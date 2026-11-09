@@ -15,6 +15,7 @@ This wiki is the project's knowledge base. Plain Markdown, no proprietary format
 - [Commands](Commands.md) — `/new`, `/sessions`, `/fork` and the rest of the overlay's slash commands
 - [LLM Providers](LLM-Providers.md) — BYOK: Anthropic, Kimi, OpenRouter behind one contract, modelled on kintale's provider seam
 - [Integrations](Integrations.md) — addons Wisp talks to: candidates, what each needs, what is verified
+- [Roadmap](Roadmap.md) — the build order, milestone by milestone, starting with the checks nobody has run yet
 - [Ideas](Ideas.md) — backlog: postponed and undecided
 
 ## Status

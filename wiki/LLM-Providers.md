@@ -108,7 +108,7 @@ A fourth OpenAI-compatible provider is a few lines of configuration, not a new i
 ## What depends on the provider
 
 - **Tools are ours, so they work everywhere.** Wowhead, character, screenshot and the game commands run in Python; any model with tool calling can use them ([Tools](Tools.md)).
-- **Web search does not.** Only some providers have it built in. Where it is missing, Wisp either goes without or needs its own search tool — **open**.
+- **Web search** is secondary — Wisp works primarily on Wowhead. It starts as the provider's built-in search, used in research runs only; Wisp's own search tool is a later step if needed ([Tools](Tools.md)).
 - **Vision.** On a text-only model the screenshot option is hidden, not left to fail.
 - **Cost caps** apply on every provider: tool calls per question, spend per day, fail closed. Where the price is unknown the cap counts tokens.
 
@@ -116,6 +116,5 @@ A fourth OpenAI-compatible provider is a few lines of configuration, not a new i
 
 - **Verify on Kimi:** current model ids, tool calling, tool calling while streaming, vision. kintale's default (`kimi-k2-0905-preview`) dates from summer 2026.
 - **Which SDK for the OpenAI wire:** the `openai` package with a custom base URL, or plain HTTP as kintale does.
-- **Web search on Kimi and OpenRouter:** native where it exists, or one Wisp search tool for all.
 - **One wire instead of two?** Moonshot and OpenRouter are said to offer Anthropic-compatible endpoints. Unverified; if true and complete, the Anthropic SDK alone could serve all three.
 - **Default provider and model** for a first run, and the order of the provider picker.

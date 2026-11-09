@@ -16,7 +16,7 @@ Denis asked what else would be useful. Unprioritized by him; the first five are 
 
 **Needs one new piece**
 
-- **Snapshot history.** Python keeps every snapshot, not only the latest. Gives the recap above, gold and progress over time, and goal tracking across sessions ("Thunderfury: step 4 of 9").
+- **Snapshot history** — **moved into the plan** by Denis, 2026-11-10: see [Architecture](Architecture.md) and [Roadmap](Roadmap.md).
 - **Quiet nudges.** After a login, code (no model call) compares the new snapshot with your goals and the wisp shows a dot: "you now have the materials for step 3".
 - **Alts.** A snapshot per character: "which of my characters can craft this", materials across all banks.
 - **Hardcore briefings.** Before a zone, an elite quest or a dungeon: what kills people there, from guides and comments.

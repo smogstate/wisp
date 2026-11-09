@@ -68,6 +68,32 @@ A card is a box in the conversation for something the model produced that is not
 
 **Entity card** — a Wowhead result shown as a thing, not as text: icon, name in its quality colour, the few stats that matter, a link to the Wowhead page. Shown for `/wh` results and when an answer centres on one item, NPC or quest. An NPC's card can offer "waypoint", which produces an action card.
 
+## Snapshot history
+
+> Keeping history is decided (2026-11-10). The mechanics below are proposed.
+
+The addon saves one snapshot of the character; the game writes it to disk at logout. **Python keeps every one of them**, so Wisp knows not only what the character is but how it got there.
+
+- **The addon stays simple.** It holds only the current snapshot. History lives on the Python side, outside the game's files.
+- **Python watches the saved file.** When it changes, the snapshot is copied into Wisp's own store, one file per snapshot, never overwritten: `snapshots/<realm>-<character>/<time>.json`.
+- **Each snapshot carries its own time** (the game clock when it was taken) and a format version. An unchanged snapshot is not stored twice.
+- **Per character**, so alts come for free.
+- **If Wisp was not running**, it picks the snapshot up at its next start. If you logged out several times in between, only the last of those is seen; the gap is accepted.
+- **Differences are computed in code**, not by the model: levels, gold, quests completed, profession skill, gear, talents, what entered and left the bags.
+- **Everything stays on this PC.**
+
+What it gives:
+
+- **A recap when you come back**: "since last time: two levels, six quests, tailoring 150 → 185". Code only, no model call.
+- **Goals across sessions**: "Thunderfury: step 4 of 9".
+- **Progress over time**: gold, levels, skill.
+- **The model can ask about the past**: what changed since a date, what the character looked like then.
+
+Open:
+
+- **How the snapshot is written.** Preferred: the addon stores it as one JSON text, which Python reads directly; this depends on the client having a JSON encoder. Otherwise Python needs a small reader for the game's saved-table format.
+- **How long to keep everything.** A snapshot is small, so "forever" is fine for a long time; thinning old ones to one a day is the later answer.
+
 ## Collapsing
 
 > Collapsible is decided; the behaviour below is proposed.
@@ -103,6 +129,7 @@ Worth carrying over from kintale as well (proposed): **one registry** where a to
 - **The overlay is collapsible** (Denis, 2026-11-09).
 - **Slash commands**: `/new`, `/sessions`, `/fork` at least ([Commands](Commands.md)).
 - The Python layer has a **set of tools** that return structures, not web pages; Wowhead is the first ([Tools](Tools.md)).
+- **Snapshot history**: every character snapshot is kept, not only the latest (Denis, 2026-11-10).
 - **BYOK.** The player brings their own key; Anthropic, Kimi and OpenRouter are supported behind one contract ([LLM Providers](LLM-Providers.md)).
 - Everything in [Red Lines](Red-Lines.md).
 

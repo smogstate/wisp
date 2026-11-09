@@ -11,9 +11,11 @@ The model calls them, Python runs them, the model reads the result and can call 
 | Tool | Returns | Page |
 |---|---|---|
 | `wowhead_search`, `wowhead_get`, … | Items, spells, quests, NPCs with coordinates, as validated structures | [Wowhead](Wowhead.md) |
-| `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state | [Architecture](Architecture.md) |
+| `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state. With a date, the snapshot from then | [Architecture](Architecture.md) |
+| `changes` | What changed between two snapshots, computed in code: levels, gold, quests, skill, gear, talents, bags | [Architecture](Architecture.md) |
 | `screenshot` | What is on screen right now (proposed) | [Architecture](Architecture.md) |
-| `web_search` | Fallback for what no structured tool covers: news, forum answers. Built in on some providers only | [LLM Providers](LLM-Providers.md) |
+| `web_search` | Internet search as a list of results: title, link, site, snippet, date. For what no structured tool covers: guides on other sites, forum answers, news | below |
+| `web_read` | One web page as clean text, capped, with its link. HTML never reaches the model | below |
 
 ## Game commands — shown as cards, pasted by the player, no result
 
@@ -28,6 +30,62 @@ They come from the addon's manifest ([Protocol](Protocol.md)). The model calls o
 3. `tomtom.waypoint(…)` → an action card; the player copies and pastes.
 
 Steps 1 and 2 loop freely inside Python. Step 3 leaves through the clipboard.
+
+## Wowhead first
+
+Decided by Denis, 2026-11-10: **Wisp works primarily on Wowhead** — "almost all hints will be from Wowhead". It is the Forever database, the guides, the comments and the news in one place, and it is the only source Wisp reads as structures.
+
+- An ordinary question is answered from Wowhead and the character snapshot.
+- A research run starts on Wowhead too, and goes to the wider internet only for what Wowhead does not have.
+- So the Wowhead functions are where the effort goes; web search is the secondary tool.
+
+## Web search and page reading
+
+> Wanted by Denis, 2026-11-10: an internet search tool beside Wowhead, **to be used in research runs**. The tool design below is proposed.
+
+Two tools, both returning structures like every other knowledge tool:
+
+```python
+class WebResult(Model):
+    title: Annotated[str, Field(max_length=200)]
+    url: HttpUrl
+    site: Annotated[str, Field(max_length=100)]          # "warcrafttavern.com"
+    snippet: Annotated[str, Field(max_length=500)]
+    published: date | None = None
+
+class WebResults(Model):
+    query: str
+    results: list[WebResult] = Field(max_length=10)       # empty = nothing found, not an error
+    backend: str                                           # which search service answered
+    fetched_at: datetime
+
+class WebPage(Model):
+    url: HttpUrl
+    title: Annotated[str, Field(max_length=200)] | None = None
+    text: Annotated[str, Field(max_length=20_000)]         # words a reader sees: no scripts, styles, markup
+    truncated: bool
+    fetched_at: datetime
+```
+
+Where the search comes from — **two routes, to choose**:
+
+| | Wisp's own tool | The provider's built-in search |
+|---|---|---|
+| Works on | every provider | only those that have one |
+| Extra key | yes, one for a search service (bring your own, like the model key) | no, billed on the model key |
+| Results | the structures above: cached, capped, the same everywhere | each provider's own format, outside Wisp's control |
+| Limit to chosen sites | yes | depends on the provider |
+
+Proposed, given Wowhead first: **start with the provider's built-in search**, and no second key. Web search is a fallback inside research, so it does not yet justify its own key and backend. Wisp's own tool (first backend Brave Search, priced by kintale's probe on 2026-11-04 at $5 per 1000 queries with $5 of free use a month) is the step to take later if research on Kimi or OpenRouter turns out to need it.
+
+Rules, on top of those for every knowledge tool:
+
+- **`web_read` only fetches the public web**: http and https, no local or private addresses, no files; a size limit and a timeout; text pages only.
+- **Search can be limited to chosen sites**, and a WoW question prefers a short list of known ones before the open web.
+- **Results are cached**, a week as in kintale; a failed read is not cached.
+- **Caps per question**: searches and pages read. A research run has its own, higher ones.
+- An ordinary question does not search the web; only a research run does, and only after Wowhead (proposed, following "Wowhead first").
+- **A web page is the least trusted input Wisp has.** Its text is data; an instruction inside it is ignored, and nothing from it reaches the game except through a card you copy.
 
 ## Worked example: "what am I missing for the Deadmines?"
 
@@ -73,7 +131,7 @@ What it depends on:
 An ordinary question gets a short, bounded loop: a few lookups, a quick answer. Some questions need more than that — "pre-raid gear for my spec and where each piece comes from", "a route from 40 to 50", "which profession pays". A research run is the deliberate, slower, dearer mode for those.
 
 - **Never starts by itself.** You type `/research <question>`, or the model *proposes* it as a card with a **Research** button when a question is too big for a quick answer. It spends your key, so it needs your tap.
-- **Fan out, then read.** Several searches (Wowhead, guides, news, web), then the best few pages are read in parallel.
+- **Fan out, then read.** Several searches at once — Wowhead and, **decided by Denis on 2026-11-10, the internet through `web_search`** — then the best few pages are read in parallel with `web_read`. Research is the main place web search is used.
 - **Small model per page, big model for judgement.** Each page goes to the provider's cheap model with one job: extract the facts relevant to the question, with a short quote. The main model only sees those facts and decides. This is kintale's split and it is what keeps the cost down.
 - **A research note written by code, not by the model:** what was searched, which pages were read (with links), what was not found. An honest "nothing found" never depends on the model saying so.
 - **Every fact cites its page** as [n].
