@@ -116,6 +116,7 @@ Worth carrying over from kintale as well (proposed): **one registry** where a to
 
 ## Open
 
+- What exactly the addon saves in the character snapshot. Known needs: **completed quest ids**, for "what am I missing" questions, and **professions with skill levels plus bag and bank contents**, for crafting plans ([Tools](Tools.md)).
 - Which integrations ship first beyond TomTom ([Integrations](Integrations.md)).
 - Where answers appear: a side panel, or a small bubble that fades.
 - Whether questions can also be typed in game. Without a live channel out, they cannot reach the overlay — likely dropped.

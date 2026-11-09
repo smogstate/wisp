@@ -17,7 +17,7 @@ Decoded:
 ```json
 {"cmds": [
   {"do": "tomtom.waypoint", "map": 2339, "x": 45.2, "y": 33.1, "title": "Auctioneer"},
-  {"do": "auctionator.shopping_list", "name": "Tonight", "items": ["Bismuth", "Ironclaw Ore"]}
+  {"do": "auctionator.shopping_list", "name": "Tailoring 150-200", "items": [{"name": "Silk Cloth", "quantity": 80}]}
 ]}
 ```
 

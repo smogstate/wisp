@@ -29,6 +29,43 @@ They come from the addon's manifest ([Protocol](Protocol.md)). The model calls o
 
 Steps 1 and 2 loop freely inside Python. Step 3 leaves through the clipboard.
 
+## Worked example: "what am I missing for the Deadmines?"
+
+The scenario Denis asked for on 2026-11-10. Every data source in it was checked that day; none of it is built.
+
+1. `wowhead_search("deadmines")` → the zone, id 1581.
+2. `wowhead_zone_quests(1581)` → the dungeon's 8 quests, with level and faction.
+3. `character` → the quests already completed and those in the log. Subtract them, and drop the other faction's.
+4. For each quest left, `wowhead_quest(id)` → its chain. The answer names **the first step not yet done**, not the first step of the chain, and who starts it.
+5. `wowhead_get(npc, id)` → where that NPC stands.
+6. The answer: one quest card per missing quest (name, level, "step 2 of 2", starts at Gryan Stoutmantle in Westfall), and one action card with a waypoint to each starting NPC.
+
+What it depends on:
+
+- **The addon must save completed quest ids**, not only the quest log. The log shows what is in progress; "missing" needs what is done.
+- **That list is as of the last login or logout.** A quest finished this session still looks missing until then. A screenshot of the open quest log covers the in-progress side live, but only the part that is on screen, and it cannot show completed quests.
+- `wowhead_zone_quests` and `wowhead_quest` — listed as later functions; this scenario is the argument for having them early.
+
+## Worked example: "level my tailoring, and give me the shopping list"
+
+Asked by Denis on 2026-11-10. The Wowhead data was checked that day; nothing is built.
+
+1. `character` → profession and current skill, and what is already in bags and bank.
+2. `wowhead_profession(197)` → every recipe with its materials and the skill range in which it still gives skill. The profession's leveling guide, where one exists, gives a tested path to follow and cite.
+3. The model picks the path: which recipe to craft over which skill range.
+4. **`craft_plan` does the arithmetic** — a calculator tool, in code: steps × materials, summed, minus what you own. The model never adds up quantities itself; totals from a language model are not trustworthy.
+5. The answer, step by step: "150–165: 20 × Bolt of Silk Cloth — 80 Silk Cloth", with a stop at each point where a trainer must be visited.
+6. Cards: one **plan card** with the steps as a checklist; one **action card** with the shopping list for the auction addon and waypoints to the trainers.
+
+What it depends on:
+
+- **The addon must save professions with skill levels, and bag and bank contents.** Bank contents are only known from the last time the bank was open.
+- **Skill is as of the last login or logout.** Mid-session you say "I'm at 180 now" and the plan continues from there.
+- **Recipes that are not orange do not always give a point.** The plan must say its counts are an estimate and add a margin; a guide's tested numbers are better than a calculation.
+- **A shopping-list command for Auctionator** ([Integrations](Integrations.md)). Its API accepts quantities and supports Forever, per its source; not yet run in a client.
+- **Prices** come only from the auction addon's saved scan, so a cost estimate is as old as that scan.
+- This is a **research run** more than a quick question: many recipes, a guide to read, a plan worth keeping.
+
 ## Research run
 
 > Proposed 2026-11-09, modelled on kintale's `research` tool. Not for the first version.
@@ -60,6 +97,7 @@ Undecided. Listed so the tool set is designed as a set.
 
 | Tool | What for |
 |---|---|
+| `craft_plan` | Calculator: crafting steps → total materials, minus what the character owns. Arithmetic in code, never by the model |
 | `talents` | Decode and compare talent import strings |
 | `prices` | Auction prices from the Auctionator or TSM saved data |
 | `notes` | Wisp's own memory between sessions: goals, plans, what was decided |

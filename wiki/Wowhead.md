@@ -27,6 +27,19 @@ Verified about the pages (existence only):
 
 - An NPC page that drops loot has a `drops` table; an item page has `reward-from-q`; NPC and quest pages carry map data; every page has `comments`.
 
+Verified for the dungeon-quests scenario ([Tools](Tools.md)), 2026-11-10:
+
+- **A zone page lists its quests as data.** The Deadmines (`zone=1581`, type code `7`) has a `quests` table of 8 entries, each with `id`, `name`, `level`, `reqlevel`, `side`, `xp`. The page also has `drops`, `npcs`, `objects`, `starts-quest` and `quest-rewards` tables.
+- **A quest page shows its chain.** A `Series` table lists the steps in order with their quest ids; the current step is the one without a link.
+- **A quest page names who starts and ends it**, with the NPC id: `Start: … /forever/npc=234 … Gryan Stoutmantle`. That NPC's coordinates come from the tooltip endpoint.
+
+Verified for the profession scenario ([Tools](Tools.md)), 2026-11-10:
+
+- **A profession is a "skill" entity** (type code `15`): Tailoring is `skill=197`.
+- **Its page lists every recipe as data** (`spells` table, 422 rows for Tailoring). Each row has `reagents` as `[item id, count]` pairs, `creates` as `[item id, min, max]`, `learnedat`, and `colors` — the four skill levels where the recipe changes difficulty colour. Bolt of Linen Cloth: reagents `[[2589, 2]]` (two Linen Cloth), creates `[2996, 1, 1]`, colours `[0, 25, 37, 50]`.
+- **The same page has a `trainers` table** and tables for recipe items and crafted items.
+- **Search finds a leveling guide** for the profession (one guide hit for "tailoring"). Its contents were not read.
+
 Verified details of the tooltip endpoint:
 
 - **`dataEnv=16` is WoW Forever.** Thunderfury there is item level 80, against 40 in the default data set.
@@ -52,7 +65,9 @@ Later, each needing page parsing and so the unverified `www` host:
 |---|---|
 | `wowhead_sources(item_id)` | Where an item comes from: dropped by, sold by, quest reward, crafted |
 | `wowhead_loot(npc_id)` | What an NPC drops or sells |
-| `wowhead_quest(quest_id)` | Full quest: giver, turn-in, rewards, prerequisites, chain |
+| `wowhead_zone_quests(zone_id)` | Every quest of a zone or dungeon: id, name, level, required level, faction |
+| `wowhead_quest(quest_id)` | Full quest: giver and turn-in with NPC ids, the chain it belongs to and its position in it, rewards |
+| `wowhead_profession(skill_id)` | Every recipe of a profession: materials with counts, what it makes, the skill level it is learned at and where it stops giving skill; plus the trainers |
 | `wowhead_guides(class, spec)` / `wowhead_guide(url)` | Guide list, and one guide with its builds and talent import strings |
 | `wowhead_comments(kind, id, limit?)` | Top-rated comments, often the most practical tip on the page |
 | `wowhead_news(limit?)` | Forever news feed: patches and hotfixes |
