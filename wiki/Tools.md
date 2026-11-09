@@ -99,7 +99,7 @@ Undecided. Listed so the tool set is designed as a set.
 |---|---|
 | `craft_plan` | Calculator: crafting steps → total materials, minus what the character owns. Arithmetic in code, never by the model |
 | `macro_check` | Validator: macro length, commands, conditional syntax, spell and item names. Runs before a macro is offered ([Integrations](Integrations.md)) |
-| `talents` | Decode and compare talent import strings |
+| `talents` | Decode a build code into talent names and ranks; diff it against the character's current talents; list the next points while leveling ([Integrations](Integrations.md)) |
 | `prices` | Auction prices from the Auctionator or TSM saved data |
 | `notes` | Wisp's own memory between sessions: goals, plans, what was decided |
 | `guide` | A guide site other than Wowhead |

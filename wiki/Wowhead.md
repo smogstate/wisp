@@ -40,6 +40,13 @@ Verified for the profession scenario ([Tools](Tools.md)), 2026-11-10:
 - **The same page has a `trainers` table** and tables for recipe items and crafted items.
 - **Search finds a leveling guide** for the profession (one guide hit for "tailoring"). Its contents were not read.
 
+Verified for talent builds ([Integrations](Integrations.md)), 2026-11-10:
+
+- **Forever class guides exist and search finds them.** "fire mage" under `/forever/` returns, in `categories.guides`: an overview, *Best Fire Mage Talent Tree Builds*, a leveling guide, a rotation guide and a best-in-slot guide. A guide opens at `/forever/guide={id}`.
+- **A guide embeds each build as a tag:** `[talent=mage/v20502052001001-55500001230133031-003_t0/1bbb2C1bbCh…]`. That is class, then three dash-separated digit strings — points per talent in each of three trees — then a second string that looks like the order the points are taken in. Builds sit under named tabs and headings ("Frostfire", "Best Fire Mage PvP Build").
+- **This is Wowhead's own calculator code, not a game import string.** No game-format import string appears in the guide.
+- **A Forever talent calculator exists** at `/forever/talent-calc/{class}`. How a build code maps to its URL, and where the tree definitions (talent names per position) live, was not checked.
+
 Verified details of the tooltip endpoint:
 
 - **`dataEnv=16` is WoW Forever.** Thunderfury there is item level 80, against 40 in the default data set.
@@ -349,8 +356,10 @@ class ItemSources(Model):
     source: Source
 
 class Build(Model):
-    name: Name
-    import_string: Annotated[str, Field(min_length=1, max_length=2000, pattern=r"^[A-Za-z0-9+/=_\-]+$")]
+    label: Name                        # the tab or heading it sits under: "Frostfire", "PvP"
+    game_class: Annotated[str, Field(pattern=r"^[a-z]+$", max_length=20)]     # "mage"
+    trees: Annotated[str, Field(pattern=r"^v\d+[0-9\-]+_t\d+$", max_length=200)]   # points per talent, three trees
+    order: Annotated[str, Field(pattern=r"^[A-Za-z0-9]+$", max_length=200)] | None = None   # believed: the order points are taken
 
 class Guide(Model):
     title: Name

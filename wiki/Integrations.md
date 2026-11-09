@@ -12,6 +12,7 @@ Each integration is one Lua file registered through [Protocol](Protocol.md). Com
 | TomTom | waypoint, route of waypoints | current waypoints | TomTom | no |
 | Auctionator | create a shopping list **with quantities** | prices, price age, vendor price | Auctionator | API read in source (v343), not run in a client |
 | WeakAuras | open the import dialog with a string | — | WeakAuras | no |
+| Talents | show or mark a build in game (how is open) | current talents | nothing | no |
 | Macros | create or update a macro, **checked before it is offered** | existing macros, known spells | nothing | no |
 
 TomTom is first. The rest are **open**: Denis decides which follow. **Auctionator is second** (Denis, 2026-11-10): shopping lists for crafting plans.
@@ -58,6 +59,27 @@ Rules:
 - The addon saves existing macros and the spellbook into the snapshot, so "fix my macro" needs no retyping.
 
 Open: the macro slot limits and the exact conditional list in the Forever client, to be read from the client; whether Forever restricts any macro commands the way Midnight restricts addons.
+
+## Talent builds
+
+> Wanted by Denis, 2026-11-10: help with talent builds, import strings. Proposed; the delivery into the game is open.
+
+What Wisp can do with what was verified ([Wowhead](Wowhead.md)):
+
+- **Find builds for your class and purpose** — raid, PvP, leveling — from the Forever guides, each with the guide's reasoning and a citation.
+- **Read a build as talents, not as a code**: decode the points per tree into talent names and ranks. Needs the tree definitions, not yet located.
+- **Compare with what you have**: "you are 3 points off the raid build: move 2 from X to Y". Needs the addon to save your current talents.
+- **Say what comes next while leveling**: "your next five points", from the build's order.
+- **Explain a talent** through the ordinary spell lookup.
+
+Getting the build into the game — **open, depends on the Forever client**:
+
+| Way | Needs | Status |
+|---|---|---|
+| The game's own Import box | The Forever talent window to have one, and a game-format string. Wowhead's guides carry Wowhead's own code, so Wisp would have to convert | unknown whether the box exists |
+| A link to the Wowhead calculator | nothing | works, but outside the game |
+| The addon marks the next talents in the talent window | the addon reading the talent tree; display only, you click the points | to check in the client |
+| The addon spends the points | an API that allows it. Spending points costs gold to undo, so never without a clear confirmation in game | to check; lowest priority |
 
 ## Adding one
 
