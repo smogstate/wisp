@@ -76,7 +76,7 @@ Getting the build into the game — **open, depends on the Forever client**:
 
 | Way | Needs | Status |
 |---|---|---|
-| The game's own Import box | The Forever talent window to have one, and a game-format string. Wowhead's guides carry Wowhead's own code, so Wisp would have to convert | unknown whether the box exists |
+| The game's own Import box | A game-format string. Wowhead's guides carry Wowhead's own code, so Wisp would have to convert, using the node order the client provides | **the box exists** in the Forever source ([Checks](Checks.md)); conversion not designed |
 | A link to the Wowhead calculator | nothing | works, but outside the game |
 | The addon marks the next talents in the talent window | the addon reading the talent tree; display only, you click the points | to check in the client |
 | The addon spends the points | an API that allows it. Spending points costs gold to undo, so never without a clear confirmation in game | to check; lowest priority |

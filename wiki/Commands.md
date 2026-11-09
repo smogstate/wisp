@@ -52,8 +52,10 @@ Sessions are stored on this PC as plain files, titled automatically from the fir
 | `/compact` | Replace a long session's history with a summary to cut cost. Calls the model once |
 | `/export` | Save the session as a Markdown file |
 | `/keys` | Add, relabel or remove provider keys |
+| `/theme` | Dark, light, or auto (follow Windows) |
+| `/opacity <0-100>` | How see-through the panel's background is |
 | `/lang` | Language of the interface and of answers |
-| `/settings` | Hotkey, opacity, caps |
+| `/settings` | Hotkey, theme, transparency, caps |
 | Custom commands | Your own prompt shortcuts, e.g. `/upgrade` = screenshot + "is this an upgrade for me?" |
 
 ## Open

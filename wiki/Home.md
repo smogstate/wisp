@@ -15,6 +15,8 @@ This wiki is the project's knowledge base. Plain Markdown, no proprietary format
 - [Commands](Commands.md) — `/new`, `/sessions`, `/fork` and the rest of the overlay's slash commands
 - [LLM Providers](LLM-Providers.md) — BYOK: Anthropic, Kimi, OpenRouter behind one contract, modelled on kintale's provider seam
 - [Integrations](Integrations.md) — addons Wisp talks to: candidates, what each needs, what is verified
+- [Game Data](Game-Data.md) — what the addon can read from the game itself: your character, quest lines, the dungeon journal, flight points, and places learned by playing
+- [Checks](Checks.md) — milestone 0 results: Wowhead refuses non-browser clients on its database pages; the Forever addon API has what Wisp needs, talent import included
 - [Roadmap](Roadmap.md) — the build order, milestone by milestone, starting with the checks nobody has run yet
 - [Ideas](Ideas.md) — backlog: postponed and undecided
 

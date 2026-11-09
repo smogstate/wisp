@@ -1,5 +1,7 @@
 # Wowhead tool
 
+> **2026-11-10: [Checks](Checks.md) found that Wowhead refuses non-browser clients on its database pages (403), and its robots file disallows search and AI crawlers. Tooltips and guides are open. Every function below that reads a database page is on hold until the source decision is made.**
+>
 > Status: draft 2026-11-09. Structures and functions are a proposal; the code blocks have not been run. Endpoint facts marked **verified** were probed live that day.
 
 Gives the AI game data as validated structures instead of web pages. Part of the Python tool set ([Tools](Tools.md)).

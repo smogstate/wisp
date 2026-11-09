@@ -114,7 +114,7 @@ A fourth OpenAI-compatible provider is a few lines of configuration, not a new i
 
 ## Open
 
-- **Verify on Kimi:** current model ids, tool calling, tool calling while streaming, vision. kintale's default (`kimi-k2-0905-preview`) dates from summer 2026.
+- **Kimi, on paper** ([Checks](Checks.md)): tool calling and streaming tool calls are documented; current models are the `kimi-k3` family; images from `kimi-k2.5` up; kintale's default `kimi-k2-0905` is text only. Still to do: one real round trip with a key.
 - **Which SDK for the OpenAI wire:** the `openai` package with a custom base URL, or plain HTTP as kintale does.
 - **One wire instead of two?** Moonshot and OpenRouter are said to offer Anthropic-compatible endpoints. Unverified; if true and complete, the Anthropic SDK alone could serve all three.
 - **Default provider and model** for a first run, and the order of the provider picker.

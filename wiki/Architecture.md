@@ -68,6 +68,19 @@ A card is a box in the conversation for something the model produced that is not
 
 **Entity card** — a Wowhead result shown as a thing, not as text: icon, name in its quality colour, the few stats that matter, a link to the Wowhead page. Shown for `/wh` results and when an answer centres on one item, NPC or quest. An NPC's card can offer "waypoint", which produces an action card.
 
+## Themes and transparency
+
+> Dark and light themes and transparency are decided (2026-11-10). The behaviour below is proposed.
+
+- **Themes: dark, light, and auto.** Auto follows the Windows setting and is the default. `/theme` switches.
+- **Transparency is of the panel's background, not of the text.** The game shows through the panel; text, cards and buttons stay fully solid so they remain readable over a busy scene. A see-through window with see-through text is the thing to avoid.
+- **One setting, a slider**, from solid to mostly clear. `/opacity 70` sets it from the keyboard.
+- **Proposed: more see-through when you are not using it.** While the mouse is over the panel or you are typing, it goes to its solid setting; otherwise it fades to a lighter one, so it gets out of the way of the game by itself.
+- Both themes must pass the same check at every transparency level: text contrast against the brightest and the darkest game scene.
+- The collapsed wisp follows the theme too.
+
+To confirm when the window is built: that the chosen window toolkit supports a see-through background on Windows the way this needs.
+
 ## Snapshot history
 
 > Keeping history is decided (2026-11-10). The mechanics below are proposed.
@@ -127,6 +140,7 @@ Worth carrying over from kintale as well (proposed): **one registry** where a to
 - Commands travel as an extensible protocol with per-addon integrations ([Protocol](Protocol.md)).
 - **A nice, modern UI** for the overlay, with a **Copy button** on instructions for the game and one **Send button that flips to Stop** while an answer is generated, as in Claude Code.
 - **The overlay is collapsible** (Denis, 2026-11-09).
+- **Dark and light themes, and transparency** (Denis, 2026-11-10).
 - **Slash commands**: `/new`, `/sessions`, `/fork` at least ([Commands](Commands.md)).
 - The Python layer has a **set of tools** that return structures, not web pages; Wowhead is the first ([Tools](Tools.md)).
 - **Snapshot history**: every character snapshot is kept, not only the latest (Denis, 2026-11-10).

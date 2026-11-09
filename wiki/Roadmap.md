@@ -4,7 +4,7 @@
 
 ## 0. Checks, before any product code
 
-Things the design assumes and nobody has run. Each is minutes of work and can change the plan.
+Things the design assumes and nobody has run. Each is minutes of work and can change the plan. **Desk checks done 2026-11-10 — results in [Checks](Checks.md).** One of them does change the plan: Wowhead's database pages are closed to a plain client, and how Wisp gets that data is an open decision. The checks that need the game client or a provider key are still to run.
 
 - **On the Windows PC:** does Wowhead answer a plain Python request, or only a browser ([Wowhead](Wowhead.md)).
 - **In the Forever client:** JSON and base64 decoding (`C_EncodingUtil`); reading completed quests, professions, bags, spellbook, talents, macros; creating a macro; a TomTom waypoint and an Auctionator list from another addon; whether the talent window has an Import box.
@@ -12,7 +12,7 @@ Things the design assumes and nobody has run. Each is minutes of work and can ch
 
 ## 1. The overlay, talking
 
-A window you can chat in. Modern UI, collapsible, Send that flips to Stop, sessions with `/new`, `/sessions`, `/fork`. One provider with your key. No game data yet.
+A window you can chat in. Modern UI, dark and light themes, adjustable transparency, collapsible, Send that flips to Stop, sessions with `/new`, `/sessions`, `/fork`. One provider with your key. No game data yet.
 
 ## 2. The character, with history
 
