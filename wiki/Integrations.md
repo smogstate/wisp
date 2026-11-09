@@ -27,4 +27,4 @@ TomTom is first. The rest are **open**: Denis decides which follow.
 
 - A command does one thing the player could do by hand in the addon's own UI.
 - Nothing protected: no casting, targeting, movement, or anything in combat that the game blocks for addons.
-- If the required addon is missing, the integration is simply absent from the manifest; Claude never offers it.
+- If the required addon is missing, the integration is simply absent from the manifest; the model never offers it.

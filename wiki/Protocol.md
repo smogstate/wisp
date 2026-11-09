@@ -48,12 +48,12 @@ Wisp:Register("tomtom", {
 
 ## Discovery: the manifest
 
-At logout the addon saves a manifest of every **active** integration (its required addon is loaded): command names, help text, argument schemas. The overlay reads it and passes each command to Claude as a tool.
+At logout the addon saves a manifest of every **active** integration (its required addon is loaded): command names, help text, argument schemas. The overlay reads it and passes each command to the model as a tool.
 
-The manifest uses the shape of an MCP tool definition — `name`, `description`, a JSON Schema for the input — which is also the shape of a Claude tool. So:
+The manifest uses the shape of an MCP tool definition — `name`, `description`, a JSON Schema for the input — which every provider's tool format can be built from. So:
 
 - adding an integration needs no Python change;
-- Claude only offers actions for addons the player actually has;
+- the model only offers actions for addons the player actually has;
 - the overlay could later be exposed as a real MCP server with a thin wrapper ([Ideas](Ideas.md)).
 
 ## How this differs from MCP
@@ -64,7 +64,7 @@ The manifest uses the shape of an MCP tool definition — `name`, `description`,
 | Tool call | live connection | pasted by the player |
 | Tool result | returned to the model | **none** |
 
-Commands are fire-and-forget. Claude cannot check an outcome and continue; the player sees the outcome in game.
+Commands are fire-and-forget. The model cannot check an outcome and continue; the player sees the outcome in game.
 
 ## Reading from addons
 
@@ -82,5 +82,6 @@ An integration's `state` function contributes to the saved snapshot (current way
 
 - **Decoding in the client.** The plan is the built-in `C_EncodingUtil` (JSON and base64). It is believed to exist in retail and so in Forever, unverified. Fallback: a small bundled decoder.
 - **Who converts argument types to JSON Schema** — the addon when it writes the manifest, or Python when it reads it.
+- **Zone identifiers.** Wowhead gives area ids, TomTom wants uiMapIDs ([Wowhead](Wowhead.md)). `tomtom.waypoint` should probably take an area id or zone name and resolve it in the addon; the `map` argument above is a placeholder.
 - **Size limit** per message, and whether to compress large batches.
 - **Versioning of individual integrations**, if a command's arguments change.

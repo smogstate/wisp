@@ -6,9 +6,9 @@ An AI companion that sits beside the game. You ask it things in plain language �
 
 ## Why WoW Forever
 
-WoW Forever is Blizzard's classless server: free choice of abilities instead of fixed classes. That makes build and planning questions open-ended in a way guides cannot keep up with, and it is new enough that a language model does not know it from training. Wisp answers from live web search plus your own character data, not from memory.
+WoW Forever is Blizzard's reboot of vanilla WoW: the nine original classes with 27 reworked specializations, level 60 permanently, no expansions, and new zones, dungeons and raids on top of the original world ([Warcraft Tavern overview](https://www.warcrafttavern.com/forever/guides/overview/)). It is live. Items and abilities differ from every earlier version, and it is too new for a language model to know from training. Wisp answers from Wowhead's Forever data ([Wowhead](Wowhead.md)), web search and your own character data, not from memory.
 
-Forever's addon API matches retail Midnight, including its restrictions: addons cannot read protected combat data. Wisp is therefore an out-of-combat assistant — planning, navigation, economy, builds — not a combat helper. See [Red Lines](Red-Lines.md).
+Forever's addon API is reported to match retail Midnight, including its restrictions: addons cannot read protected combat data (one secondhand source; to confirm in the client). Wisp is therefore an out-of-combat assistant — planning, navigation, economy, builds — not a combat helper. See [Red Lines](Red-Lines.md).
 
 ## The loop
 

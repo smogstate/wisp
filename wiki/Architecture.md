@@ -26,11 +26,11 @@ Everything below is built from those four.
 │   └ saved file ── at logout ─────────┼─────▶│  character snapshot + tool manifest  │
 │                                      │      │                                      │
 │  screen ── capture when you ask ─────┼─────▶│  screenshot                          │
-└──────────────────────────────────────┘      │  Claude API + web search             │
+└──────────────────────────────────────┘      │  LLM, your key (BYOK)                │
                                               └──────────────────────────────────────┘
 ```
 
-**Overlay (Python).** The face and the brain. Holds the conversation, calls Claude, shows answers and action cards, owns the clipboard. Never touches the game.
+**Overlay (Python).** The face and the brain. Holds the conversation, calls the model, runs the knowledge tools ([Tools](Tools.md)), shows answers and action cards, owns the clipboard. Never touches the game.
 
 **Addon (Lua).** The hands. Receives pasted commands and runs them through other addons' APIs. At logout it saves a character snapshot and a manifest of what it can do.
 
@@ -38,9 +38,60 @@ Everything below is built from those four.
 
 **Asking.** Hotkey opens the overlay → you type → Wisp sends the question with the saved snapshot, the tool manifest and (if enabled) a screenshot → the answer streams in.
 
-**Acting.** Claude calls one or more tools from the manifest → the overlay shows each as a card → the encoded message goes to the clipboard → you open Wisp's input in game and paste → the addon validates and runs each command and reports in chat. Format in [Protocol](Protocol.md).
+**Acting.** The model calls one or more tools from the manifest → the overlay shows each as a card → the encoded message goes to the clipboard → you open Wisp's input in game and paste → the addon validates and runs each command and reports in chat. Format in [Protocol](Protocol.md).
 
 **Learning what is installed.** At logout the addon writes the manifest of active integrations. The overlay reads it on start. A new integration becomes known to the AI after one login and logout, with no Python change.
+
+## Cards
+
+> Proposed 2026-11-09.
+
+A card is a box in the conversation for something the model produced that is not prose. Two kinds.
+
+**Action card** — one batch of instructions for the game. It exists because the model cannot act in the game itself: when it calls a game command, the overlay does not run anything, it shows the card.
+
+```
+┌ For the game ───────────────────────────────┐
+│ ☑ TomTom  Waypoint: Auctioneer Fitch        │
+│           Stormwind City  53.4, 59.4        │
+│ ☑ TomTom  Waypoint: Bank                    │
+│           Stormwind City  57.0, 72.5        │
+│                                             │
+│ Paste in game: Ctrl+V twice        [ Copy ] │
+└─────────────────────────────────────────────┘
+```
+
+- One line per command, in plain words: which addon, what it will do.
+- All commands of one answer share one card and one Copy, because one paste carries them all.
+- A line can be unticked to leave it out.
+- After copying, the button shows "Copied". The card never shows "done": Wisp cannot see the result.
+
+**Entity card** — a Wowhead result shown as a thing, not as text: icon, name in its quality colour, the few stats that matter, a link to the Wowhead page. Shown for `/wh` results and when an answer centres on one item, NPC or quest. An NPC's card can offer "waypoint", which produces an action card.
+
+## Collapsing
+
+> Collapsible is decided; the behaviour below is proposed.
+
+Two states. **Open**: the chat panel. **Collapsed**: a small glowing wisp at the screen edge that stays on top and out of the way.
+
+- Collapse with the hotkey, a button in the panel header, or Esc when nothing is being typed or generated. The same hotkey opens it again; so does a click on the wisp.
+- The wisp shows state without opening: idle, thinking (animated), answer ready (a dot), instructions waiting to be copied (a different mark).
+- An answer keeps generating while collapsed.
+- The wisp can be dragged; position and state are remembered between runs.
+- **Open**: should it collapse by itself when the game window takes focus.
+
+## Where cards come from
+
+The card pattern is kintale's (and vintry's before it). kintale's tool registry gives every tool a confirm class, and Wisp's two kinds of tool map onto it:
+
+| kintale class | Meaning there | Wisp |
+|---|---|---|
+| `:auto` | Pure reads: run at once, result returns to the model, bounded number of hops | Knowledge tools ([Tools](Tools.md)) |
+| `:card` / `:action` | Never auto-runs: the request renders as a card with its own verb button | Game commands — the verb is **Copy** |
+
+The difference: kintale's card applies the change itself and knows the outcome. Wisp's card can only hand the instruction over; the player carries it and Wisp never sees the result.
+
+Worth carrying over from kintale as well (proposed): **one registry** where a tool is a single record and everything else is derived from it; a **hop limit** on the read loop; a **trace line** in the chat for each tool call, so it is visible what the model looked up.
 
 ## Decided
 
@@ -48,14 +99,19 @@ Everything below is built from those four.
 - The player never types `/reload`.
 - Chat happens in the overlay; copy-paste is only for commands into the game.
 - Commands travel as an extensible protocol with per-addon integrations ([Protocol](Protocol.md)).
+- **A nice, modern UI** for the overlay, with a **Copy button** on instructions for the game and one **Send button that flips to Stop** while an answer is generated, as in Claude Code.
+- **The overlay is collapsible** (Denis, 2026-11-09).
+- **Slash commands**: `/new`, `/sessions`, `/fork` at least ([Commands](Commands.md)).
+- The Python layer has a **set of tools** that return structures, not web pages; Wowhead is the first ([Tools](Tools.md)).
+- **BYOK.** The player brings their own key; Anthropic, Kimi and OpenRouter are supported behind one contract ([LLM Providers](LLM-Providers.md)).
 - Everything in [Red Lines](Red-Lines.md).
 
 ## Proposed, awaiting a yes
 
 - **Screenshot context** — one capture per question, only when you ask. The only safe source of live context.
 - **Auto-copy** — the message is copied the moment an answer contains an action; the Copy button copies it again.
-- **Claude with web search** as the model (`claude-opus-5-5`), with hard cost caps: searches per question, questions per run, fail closed.
-- **tkinter** for the window, so the only Python dependencies are the Anthropic SDK and a screen-capture library.
+- **Hard cost caps** on every provider: tool calls per question, spend per day, fail closed.
+- **pywebview** for the window: the UI is HTML and CSS in a native frameless, always-on-top window (WebView2 on Windows). This replaces the earlier tkinter proposal, which cannot look modern. Chat with streamed, formatted answers; action cards with Copy; links to sources.
 - **Paste key** — Ctrl+V twice in game: first opens Wisp's input, second pastes. `/wisp` opens it too.
 
 ## Open
@@ -64,10 +120,10 @@ Everything below is built from those four.
 - Where answers appear: a side panel, or a small bubble that fades.
 - Whether questions can also be typed in game. Without a live channel out, they cannot reach the overlay — likely dropped.
 - First-run experience: the manifest does not exist until the first logout.
-- Whose API key and what monthly cap.
+- The daily spend cap, and the default provider and model for a first run.
 
 ## Known limits
 
 - Character data can be a session old; the screenshot covers what is on screen.
-- Claude never sees whether a command worked, so commands are fire-and-forget and cannot be chained on results.
+- The model never sees whether a command worked, so commands are fire-and-forget and cannot be chained on results.
 - Addons cannot cast, target or move for the player, and on Forever cannot read protected combat data. Wisp is an out-of-combat assistant.
