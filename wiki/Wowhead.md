@@ -11,9 +11,21 @@ Wowhead has no official data API. These are the endpoints its own tooltip widget
 | Endpoint | Returns | Status |
 |---|---|---|
 | `nether.wowhead.com/tooltip/{type}/{id}?dataEnv=16&locale={n}` | JSON: `name`, `quality`, `icon`, `tooltip` (HTML with machine markers), and for NPCs and objects `map: {zone, coords}` | **verified**, works without a browser |
-| `www.wowhead.com/search/suggestions-template?q=…` | JSON: matching entities with type, id, name, icon, quality | **works in a browser on the Windows PC** (Denis, 2026-11-09). Answered 403 (CloudFront) from the dev machine. Not yet tried from Python on the PC; response shape not yet seen first-hand |
-| `www.wowhead.com/forever/{type}={id}` pages | HTML with embedded data tables: drops, vendors, quest chains, comments | unverified, same block |
+| `www.wowhead.com/forever/search/suggestions-template?q=…` | JSON: `search`, `results` (top 10, news mixed in) and `categories.database` (entities only, up to 20) | **verified in Chrome** 2026-11-09. Answered 403 (CloudFront) to a plain request from the dev machine; not yet tried from Python on the PC |
+| `www.wowhead.com/forever/{type}={id}` pages | HTML with embedded data tables (`Listview`), map data (`g_mapperData`) and comments | **verified in Chrome**: pages exist and carry the tables; the table contents are not yet parsed |
 | `www.wowhead.com/forever/guides/…` | Guides, including builds with talent import strings | unverified, known from a third-party description only |
+
+Verified details of the search endpoint:
+
+- **The `/forever/` prefix scopes search to Forever.** Without it the same URL searches retail: the quest *Rise, Thunderfury!* is level 30 there and level 60 under `/forever/`, and Forever-only entries appear (spell `468157`).
+- **Use `categories.database`, not `results`.** `results` is the top 10 by popularity and includes news posts; `categories.database` holds only game entities.
+- **Each entry:** `type` (number), `id`, `name`, `typeName`, and optionally `icon`, `quality`, `side`, `pinFooterText` ("One-Handed Sword", "Level: 60"), `pinDescription`, `pinBreadcrumb` (["Weapon", "One-Handed Sword"]).
+- **Type codes seen:** `1` NPC, `2` object, `3` item, `5` quest, `6` spell, `10` achievement, `162` news post.
+- **Nothing found is not an error:** an unknown word or a one-letter query answers HTTP 200 with empty lists.
+
+Verified about the pages (existence only):
+
+- An NPC page that drops loot has a `drops` table; an item page has `reward-from-q`; NPC and quest pages carry map data; every page has `comments`.
 
 Verified details of the tooltip endpoint:
 
@@ -31,7 +43,7 @@ Two for the first version; they answer "what is this" and "where is this".
 
 | Function | Purpose | Needs |
 |---|---|---|
-| `wowhead_search(query, kinds?, limit?)` | Turn a name into ids. Always the first step: the model must not guess ids | search endpoint (works in a browser on the PC) |
+| `wowhead_search(query, kinds?, limit?)` | Turn a name into ids. Always the first step: the model must not guess ids | search endpoint (verified in Chrome) |
 | `wowhead_get(kind, id)` | One entity as a structure: item, spell, quest, NPC, object or zone | tooltip endpoint (verified) |
 
 Later, each needing page parsing and so the unverified `www` host:
@@ -255,18 +267,26 @@ AnyEntity = Annotated[Item | Spell | Quest | Npc | GameObject | Zone, Field(disc
 ### Search and errors
 
 ```python
+TYPE_CODES = {1: Kind.NPC, 2: Kind.OBJECT, 3: Kind.ITEM, 5: Kind.QUEST, 6: Kind.SPELL}   # verified 2026-11-09
+# 10 (achievement) and 162 (news post) are dropped: not entities wowhead_get can fetch.
+
+
 class SearchHit(Model):
-    kind: Kind
+    kind: Kind                         # from the numeric `type`, through TYPE_CODES
     id: Id
     name: Name
-    quality: Quality | None = None
+    quality: Quality | None = None     # items only
     icon: str | None = None
-    url: HttpUrl
+    detail: Annotated[str, Field(max_length=80)] | None = None      # pinFooterText: "One-Handed Sword", "Level: 60"
+    category: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=5)   # pinBreadcrumb
+    summary: Annotated[str, Field(max_length=300)] | None = None    # pinDescription, HTML stripped
+    url: HttpUrl                       # built by Wisp: /forever/{kind}={id}
 
 
 class SearchResult(Model):
     query: str
-    hits: list[SearchHit] = Field(max_length=20)   # empty list = nothing found; not an error
+    hits: list[SearchHit] = Field(max_length=20)   # from categories.database; empty = nothing found, not an error
+    skipped: int = 0                               # entries of a type Wisp does not handle
     source: Source
 
 
@@ -362,8 +382,7 @@ What the models enforce, and what the tool does around them.
 
 ## Open
 
-- **Does `www.wowhead.com` answer Python, not only a browser, on the Windows PC?** A browser gets JSON from the search endpoint there. CloudFront can still refuse a non-browser client, so the first thing to run on the PC is one plain request from Python. If it is refused, search falls back to a web search limited to `wowhead.com`, or to another Forever database.
-- **The real search response.** `SearchHit` is drafted from a third-party description. It needs checking against a real response, including how results are marked as Forever versus retail.
+- **Does `www.wowhead.com` answer Python, not only a browser?** Search and the pages work in Chrome. A plain request from the dev machine got 403 from CloudFront, so a non-browser client may be refused on the PC too. The first thing to run there is one plain request from Python. If it is refused, the options are a web search limited to `wowhead.com`, another Forever database, or fetching through the overlay's own embedded browser view.
 - **Wowhead's terms on automated access have not been read.** To check before building anything beyond the tooltip endpoint.
 - **Zone ids.** Wowhead gives area ids (`1519` Stormwind); TomTom wants uiMapIDs. The waypoint command should carry the area id or zone name and let the addon resolve it — this changes the `tomtom.waypoint` arguments in [Protocol](Protocol.md).
 - **Which point is `primary`** when an NPC has many spawns: the densest cluster, or the one nearest the player (needs the player's position, which Wisp only has from a screenshot).

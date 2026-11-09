@@ -29,6 +29,22 @@ They come from the addon's manifest ([Protocol](Protocol.md)). The model calls o
 
 Steps 1 and 2 loop freely inside Python. Step 3 leaves through the clipboard.
 
+## Research run
+
+> Proposed 2026-11-09, modelled on kintale's `research` tool. Not for the first version.
+
+An ordinary question gets a short, bounded loop: a few lookups, a quick answer. Some questions need more than that — "pre-raid gear for my spec and where each piece comes from", "a route from 40 to 50", "which profession pays". A research run is the deliberate, slower, dearer mode for those.
+
+- **Never starts by itself.** You type `/research <question>`, or the model *proposes* it as a card with a **Research** button when a question is too big for a quick answer. It spends your key, so it needs your tap.
+- **Fan out, then read.** Several searches (Wowhead, guides, news, web), then the best few pages are read in parallel.
+- **Small model per page, big model for judgement.** Each page goes to the provider's cheap model with one job: extract the facts relevant to the question, with a short quote. The main model only sees those facts and decides. This is kintale's split and it is what keeps the cost down.
+- **A research note written by code, not by the model:** what was searched, which pages were read (with links), what was not found. An honest "nothing found" never depends on the model saying so.
+- **Every fact cites its page** as [n].
+- **The note is kept** and reused: a later question on the same topic starts from it and does not read the pages again.
+- **Runs while you play.** The overlay can be collapsed; the wisp shows progress and signals when the report is ready.
+- **Ends in a report, and action cards where they apply** — a gear list can come with its waypoints.
+- **Its own caps**, higher than a normal question's, shown before it starts.
+
 ## Rules for every knowledge tool
 
 - **Structures, not pages.** A tool returns a validated model with named fields. HTML never reaches the model.

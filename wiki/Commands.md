@@ -44,6 +44,7 @@ Sessions are stored on this PC as plain files, titled automatically from the fir
 
 | Command | Does |
 |---|---|
+| `/research <question>` | A research run: many sources, pages read and cited, a kept report. Slower and dearer than a question; shows its cap before starting ([Tools](Tools.md)) |
 | `/retry` | Generate the last answer again; with `/model` first, on a different model |
 | `/way <name>` | Find an NPC or place and produce a waypoint card directly, without a conversation |
 | `/actions` | Every instruction sent to the game this session, each with Copy |
