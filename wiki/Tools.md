@@ -98,6 +98,7 @@ Undecided. Listed so the tool set is designed as a set.
 | Tool | What for |
 |---|---|
 | `craft_plan` | Calculator: crafting steps → total materials, minus what the character owns. Arithmetic in code, never by the model |
+| `macro_check` | Validator: macro length, commands, conditional syntax, spell and item names. Runs before a macro is offered ([Integrations](Integrations.md)) |
 | `talents` | Decode and compare talent import strings |
 | `prices` | Auction prices from the Auctionator or TSM saved data |
 | `notes` | Wisp's own memory between sessions: goals, plans, what was decided |

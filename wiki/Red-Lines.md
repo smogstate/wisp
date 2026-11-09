@@ -9,7 +9,7 @@ The lines Wisp doesn't cross. These override every UX or feature argument.
 - **No input sent to the game.** Wisp never presses keys, moves the mouse or clicks in WoW. Not as a default, not as an opt-in setting.
 - **No reading or writing game memory.** No `ReadProcessMemory`, no injection, no DLLs, no shared-memory tricks.
 - **No modifying the game client or its files** beyond what addons are meant to do (files in `Interface/AddOns` and the addon's own saved data).
-- **No arbitrary code from outside.** Pasted text and model output are data; they are never executed as Lua ([Protocol](Protocol.md)).
+- **No arbitrary code from outside.** Pasted text and model output are data; they are never executed as Lua ([Protocol](Protocol.md)). This includes macros: Wisp never writes a macro containing `/run` or `/script`.
 
 ## What Wisp does instead
 

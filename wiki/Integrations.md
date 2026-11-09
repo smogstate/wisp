@@ -12,7 +12,7 @@ Each integration is one Lua file registered through [Protocol](Protocol.md). Com
 | TomTom | waypoint, route of waypoints | current waypoints | TomTom | no |
 | Auctionator | create a shopping list **with quantities** | prices, price age, vendor price | Auctionator | API read in source (v343), not run in a client |
 | WeakAuras | open the import dialog with a string | — | WeakAuras | no |
-| Macros | create or update a macro | macro list | nothing | no |
+| Macros | create or update a macro, **checked before it is offered** | existing macros, known spells | nothing | no |
 
 TomTom is first. The rest are **open**: Denis decides which follow. **Auctionator is second** (Denis, 2026-11-10): shopping lists for crafting plans.
 
@@ -32,6 +32,32 @@ The command, as it would look in [Protocol](Protocol.md):
 {"do": "auctionator.shopping_list", "name": "Tailoring 150-200",
  "items": [{"name": "Silk Cloth", "quantity": 80}, {"name": "Fine Thread", "quantity": 20}]}
 ```
+
+## Macros — help with verification
+
+> Wanted by Denis, 2026-11-10: macro help, verified. The design below is proposed; no API here has been run in a client.
+
+You describe what the button should do; the model writes the macro; **a checker in code verifies it before you ever see a Copy button**.
+
+What "verified" covers, in three layers:
+
+| Layer | Where | Checks |
+|---|---|---|
+| Syntax | Python tool `macro_check` | 255-character limit; every line is a known slash command; conditionals are well-formed (`[mod:shift,@mouseover,help,nodead]`); `#showtooltip` only on the first line; `/castsequence` reset syntax |
+| Names | Python, through [Wowhead](Wowhead.md) and the snapshot | every spell and item named exists in Forever, spelled exactly; and, from the saved spellbook, that this character knows the spell |
+| In game | the addon, at paste | spell names resolve in the client; a free macro slot exists; not in combat. The result is printed in chat |
+
+A macro that fails layer 1 or 2 goes back to the model with the checker's message, to fix; it is not shown as a card. The card shows the macro text in full, line by line, with what each line does.
+
+What verification cannot cover: **whether the macro does what you meant in a fight.** That takes pressing it. The answer says so.
+
+Rules:
+
+- **No `/run` or `/script` in a Wisp macro.** They execute Lua, and Wisp never hands the game code to run ([Red Lines](Red-Lines.md)). The checker rejects them.
+- The command is `macro.save {name, body, scope}`: it creates the macro, or updates the one with that name. You drag it to a bar yourself.
+- The addon saves existing macros and the spellbook into the snapshot, so "fix my macro" needs no retyping.
+
+Open: the macro slot limits and the exact conditional list in the Forever client, to be read from the client; whether Forever restricts any macro commands the way Midnight restricts addons.
 
 ## Adding one
 
