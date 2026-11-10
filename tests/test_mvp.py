@@ -372,13 +372,19 @@ def test_this_pc(tmp: Path):
     app = App(None, fake=True)   # persist is off: real settings and keys are never touched
     assert "error" in app.save_settings({"wow_dir": str(tmp)})
     assert local.addon_state(forever) == "missing"
-    saved = app.save_settings({"wow_dir": str(root), "key": "sk-ant-would-be-secret"})
+    saved = app.save_settings({"wow_dir": str(root), "keys": {"anthropic": "sk-ant-would-be-secret"}})
     assert saved["wow_dir"] == str(forever) and app.wow_dir == forever
     assert saved["addon"] == "installed" and "installed its addon" in saved["addon_note"], "one package: no button needed"
     (installed / "Wisp.lua").write_text("-- an old version")
     app.ensure_addon()
     assert local.addon_state(forever) == "installed" and "updated its addon" in app.addon_note
-    assert "sk-ant" not in json.dumps(app.settings()), "the key is never sent back"
+    assert "would-be-secret" not in json.dumps(app.settings()), "a key is never sent back"
+    assert [(p["id"], p["label"], p["model"]) for p in app.settings()["providers"]] == [
+        ("anthropic", "Claude", "claude-opus-5-5"), ("moonshot", "Kimi", "kimi-k3.1-pro")]
+    assert app.save_settings({"provider": "moonshot", "model": "kimi-k3"})["provider"] == "moonshot"
+    assert app.models == {"anthropic": "claude-opus-5-5", "moonshot": "kimi-k3"}, "a model is remembered per provider"
+    assert app.save_settings({"provider": "nope", "model": ""})["provider"] == "moonshot", "nonsense is ignored"
+    assert app.model_choices("moonshot")["models"] == ["kimi-k3", "kimi-k3.1-pro"] and "error" in app.model_choices("x")
     assert "error" in App(None, fake=True).install_addon()
 
 

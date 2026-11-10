@@ -28,7 +28,8 @@ class Sessions:
     def new(self) -> dict:
         now = time.time()
         return {"id": time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3), "title": "",
-                "created": now, "updated": now, "forked_from": None, "turns": [], "messages": [], "usage": None}
+                "created": now, "updated": now, "forked_from": None, "turns": [], "messages": [], "usage": None,
+                "provider": None, "model": None}   # who answered: a conversation stays with its provider
 
     def save(self, session: dict):
         if not session["turns"]:
@@ -77,6 +78,7 @@ class Sessions:
         fork = self.new()
         fork["title"] = (session.get("title") or "Untitled")[:54] + " (fork)"
         fork["forked_from"] = session["id"]
+        fork["provider"], fork["model"] = session.get("provider"), session.get("model")
         fork["turns"] = copy.deepcopy(turns[:upto + 1])
         fork["messages"] = copy.deepcopy(session["messages"][:turns[upto]["end"]])
         # the tokens were spent in the original; the fork starts its own count

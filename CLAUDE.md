@@ -15,6 +15,7 @@ and architecture decision lives there. Update the wiki when decisions change.
 - No live data out of the game except a screenshot. Do not reintroduce the pixel beacon.
 - Code so far is the MVP: `addon/Wisp` (Lua) and `wisp/` (Python, stdlib server + Anthropic SDK + pywebview). Run the tests with `npm install && python3 tests/test_mvp.py`; they need Node for a Lua VM (or `WISP_LUA=/path/to/lua5.1`, which is the game's Lua version), no game and no key. `python -m wisp --fake` shows the interface with a scripted model.
 - Players get `Wisp.exe`, not Python: `.github/workflows/build.yml` builds, tests and publishes it as the `mvp` release on every push that touches code. `--smoke FILE` is the self-test it runs on the built exe. Nothing may require a command line or an environment variable.
+- Two providers: Anthropic (its own SDK) and Kimi (the `openai` SDK on the shared OpenAI-shaped wire, `OpenAIChat`). A chat object owns its history in its provider's format; a conversation never changes provider. Tests: `tests/test_anthropic.py`, `tests/test_openai.py`, each against a local stand-in API.
 - The model never handles coordinates: locations carry refs, and `waypoint` accepts only refs. Keep that when adding tools.
 - `checks/` is throwaway code for milestone 0 (wiki/Checks.md), not part of the product.
 - Does not use Loom.

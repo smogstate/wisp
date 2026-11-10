@@ -1,6 +1,18 @@
 # LLM providers
 
-> Status: draft 2026-11-09. Requirement from Denis: **BYOK**, several providers supported — **Anthropic, Kimi, OpenRouter** — abstracted the way kintale does it. Nothing here is built; the code block has not been run.
+> **Built 2026-11-10: Anthropic and Kimi.** Two wires as planned — Anthropic's own, and the OpenAI-shaped one (`OpenAIChat` in `wisp/llm.py`) on which Kimi is a base URL, a default model and two quirks. OpenRouter is the same wire and not added yet. What turned out differently from the draft below is listed first.
+>
+> - **A conversation stays with its provider.** Each keeps the history in its own format, reasoning included, so switching provider starts a new conversation and the earlier one is kept. Changing model within a provider continues the same conversation.
+> - **Kimi's reasoning goes back with every turn**, as its API reference asks: the assistant message is stored whole, `reasoning_content` and tool calls included.
+> - **K3 models are asked for low reasoning effort**; their default is the maximum, which is too slow beside a game.
+> - **The key is tried on `api.moonshot.ai`, then `api.moonshot.cn`**, kintale's lesson, built in.
+> - **No price for Kimi yet.** Moonshot's pricing page showed no numbers when read, so Kimi conversations show tokens and "cost unknown" until there is a verified price.
+> - **The `openai` package** is used for the OpenAI-shaped wire.
+> - One key and one remembered model per provider, in the Windows credential store; the model list comes from the provider's own catalogue.
+>
+> Tested with the real `openai` SDK against a local stand-in for the API. **Not yet run against Kimi itself.**
+>
+> Status of the text below: draft 2026-11-09. Requirement from Denis: **BYOK**, several providers supported — **Anthropic, Kimi, OpenRouter** — abstracted the way kintale does it. Nothing here is built; the code block has not been run.
 
 Wisp ships no key and no house model. The player brings their own key for whichever provider they use, and can switch model at any time.
 

@@ -15,13 +15,14 @@ Wisp never sends input to the game and never reads its memory. See [Red Lines](w
 
 ## Run it
 
-You need the game on Windows, an Anthropic API key, and the Questie addon. TomTom is recommended; without it Wisp uses the built-in map pin. With the **DungeonJournal** addon installed, Wisp also knows every dungeon: ask *what am I missing for the Deadmines?* or *what drops in Scholomance?* **No Python is needed.**
+You need the game on Windows, an API key for Claude (Anthropic) or Kimi (Moonshot), and the Questie addon. TomTom is recommended; without it Wisp uses the built-in map pin. With the **DungeonJournal** addon installed, Wisp also knows every dungeon: ask *what am I missing for the Deadmines?* or *what drops in Scholomance?* **No Python is needed.**
 
 1. **Download [Wisp.exe](https://github.com/smogstate/wisp/releases/download/mvp/Wisp.exe)** and run it. It is not signed, so Windows SmartScreen will warn: choose *More info*, then *Run anyway*. An antivirus may also ask, as it can with any small unsigned program.
 2. **Settings** opens by itself the first time.
    - *Game folder*: Wisp looks in the usual places; otherwise browse to your `World of Warcraft` folder.
    - The **addon installs itself** once Wisp knows the game folder, and updates itself with each new `Wisp.exe`. It is one package; there is nothing else to download.
-   - *Anthropic API key*: paste it. It is kept in the Windows credential store on this PC.
+   - *API keys*: paste a key for Anthropic, for Moonshot (Kimi), or both. They are kept in the Windows credential store on this PC.
+   - *Answers come from*: which of the two answers, and which of its models. `/model` opens this. Changing the provider starts a new conversation, since one provider cannot read the other's history; the earlier conversation is kept.
 3. **Start the game** (or restart it, so it sees the new addon). On the character screen, check that Wisp is ticked under AddOns. Log in, then **log out once**. The addon writes your character and quests to disk at logout.
 4. In Settings press **Check setup**. Every line should say `ok`; a line that says `FAIL` tells you what to do.
 5. **Ask**, for example: *where do I hand in my wolf quest, and what comes next?*
@@ -33,7 +34,7 @@ To see the interface with a sample character, no key and no game: `Wisp.exe --fa
 
 Type `/` to see the commands: `/new`, `/sessions`, `/fork`, `/cost`, `/copy`, `/check`, `/settings`.
 
-Every conversation is kept on your PC (`%APPDATA%\Wisp\sessions`). The clock icon, or `/sessions`, lists them: search, look at one without opening it, or open it and carry on. `/fork` continues in a copy, and the small branch icon under any answer forks from that point, so you can try another direction without losing the original. The line above the input shows the tokens and dollars this conversation has used so far; `/cost` gives the breakdown. The price is Wisp's estimate from Anthropic's list prices, and your Anthropic bill is the final word.
+Every conversation is kept on your PC (`%APPDATA%\Wisp\sessions`). The clock icon, or `/sessions`, lists them: search, look at one without opening it, or open it and carry on. `/fork` continues in a copy, and the small branch icon under any answer forks from that point, so you can try another direction without losing the original. The line above the input shows the tokens and dollars this conversation has used so far; `/cost` gives the breakdown. For Claude the price is Wisp's estimate from Anthropic's list prices; your bill is the final word. For Kimi only tokens are shown: Wisp has no verified price list for it yet.
 
 ### It remembers your character
 

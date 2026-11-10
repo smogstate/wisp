@@ -12,7 +12,7 @@ from pathlib import Path
 
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".config") / "Wisp"
 CONFIG = APP_DIR / "config.json"
-KEY_SERVICE, KEY_NAME = "Wisp", "anthropic"
+KEY_SERVICE = "Wisp"   # one entry per provider in the credential store
 ADDON_SOURCE = Path(__file__).resolve().parent.parent / "addon" / "Wisp"   # bundled next to the code, also in the exe
 
 
@@ -33,28 +33,28 @@ def save_config(config: dict):
 
 # -- the API key: Windows Credential Manager through keyring ------------------
 
-def get_key() -> tuple[str | None, str | None]:
+def get_key(provider: str = "anthropic", env: str = "ANTHROPIC_API_KEY") -> tuple[str | None, str | None]:
     """(key, where it came from). A saved key wins over the environment."""
     try:
         import keyring
-        saved = keyring.get_password(KEY_SERVICE, KEY_NAME)
+        saved = keyring.get_password(KEY_SERVICE, provider)
         if saved:
             return saved, "saved"
     except Exception:   # no keyring package, or no credential store on this machine
         pass
-    env = os.environ.get("ANTHROPIC_API_KEY")
-    return (env, "environment") if env else (None, None)
+    found = os.environ.get(env)
+    return (found, "environment") if found else (None, None)
 
 
-def set_key(key: str) -> str | None:
+def set_key(key: str, provider: str = "anthropic") -> str | None:
     """Save the key, or remove it when empty. Returns a problem in words, or None."""
     try:
         import keyring
         if key:
-            keyring.set_password(KEY_SERVICE, KEY_NAME, key)
+            keyring.set_password(KEY_SERVICE, provider, key)
         else:
             try:
-                keyring.delete_password(KEY_SERVICE, KEY_NAME)
+                keyring.delete_password(KEY_SERVICE, provider)
             except keyring.errors.PasswordDeleteError:
                 pass   # there was none
         return None

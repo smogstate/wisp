@@ -38,6 +38,9 @@ jobs:
       - name: Tests (the Anthropic SDK against a stand-in API)
         run: python tests/test_anthropic.py
 
+      - name: Tests (Kimi on the OpenAI SDK against a stand-in API)
+        run: python tests/test_openai.py
+
       - name: The window, from source
         run: python -m wisp --smoke smoke-source.json
 

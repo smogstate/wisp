@@ -27,7 +27,7 @@ from pathlib import Path
 from . import local
 from .game import Game, find_saved_file
 from .history import History, ago_words, diff, recap
-from .llm import MODEL, AnthropicChat, FakeChat, answer
+from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
 from .sessions import Sessions, record
 
 UI = Path(__file__).with_name("ui.html")
@@ -38,7 +38,8 @@ NO_FOLDER = ("That folder has no Interface\\AddOns inside. Choose the World of W
              "or its _forever_ folder.")
 
 
-def check(wow_dir: Path | None, call_model: bool = True) -> list[tuple[str, str, str]]:
+def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthropic",
+          model: str | None = None) -> list[tuple[str, str, str]]:
     """Everything a first run depends on, as (what, "ok" | "FAIL" | "note", detail).
     A "note" is something optional that is missing. Makes one small real model call."""
     out = []
@@ -70,7 +71,7 @@ def check(wow_dir: Path | None, call_model: bool = True) -> list[tuple[str, str,
                 "unknown": "restart the game so it sees the addon, log in with your character, then log out to the "
                            "character screen (the game only writes addon data at logout)",
             }[seen])
-            return _key_checks(out, add, call_model)
+            return _key_checks(out, add, call_model, provider, model)
         add("Snapshot file", True, str(saved))
         game = Game.load(wow_dir)
         if game.problem:
@@ -86,28 +87,40 @@ def check(wow_dir: Path | None, call_model: bool = True) -> list[tuple[str, str,
                     "not yet: log in and out once more with the new Wisp addon")
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
-    return _key_checks(out, add, call_model)
+    return _key_checks(out, add, call_model, provider, model)
 
 
-def _key_checks(out, add, call_model):
-    key, source = local.get_key()
-    add("API key", key is not None, f"from {source}" if source == "environment" else "saved on this PC", "not entered yet")
+def provider_key(provider: str) -> tuple[str | None, str | None]:
+    return local.get_key(provider, PROVIDERS[provider]["env"])
+
+
+def _key_checks(out, add, call_model, provider: str = "anthropic", model: str | None = None):
+    for name, info in PROVIDERS.items():
+        key, source = provider_key(name)
+        add(f"{info['company']} key", key is not None, f"from {source}" if source == "environment" else "saved on this PC",
+            "not entered yet", optional=name != provider)
+    key, _ = provider_key(provider)
     if not call_model or key is None:
         return out
+    model = model or PROVIDERS[provider]["model"]
     try:
-        import anthropic
-    except ImportError:
-        add("anthropic package", False, bad="pip install anthropic")
+        chat = CHATS[provider](key, model=model)
+    except ImportError as e:
+        add("A real call to the model", False, bad=f"a package is missing: {e.name}")
         return out
+    # the same code path a question takes, with one plain question and no tools to call
+    chat.user("Reply with the single word: ready")
+    text, problem = "", None
     try:
-        reply = anthropic.Anthropic(api_key=key).messages.create(
-            model=MODEL, max_tokens=2000, messages=[{"role": "user", "content": "Reply with the single word: ready"}])
-        text = "".join(b.text for b in reply.content if b.type == "text").strip()
-        add("A real call to the model", bool(text), f"{reply.model} answered: {text[:40]}", "the model sent no text")
-    except anthropic.APIStatusError as e:
-        add("A real call to the model", False, bad=f"error {e.status_code}: {e.message}")
+        for event in chat.stream(lambda: False):
+            if event["type"] == "text":
+                text += event["text"]
+            elif event["type"] == "error":
+                problem = event["message"]
     except Exception as e:   # no network
-        add("A real call to the model", False, bad=str(e)[:200])
+        problem = str(e)[:200]
+    add("A real call to the model", bool(text.strip()) and not problem, f"{model} answered: {text.strip()[:40]}",
+        problem or "the model sent no text")
     return out
 
 
@@ -127,6 +140,11 @@ class App:
         self.collapsed = False
         self.hotkey = None                       # the global show/hide key, when Windows granted it
         saved = local.load_config() if persist else {}
+        models = saved.get("models") if isinstance(saved.get("models"), dict) else {}
+        # which provider answers, and which of its models; a model is remembered per provider
+        self.provider = saved.get("provider") if saved.get("provider") in PROVIDERS else "anthropic"
+        self.models = {name: models.get(name) if isinstance(models.get(name), str) else info["model"]
+                       for name, info in PROVIDERS.items()}
         self.prefs = {"theme": saved.get("theme") if saved.get("theme") in THEMES else "auto",
                       "opacity": saved.get("opacity") if isinstance(saved.get("opacity"), int) else 85,
                       "plain_window": bool(saved.get("plain_window"))}
@@ -153,21 +171,25 @@ class App:
             self.addon_note = "Wisp updated its addon in the game. Restart the game so the new version loads."
 
     def new_chat(self, session: dict | None = None):
-        """Start a fresh conversation, or continue a saved one."""
+        """Start a fresh conversation, or continue a saved one. A saved one stays with
+        the provider it was held with: each keeps the history in its own format."""
         self.session = session or self.sessions.new()
         history = {"messages": self.session["messages"], "usage": self.session["usage"]}
         self.chat, self.problem = None, None
         if self.fake:
             self.chat = FakeChat(**history)
             return
-        key, _ = local.get_key()
+        provider = self.session.get("provider") if self.session.get("provider") in PROVIDERS else self.provider
+        model = self.session.get("model") if self.session.get("provider") == provider and self.session["turns"] else self.models[provider]
+        info = PROVIDERS[provider]
+        key, _ = provider_key(provider)
         if key is None:
-            self.problem = "No API key yet. Open Settings and paste your Anthropic key."
+            self.problem = f"No {info['company']} key yet. Open Settings and paste one."
             return
         try:
-            self.chat = AnthropicChat(key, **history)
-        except ImportError:
-            self.problem = "The anthropic package is not installed: pip install anthropic"
+            self.chat = CHATS[provider](key, model=model, **history)
+        except ImportError as e:
+            self.problem = f"A package is missing: {e.name}"
         except Exception as e:
             self.problem = f"Cannot start the model: {e}"
 
@@ -194,7 +216,8 @@ class App:
         return {
             "recap": self.recap(game),
             "snapshots": self.history.count(game.snapshot) if game.snapshot else 0,
-            "model": "scripted test model" if self.fake else "Claude",
+            "model": "scripted test model" if self.fake or self.chat is None else
+                     f"{PROVIDERS[self.chat.provider]['label']} · {self.chat.model}",
             "model_problem": self.problem,
             "snapshot_problem": game.problem,
             "snapshot_age_minutes": game.age_minutes(),
@@ -212,11 +235,14 @@ class App:
         }
 
     def settings(self) -> dict:
-        _, source = local.get_key()
         return {
             "wow_dir": str(self.wow_dir) if self.wow_dir else "",
             "guesses": [str(p) for p in local.guess_game_folders()],
-            "key": "scripted model, no key needed" if self.fake else source,   # where the key is from; never the key
+            # per provider: its name, what a key looks like, where its key is from (never the key), its model
+            "providers": [{"id": name, "label": info["label"], "company": info["company"], "hint": info["hint"],
+                           "key": "scripted model, no key needed" if self.fake else provider_key(name)[1],
+                           "model": self.models[name]} for name, info in PROVIDERS.items()],
+            "provider": self.provider,
             "addon": local.addon_state(self.wow_dir),
             "addon_note": self.addon_note,
             "can_browse": self.window is not None,
@@ -245,13 +271,42 @@ class App:
         if self.persist:
             local.save_config({**local.load_config(), **self.prefs})
         self.apply_alpha()
-        key = body.get("key")
-        if isinstance(key, str) and key.strip() and self.persist:
-            problem = local.set_key(key.strip())
-            if problem:
-                return {"error": problem}
-            self.new_chat()
-        return self.settings()
+        restart = False
+        keys = body.get("keys") if isinstance(body.get("keys"), dict) else {}
+        for name, key in keys.items():
+            if name in PROVIDERS and isinstance(key, str) and key.strip() and self.persist:
+                problem = local.set_key(key.strip(), name)
+                if problem:
+                    return {"error": problem}
+                restart = restart or self.chat is None or name == self.provider
+        chosen = body.get("provider")
+        if chosen in PROVIDERS and chosen != self.provider:
+            self.provider, restart = chosen, True
+        model = body.get("model")
+        if isinstance(model, str) and 0 < len(model.strip()) <= 100:
+            self.models[self.provider] = model.strip()
+            if self.chat is not None and self.chat.provider == self.provider:
+                self.chat.model = model.strip()   # the same provider: the conversation simply continues on it
+        if self.persist:
+            local.save_config({**local.load_config(), "provider": self.provider, "models": self.models})
+        result = self.settings()
+        if restart and not self.fake:
+            # another provider cannot read this one's history: its answers start in a new conversation
+            moved = bool(self.session["turns"]) and self.chat is not None and self.chat.provider != self.provider
+            if self.chat is None or self.chat.provider != self.provider or not self.session["turns"]:
+                self.new_chat()
+            result["new_conversation"] = moved
+        return result
+
+    def model_choices(self, provider) -> dict:
+        """The provider's own list of models, for the picker. Its default is always offered."""
+        if provider not in PROVIDERS:
+            return {"error": "no such provider"}
+        key, _ = provider_key(provider)
+        models = list_models(provider, key) if key and not self.fake else []
+        current = self.models[provider]
+        return {"models": list(dict.fromkeys([current, PROVIDERS[provider]["model"], *models])), "current": current,
+                "has_key": key is not None}
 
     def apply_alpha(self):
         """Windows: solid while in use and while it is the wisp, as see-through as Settings says otherwise."""
@@ -347,6 +402,7 @@ class App:
         turn = {"items": [{"type": "user", "text": question}], "end": 0}
         session["turns"].append(turn)
         session["title"] = session["title"] or question[:60]
+        session["provider"], session["model"] = chat.provider, chat.model
         try:
             for event in answer(chat, game, question, self.stop.is_set):
                 record(turn, event)
@@ -367,6 +423,10 @@ class App:
         session = self.sessions.load(session_id)
         if session is None:
             return {"error": "That conversation could not be opened."}
+        held_with = session.get("provider")
+        if not self.fake and held_with in PROVIDERS and provider_key(held_with)[0] is None:
+            return {"error": f"That conversation was held with {PROVIDERS[held_with]['label']}. "
+                             f"Add a {PROVIDERS[held_with]['company']} key in Settings to continue it."}
         self.new_chat(session)
         return self.view()
 
@@ -420,6 +480,8 @@ def make_handler(app: App, port: int):
                 self.send_json(200, app.settings())
             elif path == "/api/session" and self.allowed():
                 self.send_json(200, app.view())
+            elif path == "/api/models" and self.allowed():
+                self.send_json(200, app.model_choices(urllib.parse.parse_qs(query).get("provider", [""])[0]))
             elif path == "/api/sessions" and self.allowed():
                 search = urllib.parse.parse_qs(query).get("q", [""])[0][:200]
                 self.send_json(200, {"sessions": app.sessions.list(search)})
@@ -474,7 +536,7 @@ def make_handler(app: App, port: int):
                     return self.send_json(200, app.install_addon())
                 if self.path == "/api/browse":
                     return self.send_json(200, app.browse())
-                results = check(app.wow_dir, call_model=not app.fake)
+                results = check(app.wow_dir, call_model=not app.fake, provider=app.provider, model=app.models[app.provider])
                 return self.send_json(200, {"results": [{"what": w, "status": s, "detail": d} for w, s, d in results]})
             if self.path != "/api/ask":
                 return self.send_json(404, {"error": "not found"})
@@ -598,7 +660,8 @@ def main():
             wow_dir = guesses[0] if guesses else None
 
     if "--check" in args:
-        results = check(wow_dir)
+        chosen = local.load_config().get("provider")
+        results = check(wow_dir, provider=chosen if chosen in PROVIDERS else "anthropic")
         for what, status, detail in results:
             print(f"  {status:<4}  {what}{': ' + detail if detail else ''}")
         failed = sum(status == "FAIL" for _, status, _ in results)

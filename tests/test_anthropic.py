@@ -78,7 +78,10 @@ class FakeAnthropic(BaseHTTPRequestHandler):
         last = body["messages"][-1]
         results = [b for b in last["content"] if isinstance(b, dict) and b.get("type") == "tool_result"] \
             if isinstance(last["content"], list) else []
-        if not results:
+        asked = last["content"] if isinstance(last["content"], str) else ""
+        if "ready" in asked:   # the setup check's one plain question
+            blocks, stop = [{"type": "text", "text": "ready"}], "end_turn"
+        elif not results:
             blocks, stop = [{"type": "text", "text": "Let me look at your quests."},
                             {"type": "tool_use", "id": "toolu_1", "name": "quests", "input": {}}], "tool_use"
         elif results[0]["tool_use_id"] == "toolu_1":
@@ -194,11 +197,12 @@ def main():
         assert results["TomTom installed"][0] == "note", "optional and missing: reported, not counted as a failure"
         assert results["Snapshot readable"] == ("ok", "2 quests, saved 0 minutes ago"), results["Snapshot readable"]
         assert results["Quest locations found"][0] == "ok" and results["Questie data in the snapshot"][0] == "ok"
-        assert results["API key"] == ("ok", "from environment")
-        assert results["A real call to the model"] == ("ok", "claude-opus-5-5 answered: ready")
+        assert results["Anthropic key"] == ("ok", "from environment")
+        assert results["Moonshot key"][0] == "note", "a provider that is not in use is optional"
+        assert results["A real call to the model"] == ("ok", "claude-opus-5-5 answered: ready"), results["A real call to the model"]
         os.environ["ANTHROPIC_API_KEY"] = "bad-key"
         status, detail = {what: (st, d) for what, st, d in check(wow)}["A real call to the model"]
-        assert status == "FAIL" and "401" in detail, detail
+        assert status == "FAIL" and "key was rejected" in detail, detail
     server.shutdown()
     print(f"anthropic sdk {anthropic.__version__}: OK")
 

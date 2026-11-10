@@ -96,6 +96,7 @@
   .hello { margin: auto; text-align: center; color: var(--muted); max-width: 300px; }
   .hello strong { display: block; color: var(--text); font-size: 16px; margin-bottom: 6px; }
   .hello .warn { color: var(--danger); margin-top: 10px; }
+  .hello .hint { font-size: 12px; }
   .recap { margin-top: 16px; padding: 10px 12px; text-align: left; color: var(--text); background: var(--panel);
     border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
   .recap h2 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
@@ -148,6 +149,8 @@
   dialog .problem:empty { display: none; }
   dialog .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
   dialog .actions .grow { flex: 1; }
+  #keys { display: flex; flex-direction: column; gap: 6px; }
+  #keys .row span { width: 78px; flex: none; color: var(--muted); }
   dialog select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   dialog input[type="range"] { padding: 0; accent-color: var(--accent); }
   dialog .check { display: flex; gap: 8px; align-items: center; font-weight: 400; margin-top: 10px; }
@@ -196,9 +199,15 @@
     <button id="install" type="button">Install addon</button>
   </div>
   <div class="hint" id="addon-hint"></div>
-  <label for="key">Anthropic API key</label>
-  <div class="row"><input id="key" type="password" autocomplete="off" spellcheck="false"></div>
-  <div class="hint" id="key-hint"></div>
+  <label for="provider">Answers come from</label>
+  <div class="row">
+    <select id="provider" aria-label="Provider"></select>
+    <select id="model" aria-label="Model" style="flex:1;min-width:0"></select>
+  </div>
+  <div class="hint" id="model-hint"></div>
+  <label>API keys</label>
+  <div id="keys"></div>
+  <div class="hint">Kept in this PC's credential store. Each key is sent only to its own provider.</div>
   <label for="theme">Appearance</label>
   <div class="row">
     <select id="theme" aria-label="Theme">
@@ -365,7 +374,7 @@ async function refresh() {
   try { s = await (await api("/api/state")).json(); } catch { statusEl.textContent = "not connected"; return; }
   statusEl.textContent = s.snapshot_problem ? "no character data"
     : `level ${s.level ?? "?"} · ${s.quests} quests · ${age(s.snapshot_age_minutes ?? 0)}`;
-  statusEl.title = s.snapshot_problem || "Your character as of your last logout";
+  statusEl.title = (s.snapshot_problem || "Your character as of your last logout") + " · answers from " + s.model;
   lastRecap = s.recap; snapshotsKept = s.snapshots;
   glass = s.window.glass; fade = s.window.fade;
   document.body.classList.toggle("glass", glass);
@@ -380,6 +389,9 @@ async function refresh() {
     const title = document.createElement("strong");
     title.textContent = "Ask about your quests";
     hello.append(title, "Where do I hand this in? What comes next in the chain? Wisp knows your quest log as of your last logout.");
+    const who = document.createElement("div");
+    who.className = "hint"; who.style.marginTop = "8px"; who.textContent = "Answers from " + s.model;
+    hello.append(who);
     if (s.recap) hello.append(recapBlock(s.recap));
     for (const problem of [s.snapshot_problem, s.model_problem, s.questie === false ? "Questie was not found, so locations will be missing." : null]) {
       if (!problem) continue;
@@ -535,8 +547,8 @@ function showCost() {
   log.querySelector(".hello")?.remove();
   if (!usage || !usage.requests) { add("div", "trace", "Nothing spent yet in this conversation."); return; }
   add("div", "trace", `This conversation: ${usage.requests} model requests · ${usage.input.toLocaleString("en-US")} tokens in · ${usage.output.toLocaleString("en-US")} out · ${money(usage)}`);
-  add("div", "trace", usage.priced ? "Prices: Claude Opus 5.5, $4 in and $20 out per million tokens. Your Anthropic bill is the final word."
-    : "Part of this was answered by a model Wisp has no price for, so only tokens are shown.");
+  add("div", "trace", usage.priced ? "Worked out from the provider's list prices. Your bill from the provider is the final word."
+    : "Wisp has no price list for this model, so only tokens are shown.");
 }
 
 function showRecap() {
@@ -579,6 +591,7 @@ const commands = [
   { name: "collapse", help: "Shrink to the wisp; click it to come back", run: () => setCollapsed(true) },
   { name: "theme", help: "dark, light or auto", run: setTheme },
   { name: "opacity", help: "How solid the window is, 30 to 100", run: setOpacity },
+  { name: "model", help: "Which provider and model answers", run: async () => { await openSettings(); $("provider").focus(); } },
   { name: "check", help: "Check that everything is set up", run: async () => { await openSettings(); document.getElementById("check").click(); } },
   { name: "settings", help: "Game folder, addon and API key", run: () => openSettings() },
 ];
@@ -685,11 +698,46 @@ function showSettings(s) {
   $("opacity-hint").textContent = s.glass ? "How solid the window is while you are not using it. It is fully solid under the mouse and while you type."
     : "Transparency needs Wisp's own window.";
   $("plain").checked = s.plain_window;
-  $("key").value = "";
-  $("key").placeholder = s.key ? "•••••••• (" + (s.key === "saved" ? "saved on this PC" : s.key) + ")" : "sk-ant-…";
-  $("key-hint").textContent = s.key ? "Paste a new key to replace it." : "Kept in this PC's credential store. Sent only to Anthropic.";
+  // who answers: a provider and one of its models; and a key for each provider
+  const provider = $("provider");
+  provider.textContent = "";
+  $("keys").textContent = "";
+  for (const one of s.providers) {
+    const option = document.createElement("option");
+    option.value = one.id; option.textContent = one.label + (one.key ? "" : " (no key yet)");
+    provider.append(option);
+    const row = document.createElement("div"); row.className = "row";
+    const name = document.createElement("span"); name.textContent = one.company;
+    const field = document.createElement("input");
+    field.type = "password"; field.autocomplete = "off"; field.spellcheck = false; field.dataset.provider = one.id;
+    field.setAttribute("aria-label", one.company + " API key");
+    field.placeholder = one.key ? "•••••••• (" + (one.key === "saved" ? "saved on this PC" : one.key) + ")" : one.hint;
+    row.append(name, field);
+    $("keys").append(row);
+  }
+  provider.value = s.provider;
+  showModels(s.provider);
   return true;
 }
+
+// The models of one provider, from its own catalogue once it has a key.
+async function showModels(provider) {
+  const select = $("model");
+  let list = { models: [], current: "", has_key: false };
+  try { list = await (await api("/api/models?provider=" + encodeURIComponent(provider))).json(); } catch {}
+  select.textContent = "";
+  for (const model of list.models || []) {
+    const option = document.createElement("option");
+    option.value = option.textContent = model;
+    select.append(option);
+  }
+  select.value = list.current;
+  $("model-hint").textContent = list.has_key ? "Changing the provider starts a new conversation; the earlier one is kept."
+    : "Paste a key for this provider below to see all its models.";
+}
+
+const keysNow = () => Object.fromEntries([...document.querySelectorAll("#keys input")].filter(f => f.value.trim()).map(f => [f.dataset.provider, f.value]));
+const modelNow = () => ({ keys: keysNow(), provider: $("provider").value, model: $("model").value });
 
 async function openSettings() {
   $("results").textContent = "";
@@ -702,11 +750,19 @@ async function post(path, body) {
 }
 
 $("gear").onclick = openSettings;
+$("provider").onchange = () => showModels($("provider").value);
 $("close").onclick = () => dialog.close();
 const lookNow = () => ({ theme: $("theme").value, opacity: parseInt($("opacity").value, 10), plain_window: $("plain").checked });
 $("theme").onchange = $("opacity").oninput = () => applyLook($("theme").value, parseInt($("opacity").value, 10));   // see it before saving
 $("save").onclick = async () => {
-  if (showSettings(await post("/api/settings", { wow_dir: $("folder").value, key: $("key").value, ...lookNow() }))) { dialog.close(); refresh(); }
+  const saved = await post("/api/settings", { wow_dir: $("folder").value, ...modelNow(), ...lookNow() });
+  if (!showSettings(saved)) return;
+  dialog.close();
+  if (saved.new_conversation) {   // another provider cannot read this one's history
+    renderSession({ turns: [], usage: null });
+    add("div", "note", "A new conversation with the other provider. The earlier one is kept under Conversations.");
+  }
+  refresh();
 };
 dialog.addEventListener("close", refresh);   // closing without saving puts the look back
 $("install").onclick = async () => {
@@ -718,7 +774,7 @@ $("browse").onclick = async () => {
   if (picked.path) $("folder").value = picked.path;
 };
 $("check").onclick = async () => {
-  const saved = await post("/api/settings", { wow_dir: $("folder").value, key: $("key").value });
+  const saved = await post("/api/settings", { wow_dir: $("folder").value, ...modelNow() });
   if (!showSettings(saved)) return;
   $("results").textContent = "";
   $("check").disabled = true; $("check").textContent = "Checking…";
