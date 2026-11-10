@@ -277,13 +277,14 @@ def test_settings_api(wow: Path):
         # appearance: kept, and kept within bounds
         state = call("/api/state")
         assert state["theme"] == "auto" and state["opacity"] == 85
-        assert state["window"] == {"own": False, "glass": False, "collapsed": False, "hotkey": None}
+        assert state["window"] == {"own": False, "glass": False, "fade": False, "collapsed": False, "hotkey": None}
         saved = call("/api/settings", {"theme": "dark", "opacity": 5, "plain_window": True})
         assert (saved["theme"], saved["opacity"], saved["plain_window"]) == ("dark", 30, True), "never clearer than 30"
         assert call("/api/settings", {"theme": "neon", "opacity": "70"})["theme"] == "dark", "nonsense is ignored"
         assert call("/api/window", {"collapsed": True}) == {"collapsed": True}
         assert call("/api/state")["window"]["collapsed"] is True
         assert call("/api/window", {"collapsed": False}) == {"collapsed": False}
+        assert call("/api/window", {"active": False}) == {"active": False}, "the page reports when it is not in use"
     finally:
         server.shutdown()
 

@@ -113,7 +113,9 @@ class App:
         self.chat = None
         self.problem = None                      # why the model cannot be used, in words
         self.window = None                       # the pywebview window, when there is one
-        self.frameless = False                   # Wisp draws its own window: no title bar, see-through background
+        self.frameless = False                   # Wisp draws its own window: no title bar, see-through
+        self.handle = None                       # the Windows handle of that window
+        self.active = True                       # the mouse is over it or it has the keyboard
         self.collapsed = False
         self.hotkey = None                       # the global show/hide key, when Windows granted it
         saved = local.load_config() if persist else {}
@@ -174,8 +176,10 @@ class App:
             "needs_setup": self.wow_dir is None or (self.chat is None and not self.fake),
             "theme": self.prefs["theme"],
             "opacity": self.prefs["opacity"],
-            "window": {"own": self.window is not None, "glass": self.frameless, "collapsed": self.collapsed,
-                       "hotkey": self.hotkey},
+            # two ways to be see-through: the page's own background (where the system blends single pixels),
+            # or the whole window's opacity (Windows), which the page drives by reporting when it is in use
+            "window": {"own": self.window is not None, "glass": self.frameless and os.name != "nt",
+                       "fade": self.frameless and os.name == "nt", "collapsed": self.collapsed, "hotkey": self.hotkey},
             "usage": dict(self.chat.usage) if self.chat is not None else None,
         }
 
@@ -191,7 +195,7 @@ class App:
             "theme": self.prefs["theme"],
             "opacity": self.prefs["opacity"],
             "plain_window": self.prefs["plain_window"],
-            "glass": self.frameless,
+            "glass": self.frameless,   # either way of being see-through: the slider applies
         }
 
     def save_settings(self, body: dict) -> dict:
@@ -212,6 +216,7 @@ class App:
             self.prefs["plain_window"] = body["plain_window"]
         if self.persist:
             local.save_config({**local.load_config(), **self.prefs})
+        self.apply_alpha()
         key = body.get("key")
         if isinstance(key, str) and key.strip() and self.persist:
             problem = local.set_key(key.strip())
@@ -220,6 +225,26 @@ class App:
             self.new_chat()
         return self.settings()
 
+    def apply_alpha(self):
+        """Windows: solid while in use and while it is the wisp, as see-through as Settings says otherwise."""
+        solid = self.active or self.collapsed
+        local.set_window_alpha(self.handle, 1.0 if solid else self.prefs["opacity"] / 100)
+
+    def set_active(self, active: bool) -> dict:
+        self.active = bool(active)
+        self.apply_alpha()
+        return {"active": self.active}
+
+    def window_shown(self):
+        """Once the window exists: its real size, rounded corners, and its starting opacity."""
+        if not self.frameless:
+            return
+        from webview.window import FixPoint
+        self.window.resize(*SIZE, fix_point=FixPoint.NORTH | FixPoint.EAST)   # a borderless window starts a little small
+        self.handle = local.window_handle(self.window)
+        local.round_window_corners(self.handle)
+        self.apply_alpha()
+
     def set_collapsed(self, collapsed: bool) -> dict:
         """Shrink the window to the wisp, or bring it back, keeping its top-right corner where it is."""
         self.collapsed = bool(collapsed)
@@ -227,7 +252,13 @@ class App:
             if self.frameless:
                 from webview.window import FixPoint
                 width, height = (ORB, ORB) if self.collapsed else SIZE
+                if not self.collapsed:
+                    local.set_window_round(self.handle, False)
                 self.window.resize(width, height, fix_point=FixPoint.NORTH | FixPoint.EAST)
+                if self.collapsed:
+                    time.sleep(0.15)   # let the resize land before the shape is cut from the new size
+                    local.set_window_round(self.handle, True)
+                self.apply_alpha()
             elif self.collapsed:
                 self.window.minimize()   # an ordinary window just goes to the taskbar
             else:
@@ -391,6 +422,8 @@ def make_handler(app: App, port: int):
                     return self.send_json(200, app.close_window())
                 if isinstance(body.get("collapsed"), bool):
                     return self.send_json(200, app.set_collapsed(body["collapsed"]))
+                if isinstance(body.get("active"), bool):
+                    return self.send_json(200, app.set_active(body["active"]))
                 return self.send_json(400, {"error": "nothing to do"})
             if self.path == "/api/sessions/peek":   # look without switching
                 session = app.sessions.load(body.get("id"))
@@ -486,8 +519,14 @@ def smoke(window, result: dict, shots: str | None = None):
         result["copy_button"] = js("document.querySelector('.card button') ? document.querySelector('.card button').dataset.state : null")
         # collapse to the wisp and back, in the real window
         result["glass"] = js("document.body.classList.contains('glass')")
+        result["fade"] = js("fade")
         result["size_open"] = [window.width, window.height]
+        js("post('/api/window', { active: true }); true")
         grab(shots, "open")
+        js("post('/api/settings', { opacity: 50 }).then(() => post('/api/window', { active: false })); true")
+        time.sleep(1)
+        grab(shots, "idle")
+        js("post('/api/window', { active: true }); true")
         js("setCollapsed(true); true")
         wait("document.body.classList.contains('collapsed')", 10)
         time.sleep(1.5)
@@ -563,6 +602,7 @@ def main():
         window = webview.create_window("Wisp", url, **options)
         app.window, app.frameless = window, not plain
         window.events.closing += app.remember_position
+        window.events.shown += app.window_shown
         if not fake and local.start_hotkey(app.toggle_from_hotkey):
             app.hotkey = local.HOTKEY_LABEL
         if smoke_file:

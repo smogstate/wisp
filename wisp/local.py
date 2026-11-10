@@ -125,6 +125,66 @@ def bring_to_front(window) -> None:
         pass
 
 
+# -- how Windows draws the window ----------------------------------------------
+# A web view on Windows cannot blend single pixels with the desktop, so on
+# Windows the see-through look is the whole window's opacity, and the round
+# wisp is a round window shape. All of it acts on Wisp's own window only.
+
+def window_handle(window) -> int | None:
+    if os.name != "nt":
+        return None
+    try:
+        return int(window.native.Handle.ToInt64())
+    except Exception:
+        return None
+
+
+def set_window_alpha(handle: int | None, alpha: float):
+    """1.0 is solid; lower lets what is behind the window show through."""
+    if not handle:
+        return
+    import ctypes
+    user32 = ctypes.windll.user32
+    gwl_exstyle, ws_ex_layered, lwa_alpha = -20, 0x00080000, 0x2
+    get, put = user32.GetWindowLongPtrW, user32.SetWindowLongPtrW
+    get.restype = put.restype = ctypes.c_ssize_t
+    get.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    put.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+    style = get(handle, gwl_exstyle)
+    if not style & ws_ex_layered:
+        put(handle, gwl_exstyle, style | ws_ex_layered)
+    user32.SetLayeredWindowAttributes(ctypes.c_void_p(handle), 0, max(40, min(255, round(alpha * 255))), lwa_alpha)
+
+
+def set_window_round(handle: int | None, round_shape: bool):
+    """Clip the window to a disc (the collapsed wisp), or give it back its rectangle."""
+    if not handle:
+        return
+    import ctypes
+    from ctypes import wintypes
+    user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+    user32.SetWindowRgn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
+    gdi32.CreateEllipticRgn.restype = ctypes.c_void_p
+    region = None
+    if round_shape:
+        rect = wintypes.RECT()
+        user32.GetWindowRect(ctypes.c_void_p(handle), ctypes.byref(rect))
+        region = gdi32.CreateEllipticRgn(0, 0, rect.right - rect.left + 1, rect.bottom - rect.top + 1)
+    user32.SetWindowRgn(handle, region, True)   # the window owns the region from here on
+
+
+def round_window_corners(handle: int | None):
+    """Windows 11 rounds a borderless window's corners on request; older versions ignore this."""
+    if not handle:
+        return
+    try:
+        import ctypes
+        preference = ctypes.c_int(2)   # DWMWCP_ROUND
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(handle), 33, ctypes.byref(preference), 4)
+    except Exception:
+        pass
+
+
 # -- the game folder ----------------------------------------------------------
 
 def game_folder(path) -> Path | None:

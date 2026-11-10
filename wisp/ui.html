@@ -46,9 +46,12 @@
   }
   /* Wisp's own see-through window: the background lets the game show, text and cards stay solid.
      It is at its most solid while the mouse is over it or you are typing, and fades otherwise. */
-  body.glass { --glass-now: var(--glass); --chrome-now: min(1, calc(var(--glass) + .12));
-    border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-  body.glass:not(:hover):not(:focus-within) { --glass-now: calc(var(--glass) * .6); --chrome-now: calc(var(--glass) * .75); }
+  body.glass { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  body.glass:not(:hover):not(:focus-within) { --glass-now: var(--glass); --chrome-now: min(1, calc(var(--glass) + .15)); }
+  /* On Windows the whole window fades instead, and the collapsed window is cut to a disc: fill it. */
+  body.fade { border: 1px solid var(--line); }
+  body.fade.collapsed #orb button { width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
+  body.fade.collapsed #orb[data-state="ready"] button::after, body.fade.collapsed #orb[data-state="card"] button::after { top: 9px; right: 9px; }
   header {
     display: flex; align-items: center; gap: 6px; padding: 10px var(--gutter);
     background: rgb(var(--panel-rgb) / var(--chrome-now)); border-bottom: 1px solid var(--line);
@@ -253,7 +256,7 @@ function setIcon(button, name, label) {
 const token = new URLSearchParams(location.search).get("t") || "";
 const log = document.getElementById("log"), input = document.getElementById("input");
 const send = document.getElementById("send"), statusEl = document.getElementById("status");
-let running = false, usage = null, lastCard = null, turnCount = 0, collapsed = false, glass = false;
+let running = false, usage = null, lastCard = null, turnCount = 0, collapsed = false, glass = false, fade = false;
 const orb = document.getElementById("orb");
 
 // ---- appearance: theme and how see-through the window is ----
@@ -262,6 +265,19 @@ function applyLook(theme, opacity) {
   else document.documentElement.dataset.theme = theme;
   document.documentElement.style.setProperty("--glass", glass ? opacity / 100 : 1);
 }
+
+// On Windows the window itself fades when not in use: tell Wisp when the mouse or the keyboard is here.
+let hovering = false, activeSent = null;
+function reportActive() {
+  const on = hovering || document.hasFocus();
+  if (!fade || on === activeSent) return;
+  activeSent = on;
+  post("/api/window", { active: on });
+}
+document.documentElement.addEventListener("mouseenter", () => { hovering = true; reportActive(); });
+document.documentElement.addEventListener("mouseleave", () => { hovering = false; reportActive(); });
+window.addEventListener("focus", reportActive);
+window.addEventListener("blur", reportActive);
 
 // ---- collapsing to the wisp and back ----
 async function setCollapsed(on) {
@@ -330,10 +346,11 @@ async function refresh() {
   let s;
   try { s = await (await api("/api/state")).json(); } catch { statusEl.textContent = "not connected"; return; }
   statusEl.textContent = s.snapshot_problem ? "no character data"
-    : `level ${s.level ?? "?"} · ${s.quests} quests · saved ${age(s.snapshot_age_minutes ?? 0)}`;
+    : `level ${s.level ?? "?"} · ${s.quests} quests · ${age(s.snapshot_age_minutes ?? 0)}`;
   statusEl.title = s.snapshot_problem || "Your character as of your last logout";
-  glass = s.window.glass;
+  glass = s.window.glass; fade = s.window.fade;
   document.body.classList.toggle("glass", glass);
+  document.body.classList.toggle("fade", fade);
   applyLook(s.theme, s.opacity);
   document.getElementById("quit").hidden = !s.window.own;
   document.getElementById("collapse").title = "Collapse" + (s.window.hotkey ? " (" + s.window.hotkey + ")" : " (Esc)");
@@ -519,11 +536,11 @@ async function setTheme(word) {
 
 async function setOpacity(word) {
   const value = parseInt(word, 10);
-  if (!glass) { add("div", "trace", "This window cannot be see-through. Wisp's own window can: see Settings."); return; }
+  if (!glass && !fade) { add("div", "trace", "This window cannot be see-through. Wisp's own window can: see Settings."); return; }
   if (!(value >= 30 && value <= 100)) { add("div", "trace", "Say how solid, from 30 to 100: /opacity 70"); return; }
   const s = await post("/api/settings", { opacity: value });
   applyLook(s.theme, s.opacity);
-  add("div", "trace", "The window is now " + s.opacity + "% solid at most, and fades when you are not using it.");
+  add("div", "trace", "The window is now " + s.opacity + "% solid while you are not using it.");
 }
 
 const commands = [
@@ -638,7 +655,7 @@ function showSettings(s) {
   $("theme").value = s.theme;
   $("opacity").value = s.opacity;
   $("opacity").disabled = !s.glass;
-  $("opacity-hint").textContent = s.glass ? "How solid the window is. It fades further while you are not using it."
+  $("opacity-hint").textContent = s.glass ? "How solid the window is while you are not using it. It is fully solid under the mouse and while you type."
     : "Transparency needs Wisp's own window.";
   $("plain").checked = s.plain_window;
   $("key").value = "";
