@@ -3,7 +3,7 @@
 -- fengari VM alike. Used by tests/test_mvp.py.
 --   lua tests/wow_stub.lua snapshot          -> prints the saved WispSnapshot
 --   lua tests/wow_stub.lua paste <message>   -> prints what TomTom and chat received
---   WISP_STUB=noquestie,notomtom,nojournal,noauctionator removes those addons;
+--   WISP_STUB=noquestie,notomtom,nojournal,noauctionator,nogathermate removes those addons;
 --   noprofession leaves the profession window closed
 
 local mode, ARG = arg[1], arg[2] or ""
@@ -213,7 +213,8 @@ local npcs = {
   [240] = { name = "Marshal Dughan", spawns = { [12] = { { 42.1, 65.9 } }, [1519] = { { -1, -1 } } } },
 }
 local objects = { [55] = { name = "Wanted Poster", spawns = { [12] = { { 24.6, 74.7 } } } },
-                  [77] = { name = "Silk Crate", spawns = { [12] = { { 51, 52 } } } } }
+                  [77] = { name = "Silk Crate", spawns = { [12] = { { 51, 52 } } } },
+                  [1731] = { name = "Copper Vein", spawns = { [12] = { { 40, 80 } } } } }
 npcs[1347] = { name = "Alexandra Bolero", spawns = { [1519] = { { 43.2, 73.9 } } } }
 npcs[118] = { name = "Prowler", spawns = { [12] = { { 30, 60 } } } }
 for id = 100, 106 do npcs[id] = { name = "Defias Weaver " .. id, spawns = { [12] = { { id - 60, 55 } } } } end
@@ -231,6 +232,7 @@ local questieItems = {
   [4306] = { name = "Silk Cloth", Sources = from({}, { 100, 101, 102, 103, 104, 105, 106 }, { 77 }) },
   [750] = { name = "Tough Wolf Meat", Sources = from({}, { 118 }, {}) },
   [6948] = { name = "Hearthstone", Sources = {} },
+  [2770] = { name = "Copper Ore", Sources = from({}, {}, { 1731 }) },
 }
 local QuestieDB = {
   GetItem = function(_, id) return questieItems[id] end,
@@ -319,7 +321,7 @@ C_TradeSkillUI = {
 }
 local bagSlots = { [0] = { { itemID = 4306, stackCount = 20, itemName = "Silk Cloth" }, { itemID = 4306, stackCount = 12, itemName = "Silk Cloth" },
                            false, { itemID = 6948, stackCount = 1, itemName = "Hearthstone" } },
-                   [1] = { { itemID = 2321, stackCount = 3 } } }
+                   [1] = { { itemID = 2321, stackCount = 3 }, { itemID = 2770, stackCount = 4, itemName = "Copper Ore" } } }
 C_Container = {
   GetContainerNumSlots = function(bag) return bagSlots[bag] and #bagSlots[bag] or 0 end,
   GetContainerItemInfo = function(bag, i) return bagSlots[bag][i] or nil end,
@@ -363,6 +365,32 @@ if not flags:find("noauctionator") then
     end,
     CreateShoppingList = function(id, name, searches) caller(id); LISTS[#LISTS + 1] = name .. " = " .. table.concat(searches, " + ") end,
   } } }
+end
+-- GatherMate2, as its source has it: one saved table per profession, zone -> { encoded place = node id },
+-- read through its own functions. Made-up nodes.
+if not flags:find("nogathermate") then
+  -- x, y in 0-100. As floats: the game's numbers are, and the test's other Lua VM has 32-bit whole numbers
+  local function at(x, y) return math.floor(x * 100 + 0.5) * 1000000.0 + math.floor(y * 100 + 0.5) * 100.0 end
+  local function nodes(id, ...)
+    local out, places = {}, { ... }
+    for i = 1, #places, 2 do out[at(places[i], places[i + 1])] = id end
+    return out
+  end
+  local function join(a, b) for k, v in pairs(b) do a[k] = v end return a end
+  GatherMate2HerbDB = {
+    [1429] = join(nodes(401, 30, 60, 31, 61, 30.5, 60.5, 45, 62, 60, 40, 61, 41, 75, 70), nodes(402, 20, 20, 22, 21)),   -- Peacebloom, Silverleaf
+    [1436] = nodes(401, 50, 50, 52, 48),
+  }
+  GatherMate2MineDB = { [1429] = nodes(201, 40, 80, 41, 81, 70, 30, 71, 31, 55, 55) }   -- Copper Vein
+  GatherMate2FishDB = {}
+  local names = { ["Herb Gathering"] = { [401] = "Peacebloom", [402] = "Silverleaf" }, ["Mining"] = { [201] = "Copper Vein" }, ["Fishing"] = {} }
+  local tables = { ["Herb Gathering"] = GatherMate2HerbDB, ["Mining"] = GatherMate2MineDB, ["Fishing"] = GatherMate2FishDB }
+  GatherMate2 = {
+    db_types = { "Herb Gathering", "Mining", "Fishing" },
+    GetNodesForZone = function(_, zone, kind) return pairs(tables[kind][zone] or {}) end,
+    GetNameForNode = function(_, kind, id) return names[kind][id] end,
+    DecodeLoc = function(_, id) return math.floor(id / 1000000) / 10000, math.floor(id % 1000000 / 100) / 10000 end,
+  }
 end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }

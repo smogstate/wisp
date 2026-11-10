@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Wisp
 ## Notes: Game side of the Wisp assistant: saves a snapshot at logout, runs pasted commands. /wisp
-## OptionalDeps: Questie, TomTom, Auctionator
+## OptionalDeps: Questie, TomTom, Auctionator, GatherMate2
 ## SavedVariables: WispSnapshot, WispData
 
 Wisp.lua

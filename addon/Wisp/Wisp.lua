@@ -416,6 +416,50 @@ local function itemSources(ids, DB, ZoneDB)
   return out
 end
 
+-- Gathering nodes, from the GatherMate2 addon when it is installed: every herb, vein, pool and
+-- chest it knows, whether the player found it or imported it. Read through its own functions;
+-- only the list of zones comes from its saved tables, which is where it keeps them.
+-- Returns { total = n, kinds = { { kind = "Mining", zones = { { map = id, zone = name,
+--           nodes = { { name = "Copper Vein", at = { x, y, x, y, ... } } } } } } } }, x and y in 0-10000.
+-- ponytail: everything it knows, every logout, up to 80000 nodes; hand over only what changed
+-- if a full import makes logouts slow
+local GATHER_TABLES = { ["Herb Gathering"] = "Herb", ["Mining"] = "Mine", ["Fishing"] = "Fish", ["Treasure"] = "Treasure",
+                        ["Extract Gas"] = "Gas", ["Archaeology"] = "Archaeology", ["Logging"] = "Logging" }
+local function gathering()
+  local G = _G.GatherMate2
+  if type(G) ~= "table" or type(G.db_types) ~= "table" or type(G.GetNodesForZone) ~= "function"
+     or type(G.GetNameForNode) ~= "function" or type(G.DecodeLoc) ~= "function" then return nil end
+  local kinds, total, cut = {}, 0, false
+  for _, kind in ipairs(G.db_types) do
+    local saved = GATHER_TABLES[kind] and _G["GatherMate2" .. GATHER_TABLES[kind] .. "DB"]
+    local zones = {}
+    for map in pairs(type(saved) == "table" and saved or {}) do
+      if type(map) == "number" and not cut then
+        local byName = {}
+        for coord, nodeID in G:GetNodesForZone(map, kind, true) do
+          if total >= 80000 then cut = true; break end
+          local name = type(coord) == "number" and G:GetNameForNode(kind, nodeID)
+          if type(name) == "string" then
+            local x, y = G:DecodeLoc(coord)
+            local list = byName[name]
+            if not list then list = {}; byName[name] = list end
+            local n = #list
+            list[n + 1], list[n + 2] = math.floor(x * 10000 + 0.5), math.floor(y * 10000 + 0.5)
+            total = total + 1
+          end
+        end
+        local nodes = {}
+        for name, at in pairs(byName) do nodes[#nodes + 1] = { name = name, at = at } end
+        table.sort(nodes, function(a, b) return a.name < b.name end)
+        if #nodes > 0 then zones[#zones + 1] = { map = map, zone = mapName(map), nodes = nodes } end
+      end
+    end
+    table.sort(zones, function(a, b) return a.map < b.map end)
+    if #zones > 0 then kinds[#kinds + 1] = { kind = kind, zones = zones } end
+  end
+  return { total = total, cut = cut or nil, kinds = kinds }
+end
+
 local function myMarket() return tostring(GetRealmName()) .. "-" .. tostring((UnitFactionGroup("player"))) end
 
 -- Auctionator's day-by-day record: for each day it scanned, each item's lowest and highest price
@@ -510,6 +554,8 @@ local function buildSnapshot()
   if not okA then market = nil end
   local okM, record = pcall(marketDays)
   if not okM then record = nil end
+  local okG, nodes = pcall(gathering)
+  if not okG then nodes = nil end
   return {
     v = 1,
     takenAt = time(),
@@ -526,12 +572,13 @@ local function buildSnapshot()
       x = x and round1(x * 100), y = y and round1(y * 100),
     },
     addons = { questie = DB ~= nil, tomtom = type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function",
-               dungeonjournal = journal ~= nil, auctionator = auctionator() ~= nil },
+               dungeonjournal = journal ~= nil, auctionator = auctionator() ~= nil, gathermate = nodes ~= nil },
     dungeons = journal,
     bags = carried,
     recipes = books,
     prices = market,
     market = record,
+    gather = nodes,
     quests = log,
     sources = sources,
     completed = C_QuestLog.GetAllCompletedQuestIDs(),

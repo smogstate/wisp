@@ -31,6 +31,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **What is this for, where do I get it.** Ask about any item you carry, craft with or need for a quest: Wisp shows which of your recipes use it, which quests ask for it, which boss drops it, who sells it and what drops it, with a waypoint to the seller.
 
+**Gathering.** With the **GatherMate2** addon, ask *where is the most Peacebloom?* or *a route for Copper Vein in Elwynn*: Wisp ranks the zones by the nodes GatherMate2 has on record and makes a route you paste into the game, one TomTom waypoint per stop.
+
 **Research.** Type `/research` and a real question: *what should I buy now that will be worth more later?*, *what are my best ways to earn gold?* Wisp works through your own data, then searches and reads the web (with a Claude key; 8 searches at a cent each and 6 pages at most), and ends with a report: short points, next steps, numbered sources you can click. Reports are kept; `/notes` opens the folder.
 
 **Gold and prices.** Scan the auction house with Auctionator as you normally do and log out. Wisp keeps every scan day for good (Auctionator itself forgets after three weeks), so you can ask *what is cheap right now?*, *what in my bags is worth selling?*, *how has Silk Cloth moved, and where is it heading?* Prices are your own scans: the lowest listing of the day, not a sale.

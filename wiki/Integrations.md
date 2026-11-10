@@ -12,6 +12,7 @@ Each integration is one Lua file registered through [Protocol](Protocol.md). Com
 | TomTom | waypoint | — | TomTom | **works in the game** (Denis, 2026-11-10) |
 | Questie | — | quests, chains, NPC positions; the items a quest asks for; who sells an item, what drops it, what holds it | Questie | quests **work in the game**; the item side is built and not yet run there |
 | DungeonJournal | — | dungeons, their quests and prerequisites, bosses, loot, entrances | DungeonJournal | export tested against its real data files; not yet run in the game |
+| GatherMate2 | — | every gathering node it knows: profession, zone, name, places | GatherMate2 | **built 2026-11-10**; API read in its source; not yet run in the game |
 | Auctionator | create a shopping list **with quantities** | auction price and its age, per item | Auctionator | **built 2026-11-10**; API read in source (v343), tested against a stand-in of it; not yet run in the game |
 | The game's profession window | — | every recipe it lists: colour, the skill it turns grey at, what it makes, materials | nothing | built; the client's API read in Blizzard's source, not yet run in the game |
 | WeakAuras | open the import dialog with a string | — | WeakAuras | no |
@@ -97,6 +98,23 @@ Open:
 - **Farming for gold needs sources for items the character has nothing to do with.** That takes a background pass over every priced item while playing, and keeping the result in the SQLite file.
 - **How complete Questie's item data is for Forever is not known.** Its code has the fields; its repository lists Forever work still to do. To see in the game.
 - Quest rewards are not linked; recipes of other professions and unlearned recipes are not known.
+
+## GatherMate2 — built 2026-11-10
+
+Denis: "we need gatherer db integration, GatherMate". GatherMate2 supports Forever (its manifest lists interface `16001`; its licence file is GPL 2). It records every herb, ore vein, fishing pool and chest the player gathers from, and its companion GatherMate2_Data can import a ready-made set.
+
+- **Read at logout, through its own functions**: `GetNodesForZone`, `GetNameForNode`, `DecodeLoc`, over the professions in `db_types`. Only the list of zones is taken from its saved tables (`GatherMate2HerbDB` and the like), which is where it keeps them. Everything it knows goes into the snapshot, up to 80,000 nodes: per profession and zone, each node's name and its places.
+- **`gathering`** is the tool. With nothing: what is on record, by profession. With a node: the zones it is known in, richest first. With a zone: what that zone holds. With both: **a route**.
+- **A route is made in code.** Nodes within 2.5 map units of each other become one stop, the 20 richest stops are kept, and the walk goes from where the character stands (when in that zone) to the nearest stop, then the nearest after that. The model gets one ref; `waypoint` turns it into one card line and a TomTom waypoint per stop.
+- **It joins the item graph.** A herb's node has the herb's own name; an ore's vein is the object Questie says holds the ore. So `item_links` on Copper Ore names Copper Vein with its richest zones, and the model walks on to `gathering` for the route.
+- Node and item names are the client's own, so the join works in any game language.
+
+Limits:
+
+- **A node is where something can appear, not that it is there now.** And a zone the player has not gathered in looks empty unless data was imported.
+- **The route is nearest-neighbour**, good for following an arrow, not the shortest possible loop.
+- Whether GatherMate2_Data has nodes for Forever's zones is not known.
+- Not yet run in the game.
 
 ## Auctionator — what its API offers
 

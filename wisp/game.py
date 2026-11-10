@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .crafting import Crafting, coins
+from .gathering import Gathering
 from .graph import ItemGraph
 from .history import diff
 
@@ -72,6 +73,8 @@ class Game:
         self.dungeons = [self._dungeon(i, d) for i, d in enumerate(_as_list(self.snapshot.get("dungeons")))
                          if isinstance(d, dict)]
         self.crafting = Crafting(self.snapshot)
+        self.gathering = Gathering(self.snapshot)
+        self.routes: dict[str, dict] = {}  # ref -> a walk through several places, made by the gathering tool
         self.graph = ItemGraph(self)       # how items tie recipes, quests, bosses, vendors and drops together
         self.cards: list[dict] = []        # action cards made during the current answer
         self.history = None                # the snapshot history, when the app has one
@@ -292,18 +295,29 @@ class Game:
         refs = args.get("refs")
         if not isinstance(refs, list) or not refs or len(refs) > 20 or not all(isinstance(r, str) for r in refs):
             return {"error": "refs must be a list of 1 to 20 location refs from the quests or dungeon tools"}
-        unknown = [r for r in refs if r not in self.places]
+        unknown = [r for r in refs if r not in self.places and r not in self.routes]
         if unknown:
             return {"error": f"unknown refs: {', '.join(unknown[:5])}. Use refs exactly as a tool returned them."}
-        lines = [self.places[r] for r in dict.fromkeys(refs)]
+        shown, points = [], []
+        for ref in dict.fromkeys(refs):
+            if ref in self.routes:   # a route is one line on the card and a waypoint for each of its stops
+                route = self.routes[ref]
+                shown.append({"addon": "TomTom", "text": f"Route: {route['title']}", "detail": route["detail"]})
+                points += route["stops"]
+            else:
+                p = self.places[ref]
+                shown.append({"addon": "TomTom", "text": f"Waypoint: {p['title']}", "detail": f"{p['zone']}  {p['x']}, {p['y']}"})
+                points.append(p)
+        if len(points) > 50:
+            return {"error": "that is more than 50 waypoints at once: ask for fewer routes"}
         card = {
             "id": f"card{len(self.cards) + 1}",
-            "lines": [{"addon": "TomTom", "text": f"Waypoint: {p['title']}", "detail": f"{p['zone']}  {p['x']}, {p['y']}"}
-                      for p in lines],
+            "lines": shown,
             "wisp": encode_wisp1([{"do": "tomtom.waypoint", "map": p["map"], "x": p["x"], "y": p["y"], "title": p["title"]}
-                                  for p in lines]),
+                                  for p in points]),
         }
         self.cards.append(card)
+        lines = shown
         return {"shown": len(lines), "note": "A card with a Copy button is now shown to the player. Nothing has happened "
                 "in the game yet: the player must copy it and paste it into the game, and you cannot see whether they did."}
 
@@ -577,6 +591,62 @@ class Game:
         return {"notes": [{"note": f.stem, "title": heading(f), "kept": f.stem[:8]} for f in files[:30]],
                 "note": "Read one with read set to its title or its note name."}
 
+    def tool_gathering(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        gather = self.gathering
+        if not gather.nodes:
+            return {"error": "No gathering nodes are known. They come from the GatherMate2 addon: "
+                             + ("it is installed but has nothing on record yet. It notes every herb, vein and pool the "
+                                "player gathers from; its companion GatherMate2_Data can import a ready-made set."
+                                if gather.installed else "it was not installed at the last logout.")}
+        what = _clean(args.get("what"), 80) if isinstance(args.get("what"), str) else ""
+        zone = _clean(args.get("zone"), 60) if isinstance(args.get("zone"), str) else ""
+        note = ("Places the player's GatherMate2 addon has on record, found by the player or imported: where a node can "
+                "appear, not whether it is there now. Zones the player has not gathered in look empty.")
+        names = gather.find(what) if what else []
+        if what and not names:
+            return {"error": f"no node named like '{what}' is on record. Known: " + ", ".join(sorted(gather.nodes)[:40])}
+        if len(names) > 1:
+            return {"several_nodes_match": names, "note": "Ask again with one of these names exactly."}
+        maps = gather.zone(zone) if zone else []
+        if zone and not maps:
+            return {"error": f"no nodes are on record in a zone named like '{zone}'"}
+        if len(maps) > 1:
+            return {"several_zones_match": [gather.zone_name(m) for m in maps], "note": "Ask again with one of these zones exactly."}
+        if not names and not maps:   # the lie of the land
+            kinds = {}
+            for name, node in gather.nodes.items():
+                kinds.setdefault(node["kind"], []).append({"node": name, "known_nodes": sum(len(z["at"]) for z in node["zones"].values()),
+                                                           "zones": len(node["zones"])})
+            return {"known_nodes": gather.total, "by_profession": {k: sorted(v, key=lambda n: -n["known_nodes"])[:60] for k, v in kinds.items()},
+                    "note": note + " Ask with what for the zones a node is in, with zone for what a zone holds."}
+        if not names:
+            return {"zone": gather.zone_name(maps[0]), "gatherable": gather.in_zone(maps[0]),
+                    "note": note + " Ask again with what as well for a route."}
+        name = names[0]
+        zones = gather.where(name)
+        if not maps:
+            return {"node": name, "profession": gather.nodes[name]["kind"], "zones": [{k: v for k, v in z.items() if k != "map"} for z in zones[:12]],
+                    "note": note + " Ask again with a zone for a route through its nodes."}
+        map_id = maps[0]
+        if map_id not in gather.nodes[name]["zones"]:
+            return {"error": f"no {name} is on record in that zone", "zones_with_it": [z["zone"] for z in zones[:8]]}
+        place = gather.nodes[name]["zones"][map_id]
+        me = self.snapshot.get("character") or {}
+        start = (me["x"], me["y"]) if me.get("map") == map_id and isinstance(me.get("x"), (int, float)) and isinstance(me.get("y"), (int, float)) else None
+        stops = gather.route(name, map_id, start)
+        ref = f"g{map_id}." + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        self.routes[ref] = {"title": f"{name}, {len(stops)} stop{'s' if len(stops) != 1 else ''}",
+                            "detail": f"{place['zone']} · {len(place['at'])} known node{'s' if len(place['at']) != 1 else ''}",
+                            "stops": [{"map": map_id, "zone": place["zone"], "x": s["x"], "y": s["y"], "title": f"{name} {i + 1}"}
+                                      for i, s in enumerate(stops)]}
+        return {"node": name, "zone": place["zone"], "known_nodes": len(place["at"]),
+                "route": {"ref": ref, "stops": len(stops), "starts": "from where the character stands" if start else "at the richest spot",
+                          "first_stops": [{"x": s["x"], "y": s["y"], "nodes": s["nodes"]} for s in stops[:5]]},
+                "note": note + " Give the route's ref to the waypoint tool to show the whole route as one card: nodes close "
+                               "together are one stop, and each stop follows the nearest one before it."}
+
     def tool_craft_plan(self, args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
@@ -810,6 +880,20 @@ TOOLS = [
         },
     },
     {
+        "name": "gathering",
+        "description": "Where herbs, ore veins, fishing pools and chests are, from the player's GatherMate2 addon. "
+                       "With nothing: what is on record, by profession. With what: the zones a node is known in, "
+                       "richest first. With zone: what that zone holds. With both: a route through that zone's "
+                       "nodes, as one ref for the waypoint tool. The only source of gathering places: never name a "
+                       "zone or a spot for a herb or an ore from memory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"what": {"type": "string", "description": "A node as the game names it: Peacebloom, Copper Vein."},
+                           "zone": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "craft_plan",
         "description": "The arithmetic of a crafting plan, done in code: for each recipe and how many times to craft "
                        "it, the total materials, what the plan's own crafts supply (a bolt made in one step and used "
@@ -863,7 +947,7 @@ TOOLS = [
         "description": "Offer the player waypoints for the game. Pass location refs from the quests or dungeon tools. This shows "
                        "a card the player can copy and paste into the game, where TomTom sets the waypoints. It does "
                        "not act in the game by itself. Use it when the player asks where something is or wants to go "
-                       "there.",
+                       "there. A ref can also be a route from the gathering tool: one ref, a waypoint for each stop.",
         "input_schema": {
             "type": "object",
             "properties": {"refs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 20}},
@@ -934,6 +1018,9 @@ that ask for it, the bosses, creatures and objects that drop it, who sells it, a
 spans several of these, follow the links one item at a time rather than guessing the chain. When a crafting plan has \
 materials with no auction price, look them up there: a vendor may sell them, and the plan's card can be followed by a \
 waypoint to that vendor.
+
+Where to gather comes only from the gathering tool: the places the player's GatherMate2 addon has on record. Item \
+links name the node an item is gathered from; from there, ask gathering for its zones and then for a route.
 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
 into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.

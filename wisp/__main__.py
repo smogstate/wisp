@@ -99,6 +99,11 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 add("Price history kept by Wisp", kept["rows"] > 0,
                     f"{kept['rows']} prices of {kept['items']} items, from {kept['first_day']} to {kept['last_day']}",
                     "none yet: it grows with every day you scan the auction house", optional=True)
+            if (addons / "GatherMate2").is_dir():
+                add("Gathering nodes in the snapshot", game.gathering.total > 0,
+                    f"{game.gathering.total} places of {len(game.gathering.nodes)} kinds",
+                    "none yet: GatherMate2 notes each herb, vein and pool as you gather; log out after gathering",
+                    optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
     return _key_checks(out, add, call_model, provider, model)

@@ -57,7 +57,7 @@ def test_snapshot_and_tools(wow: Path):
     snap = game.snapshot
     assert snap["character"]["class"] == "MAGE" and snap["character"]["level"] == 12
     assert snap["character"]["gold"] == 15 and snap["character"]["x"] == 42.1
-    assert snap["addons"] == {"questie": True, "tomtom": True, "dungeonjournal": True, "auctionator": True}
+    assert snap["addons"] == {"questie": True, "tomtom": True, "dungeonjournal": True, "auctionator": True, "gathermate": True}
     assert [q["id"] for q in game.quests] == [33, 76], "header and hidden entries are skipped"
 
     wolves, mine = game.quests
@@ -463,6 +463,46 @@ def test_item_graph(wow: Path, tmp: Path):
     assert "sold_by" not in out and "Questie was not available" in out["note"] and out["used_in_your_recipes"]
 
 
+def test_gathering(wow: Path, tmp: Path):
+    """GatherMate2's nodes: which zones have the most, a route through one, and the way in from an item."""
+    game = Game.load(wow)
+    assert game.snapshot["gather"]["total"] == 16
+
+    def gather(**args):
+        out = run_tool(game, "gathering", args)
+        out.pop("note", None)
+        return out
+    known = gather()
+    assert known["known_nodes"] == 16 and known["by_profession"]["Herb Gathering"][0] == {"node": "Peacebloom", "known_nodes": 9, "zones": 2}
+    assert gather(what="peacebloom")["zones"] == [{"zone": "Elwynn Forest", "known_nodes": 7}, {"zone": "Westfall", "known_nodes": 2}]
+    assert gather(zone="elwynn forest")["gatherable"] == [
+        {"node": "Peacebloom", "kind": "Herb Gathering", "known_nodes": 7}, {"node": "Copper Vein", "kind": "Mining", "known_nodes": 5},
+        {"node": "Silverleaf", "kind": "Herb Gathering", "known_nodes": 2}]
+
+    # a route: three flowers in one patch are one stop; it starts where the character stands (42, 66) and walks on
+    walk = gather(what="Peacebloom", zone="Elwynn")
+    assert (walk["known_nodes"], walk["route"]["stops"], walk["route"]["starts"]) == (7, 4, "from where the character stands")
+    assert walk["route"]["first_stops"] == [{"x": 45.0, "y": 62.0, "nodes": 1}, {"x": 30.5, "y": 60.5, "nodes": 3},
+                                            {"x": 60.5, "y": 40.5, "nodes": 2}, {"x": 75.0, "y": 70.0, "nodes": 1}], walk["route"]["first_stops"]
+    assert gather(what="Peacebloom", zone="Westfall")["route"]["starts"] == "at the richest spot"
+    shown = run_tool(game, "waypoint", {"refs": [walk["route"]["ref"], "q33.end.1.1"]})
+    assert shown["shown"] == 2 and game.cards[-1]["lines"][0] == {
+        "addon": "TomTom", "text": "Route: Peacebloom, 4 stops", "detail": "Elwynn Forest · 7 known nodes"}
+    ways = [l for l in stub("paste", game.cards[-1]["wisp"]) if l.startswith("WAY ")]
+    assert len(ways) == 5 and ways[0] == "WAY tomtom 1429 0.45 0.62 Peacebloom 1" and ways[-1].endswith("Eagan Peltskinner (turn in)")
+
+    # from an item: a herb's node has the herb's name, an ore's vein is the object that holds it
+    ore = run_tool(game, "item_links", {"item": "Copper Ore"})
+    assert ore["gathered_from"] == [{"node": "Copper Vein", "profession": "Mining", "known_nodes": 5, "richest_zones": ["Elwynn Forest (5)"]}]
+    assert "gathered_from" not in run_tool(game, "item_links", {"item": "Silk Cloth"})
+
+    assert gather(what="leaf") == {"node": "Silverleaf", "profession": "Herb Gathering", "zones": [{"zone": "Elwynn Forest", "known_nodes": 2}]}
+    assert gather(what="e")["several_nodes_match"] == ["Peacebloom", "Silverleaf", "Copper Vein"]
+    assert "error" in gather(what="Mithril") and "error" in gather(zone="Nowhere") and "zones_with_it" in gather(what="Silverleaf", zone="Westfall")
+    without = Game.load(make_wow_dir(tmp, flags="nogathermate"))
+    assert without.snapshot["addons"]["gathermate"] is False and "not installed" in run_tool(without, "gathering", {})["error"]
+
+
 def test_inbox_is_strict():
     def paste(text, flags=""):
         return stub("paste", text, flags=flags)
@@ -745,6 +785,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as g:
             test_history(wow, Path(g))
         test_inbox_is_strict()
+        with tempfile.TemporaryDirectory() as j:
+            test_gathering(wow, Path(j))
         with tempfile.TemporaryDirectory() as i:
             test_item_graph(wow, Path(i))
         with tempfile.TemporaryDirectory() as h:

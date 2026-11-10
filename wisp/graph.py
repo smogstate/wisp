@@ -19,6 +19,7 @@ def _list(value) -> list:
 class ItemGraph:
     def __init__(self, game):
         craft, snapshot = game.crafting, game.snapshot
+        self.gathering = game.gathering
         self.names: dict[int, str] = dict(craft.names)
         self.used_in: dict[int, list] = {}    # item -> recipes that need it
         self.made_by: dict[int, list] = {}    # item -> recipes that make it
@@ -109,4 +110,13 @@ class ItemGraph:
         if item in self.bosses:
             out["dropped_by_bosses"] = self.bosses[item]
         out.update(self.sources.get(item, {}))
+        # gathered: a herb's node carries the herb's own name, an ore's vein is the object Questie says holds it
+        gather = self.gathering
+        for name in dict.fromkeys([out["item"]] + [o["name"] for o in out.get("found_in", [])]):
+            match = next((n for n in gather.nodes if n.lower() == name.lower()), None)
+            if match:
+                zones = gather.where(match)
+                out.setdefault("gathered_from", []).append({
+                    "node": match, "profession": gather.nodes[match]["kind"], "known_nodes": sum(z["known_nodes"] for z in zones),
+                    "richest_zones": [f"{z['zone']} ({z['known_nodes']})" for z in zones[:3]]})
         return out
