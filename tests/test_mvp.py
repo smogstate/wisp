@@ -35,7 +35,7 @@ LUA = [os.environ["WISP_LUA"], "tests/wow_stub.lua"] if os.environ.get("WISP_LUA
 
 
 def stub(*args, flags=""):
-    out = subprocess.run([*LUA, *args], cwd=ROOT, capture_output=True, text=True, env={**os.environ, "WISP_STUB": flags})
+    out = subprocess.run([*LUA, *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "WISP_STUB": flags})
     assert out.returncode == 0, out.stderr + out.stdout
     return out.stdout.splitlines()
 
