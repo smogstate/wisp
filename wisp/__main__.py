@@ -8,10 +8,12 @@ The interface is a web page served on this computer only; the window is a
 small always-on-top browser view of it. Without pywebview it opens in your
 normal browser instead.
 
+    --check     test the setup and exit: game folder, addons, snapshot, key, one real call to the model
     --fake      a scripted model, no key needed (to look at the interface)
     --browser   use the normal browser even if pywebview is installed
 """
 import json
+import os
 import secrets
 import sys
 import threading
@@ -19,8 +21,8 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .game import Game
-from .llm import AnthropicChat, FakeChat, answer
+from .game import Game, find_saved_file
+from .llm import MODEL, AnthropicChat, FakeChat, answer
 
 UI = Path(__file__).with_name("ui.html")
 
@@ -161,6 +163,54 @@ def serve(app: App, port: int = 0):
     return server, f"http://127.0.0.1:{port}/?t={app.token}"
 
 
+def check(wow_dir: Path) -> list[tuple[str, str, str]]:
+    """Everything a first run depends on, as (what, "ok" | "FAIL" | "note", detail).
+    A "note" is something optional that is missing. Makes one small real model call."""
+    out = []
+
+    def add(what, ok, good="", bad="", optional=False):
+        out.append((what, "ok" if ok else "note" if optional else "FAIL", good if ok else bad))
+
+    addons = wow_dir / "Interface" / "AddOns"
+    add("Game folder", addons.is_dir(), str(wow_dir), "there is no Interface\\AddOns folder inside it")
+    add("Wisp addon installed", (addons / "Wisp" / "Wisp.toc").is_file(), bad="copy addon\\Wisp into Interface\\AddOns")
+    add("Questie installed", (addons / "Questie").is_dir(), bad="without it Wisp knows almost no locations")
+    add("TomTom installed", (addons / "TomTom").is_dir(), bad="without it the built-in map pin is used", optional=True)
+    saved = find_saved_file(wow_dir)
+    add("Snapshot file", saved is not None, str(saved), "log in with the Wisp addon enabled, then log out once")
+    game = Game.load(wow_dir)
+    if game.problem:
+        add("Snapshot readable", False, bad=game.problem)
+    else:
+        add("Snapshot readable", True, f"{len(game.quests)} quests, saved {game.age_minutes()} minutes ago")
+        add("Questie data in the snapshot", (game.snapshot.get("addons") or {}).get("questie"),
+            bad="Questie was not ready at logout; play a little, then log out again")
+        places = sum(1 for ref in game.places if ".start." in ref or ".end." in ref)
+        add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
+    try:
+        import webview  # noqa: F401
+        add("pywebview", True)
+    except ImportError:
+        add("pywebview", False, bad="pip install pywebview (without it Wisp opens in your browser)", optional=True)
+    add("ANTHROPIC_API_KEY is set", bool(os.environ.get("ANTHROPIC_API_KEY")), bad="set it in this terminal first")
+    try:
+        import anthropic
+    except ImportError:
+        add("anthropic package", False, bad="pip install anthropic")
+        return out
+    add("anthropic package", True, anthropic.__version__)
+    try:
+        reply = anthropic.Anthropic().messages.create(
+            model=MODEL, max_tokens=2000, messages=[{"role": "user", "content": "Reply with the single word: ready"}])
+        text = "".join(b.text for b in reply.content if b.type == "text").strip()
+        add("A real call to the model", bool(text), f"{reply.model} answered: {text[:40]}", "the model sent no text")
+    except anthropic.APIStatusError as e:
+        add("A real call to the model", False, bad=f"error {e.status_code}: {e.message}")
+    except Exception as e:   # no key, no network
+        add("A real call to the model", False, bad=str(e)[:200])
+    return out
+
+
 def main():
     args = sys.argv[1:]
     fake, in_browser = "--fake" in args, "--browser" in args
@@ -168,6 +218,14 @@ def main():
     wow_dir = Path(paths[0]) if paths else None
     if wow_dir is not None and not wow_dir.is_dir():
         sys.exit(f"Not a folder: {wow_dir}\n{__doc__}")
+    if "--check" in args:
+        if wow_dir is None:
+            sys.exit("--check needs the game folder")
+        results = check(wow_dir)
+        for what, status, detail in results:
+            print(f"  {status:<4}  {what}{': ' + detail if detail else ''}")
+        failed = sum(status == "FAIL" for _, status, _ in results)
+        sys.exit(f"\n{failed} thing(s) to fix." if failed else 0)
     if wow_dir is None and not fake:
         sys.exit(__doc__)
     app = App(wow_dir, fake)

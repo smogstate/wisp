@@ -87,6 +87,16 @@ class FakeAnthropic(BaseHTTPRequestHandler):
             blocks, stop = [{"type": "tool_use", "id": "toolu_2", "name": "waypoint", "input": {"refs": [ref]}}], "tool_use"
         else:
             blocks, stop = [{"type": "text", "text": "Hand it in to Eagan. Press Copy, then Ctrl+V twice."}], "end_turn"
+        if not body.get("stream"):
+            data = json.dumps({"id": "msg_test", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
+                               "content": [{"type": "text", "text": "ready"}], "stop_reason": "end_turn",
+                               "stop_sequence": None, "usage": {"input_tokens": 5, "output_tokens": 1}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         data = sse(reply(blocks, stop))
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -134,6 +144,22 @@ def main():
         events = list(answer(AnthropicChat(), game, "hello"))
         assert events[0]["type"] == "error" and "key was rejected" in events[0]["message"], events
         assert events[-1] == {"type": "done", "reason": "error"}
+        # --check: the setup test a first run starts with, including its one model call
+        from wisp.__main__ import check
+        wow = Path(tmp)
+        (wow / "Interface/AddOns/Wisp").mkdir(parents=True)
+        (wow / "Interface/AddOns/Wisp/Wisp.toc").write_text("")
+        (wow / "Interface/AddOns/Questie").mkdir()
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        results = {what: (status, detail) for what, status, detail in check(wow)}
+        assert results["Wisp addon installed"][0] == "ok" and results["Questie installed"][0] == "ok"
+        assert results["TomTom installed"][0] == "note", "optional and missing: reported, not counted as a failure"
+        assert results["Snapshot readable"] == ("ok", "2 quests, saved 0 minutes ago"), results["Snapshot readable"]
+        assert results["Quest locations found"][0] == "ok" and results["Questie data in the snapshot"][0] == "ok"
+        assert results["A real call to the model"] == ("ok", "claude-opus-5-5 answered: ready")
+        os.environ["ANTHROPIC_API_KEY"] = "bad-key"
+        status, detail = {what: (st, d) for what, st, d in check(wow)}["A real call to the model"]
+        assert status == "FAIL" and "401" in detail, detail
     server.shutdown()
     print(f"anthropic sdk {anthropic.__version__}: OK")
 

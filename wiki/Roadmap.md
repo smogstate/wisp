@@ -15,7 +15,7 @@ Denis asked for a first working slice once it was clear he has Questie. It cuts 
 
 Left out on purpose: themes beyond following the system, transparency, collapsing, sessions and slash commands, snapshot history, other providers, every other tool and integration.
 
-**Tested** only without the game and without a model key: the addon in a Lua interpreter against a faked game and Questie, the whole loop with a scripted model, the interface in headless Chrome, and the real Anthropic SDK against a local stand-in for the API. The game functions the addon calls were checked against Blizzard's Forever interface source. **Not tested:** the addon in Forever, what the real model answers, the pywebview window on Windows. Those are the next things to learn, and `checks/WispCheck` covers the game side.
+**Tested** only without the game and without a model key: the addon in a Lua interpreter against a faked game and Questie, the whole loop with a scripted model, the interface in headless Chrome, and the real Anthropic SDK against a local stand-in for the API. The game functions the addon calls were checked against Blizzard's Forever interface source. The real pywebview window was opened on Linux and driven through a question and a Copy; Questie's record fields were checked in its source. `python -m wisp --check <game folder>` tests a real setup step by step, including one real model call. **Not tested:** the addon in Forever, what the real model answers, the window on Windows itself. Those are the next things to learn, and `checks/WispCheck` covers the game side.
 
 ## 0. Checks, before any product code
 

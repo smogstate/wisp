@@ -25,6 +25,7 @@ You need the game on Windows, Python 3.10 or newer, an Anthropic API key, and th
    python -m wisp "C:\Program Files (x86)\World of Warcraft\_forever_"
    ```
    In PowerShell the second line is `$env:ANTHROPIC_API_KEY="your-key"`.
+   If something is off, `python -m wisp --check "C:\...\_forever_"` tests the setup step by step: the game folder, the addons, the snapshot, the key, and one real call to the model.
 3. **Ask**, for example: *where do I hand in my wolf quest, and what comes next?*
 4. **Copy** on the card, then in the game press **Ctrl+V twice**: the first opens Wisp's inbox, the second pastes. `/wisp` opens the inbox too.
 
@@ -45,4 +46,7 @@ Tested on a development machine without the game:
 - The interface in headless Chrome, every state, light and dark, at three sizes.
 - The real Anthropic SDK (2.7.0) against a local stand-in for the API: the request Wisp builds is accepted, and text, tool calls, several rounds and a rejected key are all read correctly. `python tests/test_anthropic.py`
 
-**Not tested: the addon in the real game, what the real model answers, and the pywebview window on Windows.** `checks/WispCheck` exists to test what the game actually provides; see [`checks/README.md`](checks/README.md).
+- The real pywebview window, opened on Linux and driven through a question and a Copy. That is the WebKit engine; Windows uses WebView2, which is Chromium, the engine of the headless run.
+- The game functions and Questie record fields the addon uses, checked against Blizzard's Forever interface source and Questie's source.
+
+**Not tested: the addon in the real game, what the real model answers, and the window on Windows itself.** `checks/WispCheck` exists to test what the game actually provides; see [`checks/README.md`](checks/README.md).
