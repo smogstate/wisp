@@ -99,6 +99,27 @@ Open:
 - **How complete Questie's item data is for Forever is not known.** Its code has the fields; its repository lists Forever work still to do. To see in the game.
 - Quest rewards are not linked; recipes of other professions and unlearned recipes are not known.
 
+## Farming for gold — built 2026-11-10
+
+Denis: "farming for gold next". The plan had been drop rates for every priced item from Questie. **That data does not exist**: Questie's drop tables (`Database/DropTables/dropDB.lua`) hold rates only for quest items, the ones in quest objectives, and have no branch for Forever at all. Nothing else installed has rates for ordinary loot either. So Wisp measures the player's own.
+
+- **The addon notes every loot window.** For each slot the game says which corpses or nodes it came from (`GetLootSourceInfo`), so three corpses looted at once are told apart, and a corpse opened twice counts once. Added up per day, zone and source — a kind of creature, a kind of node: how many were looted, how many of each item came out, the coins (the purse before and after the window), and **time spent looting**: the gaps between one loot and the next when under five minutes. Kept for 60 days in `WispData.loot`, per character.
+- **Names.** A creature's name is taken from the target while looting, else from Questie at logout. A node's name is the target of the gathering spell just cast, which is the same name GatherMate2 uses.
+- **Worth** is the lowest auction listing where there is one, else what a vendor pays (from Auctionator's own record of vendor prices).
+- **`farming`** has three views ([Tools](Tools.md)), each with a table card:
+  - `spots`: zones the character has farmed — time looting, coins, loot worth, **gold per hour** once there are ten minutes behind it.
+  - `sources`: each creature and node looted — **the measured rate of every item** and the worth per loot.
+  - `gathering`: GatherMate2's nodes priced by zone. What a node gives is the player's own measured average where they have gathered it (so veins get their ore, stone and gems right), else one of the item that shares its name.
+
+Limits, all stated by the tool:
+
+- **Only places the player has farmed.** For anywhere else there is no measurement; the model is told to say so and to offer a research run for what other players report.
+- **Gold per hour is a little generous**: travel and long fights between loots are partly left out.
+- **Worth is listings, not sales**, and selling a stack at once pushes a price down.
+- **Gathering worth is "every known node once"**: a way to compare zones, not an hourly rate.
+- Corpses with nothing on them are never seen, so "per loot" means per corpse that had loot.
+- The loot calls (`GetLootSourceInfo`, the format of unit ids) are read from general knowledge of the client, not from Forever's source. Not yet run in the game.
+
 ## GatherMate2 — built 2026-11-10
 
 Denis: "we need gatherer db integration, GatherMate". GatherMate2 supports Forever (its manifest lists interface `16001`; its licence file is GPL 2). It records every herb, ore vein, fishing pool and chest the player gathers from, and its companion GatherMate2_Data can import a ready-made set.

@@ -104,6 +104,9 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                     f"{game.gathering.total} places of {len(game.gathering.nodes)} kinds",
                     "none yet: GatherMate2 notes each herb, vein and pool as you gather; log out after gathering",
                     optional=True)
+            looted = sum(s["looted"] for r in game.farming.records for s in r["sources"])
+            add("Looting measured by Wisp", looted > 0, f"{looted} corpses and nodes over {len({r['day'] for r in game.farming.records})} days",
+                "none yet: it starts with the first thing you loot after this update", optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
     return _key_checks(out, add, call_model, provider, model)

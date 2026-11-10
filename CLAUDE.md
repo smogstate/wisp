@@ -19,6 +19,7 @@ and architecture decision lives there. Update the wiki when decisions change.
 - The model never handles coordinates: locations carry refs, and `waypoint` accepts only refs. Keep that when adding tools.
 - The model never adds up quantities or prices either: `wisp/crafting.py` does the sums (`craft_plan`), and `shopping_list` takes the same plan. Recipes are read by the addon while the profession window is open and kept in `WispData`.
 - `wisp/gathering.py`: GatherMate2's nodes, zone rankings and routes (built in code, one ref for `waypoint`).
+- `wisp/farming.py`: no addon has drop rates for ordinary loot (Questie's are quest items only), so the addon records the player's own looting (`WispData.loot`) and everything about farming is computed from that.
 - `/research` is the only way the web is used: `answer(..., research=True)` raises the round budget, adds Anthropic's server-side web tools with hard `max_uses` caps, and offers `report`, whose sources are checked against the pages actually returned. Keep the caps hard and shown up front.
 - `wisp/graph.py` is the item graph: items tie recipes, quests, bosses, vendors, drops and prices together, and `item_links` returns one step around an item. New data that mentions items should join it.
 - Auction prices over time live in `wisp/market.py` (SQLite, `%APPDATA%\Wisp\market.sqlite`), fed by the per-day record the addon takes from Auctionator at logout. Rankings, trends and the estimate are computed there; the model only words them.

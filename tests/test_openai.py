@@ -159,7 +159,8 @@ def main():
         assert sent["reasoning_effort"] == "low", "K3 thinks at 'max' unless told otherwise"
         assert sent["messages"][0]["role"] == "system" and sent["messages"][1] == {"role": "user", "content": "where do I hand in the wolf quest?"}
         assert [t["function"]["name"] for t in sent["tools"]] == ["character", "quests", "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "price_history",
-            "market_scan", "market_query", "item_links", "gathering", "craft_plan",
+            "market_scan", "market_query", "item_links", "gathering", "farming",
+            "craft_plan",
             "shopping_list", "notes", "waypoint"]
         assert sent["tools"][2]["type"] == "function" and sent["tools"][2]["function"]["parameters"]["required"] == ["quest_ids"]
 
@@ -182,7 +183,7 @@ def main():
         assert events[-1] == {"type": "done", "reason": "end"} and "report" in [t["function"]["name"] for t in asked["tools"]]
         assert "This is a research run" in asked["messages"][0]["content"] and "not available with this provider" in asked["messages"][0]["content"]
         list(answer(chat, game, "ready?"))
-        assert "research run" not in REQUESTS[-1]["body"]["messages"][0]["content"], "and an ordinary question is ordinary again"
+        assert "This is a research run" not in REQUESTS[-1]["body"]["messages"][0]["content"], "and an ordinary question is ordinary again"
 
         # arguments that are not JSON: the call is answered with an error and the conversation goes on
         events = list(answer(chat, game, "send bad arguments"))

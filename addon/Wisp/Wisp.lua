@@ -460,6 +460,142 @@ local function gathering()
   return { total = total, cut = cut or nil, kinds = kinds }
 end
 
+---------------------------------------------------------------- loot ----
+-- What the character really loots, added up per day, zone and source (a kind of creature, a
+-- kind of node): how many were looted and what came out. Nothing in the game or its addons
+-- has drop rates for ordinary loot, so Wisp measures the player's own. Kept for 60 days.
+--   WispData.loot[character][day]["m" .. map] = { zone, secs, last, copper,
+--       src = { ["n" .. npc id | "o" .. object id] = { name, n, items = { ["i" .. item id] = count } } } }
+-- "secs" is time spent looting: the gaps between one loot and the next, when under five minutes.
+
+local lootSeen, lootSeenCount, moneyBefore, lastCast = {}, 0, nil, nil
+
+local function lootPlace()
+  local map = C_Map.GetBestMapForUnit("player")
+  if not map then return nil end
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.loot = WispData.loot or {}
+  local mine = WispData.loot[myKey()] or {}
+  WispData.loot[myKey()] = mine
+  local day = "d" .. math.floor(time() / 86400)
+  mine[day] = mine[day] or {}
+  local place = mine[day]["m" .. map] or { zone = mapName(map), secs = 0, copper = 0, src = {} }
+  mine[day]["m" .. map] = place
+  return place
+end
+
+local function lootSource(guid)   -- "Creature-0-1-2-3-<npc id>-<spawn>" -> "n<npc id>"
+  local kind, _, _, _, _, id = strsplit("-", guid)
+  id = tonumber(id)
+  if not id then return nil end
+  if kind == "GameObject" then return "o" .. id end
+  if kind == "Creature" or kind == "Vehicle" then return "n" .. id end
+  return nil
+end
+
+local function lootSourceName(guid, key)
+  if key:sub(1, 1) == "o" then   -- a node: the gathering spell was just cast at it by name
+    return lastCast and time() - lastCast.at <= 20 and lastCast.name or nil
+  end
+  for _, unit in ipairs({ "target", "mouseover" }) do
+    if UnitGUID and UnitGUID(unit) == guid then return (UnitName(unit)) end
+  end
+  return nil
+end
+
+local function lootOpened()
+  if not (GetNumLootItems and GetLootSlotLink and GetLootSourceInfo) then return end
+  local place = lootPlace()
+  if not place then return end
+  local now = time()
+  if place.last and now - place.last <= 300 then place.secs = place.secs + (now - place.last) end
+  place.last = now
+  moneyBefore = GetMoney()
+  if lootSeenCount > 6000 then lootSeen, lootSeenCount = {}, 0 end
+  for slot = 1, GetNumLootItems() do
+    local link = GetLootSlotLink(slot)
+    local item = link and tonumber(link:match("item:(%d+)"))
+    local sources = { GetLootSourceInfo(slot) }   -- guid, how many from it, guid, how many, ...
+    for i = 1, #sources, 2 do
+      local guid, count = sources[i], tonumber(sources[i + 1]) or 0
+      local key = type(guid) == "string" and lootSource(guid)
+      if key then
+        local source = place.src[key] or { n = 0, items = {} }
+        place.src[key] = source
+        source.name = source.name or lootSourceName(guid, key)
+        if not lootSeen[guid] then   -- a corpse or a node counts once, however often its window opens
+          lootSeen[guid], lootSeenCount = true, lootSeenCount + 1
+          source.n = source.n + 1
+        end
+        if item and count > 0 and not lootSeen[guid .. ":" .. slot .. ":" .. item] then
+          lootSeen[guid .. ":" .. slot .. ":" .. item], lootSeenCount = true, lootSeenCount + 1
+          source.items["i" .. item] = (source.items["i" .. item] or 0) + count
+          knownName(item)
+        end
+      end
+    end
+  end
+end
+
+local function lootClosed()
+  if not moneyBefore then return end
+  local gained = GetMoney() - moneyBefore   -- nothing else can pay out while the loot window is open
+  moneyBefore = nil
+  local place = gained > 0 and lootPlace()
+  if place then place.copper = place.copper + gained end
+end
+
+local function pruneLoot()
+  local mine = type(WispData) == "table" and type(WispData.loot) == "table" and WispData.loot[myKey()]
+  local oldest = math.floor(time() / 86400) - 60
+  for day in pairs(type(mine) == "table" and mine or {}) do
+    if (tonumber(tostring(day):sub(2)) or 0) < oldest then mine[day] = nil end
+  end
+end
+
+-- The loot record for the snapshot, flattened, with a name for every source where one can be found.
+local function lootRecord(wanted, DB)
+  local mine = type(WispData) == "table" and type(WispData.loot) == "table" and WispData.loot[myKey()]
+  local out = {}
+  for day, places in pairs(type(mine) == "table" and mine or {}) do
+    for mapKey, place in pairs(places) do
+      local sources = {}
+      for key, source in pairs(place.src or {}) do
+        local items = {}
+        for itemKey, count in pairs(source.items or {}) do
+          local id = tonumber(itemKey:sub(2))
+          if id then items[#items + 1] = { id, count, knownName(id) or "" }; wanted[id] = true end
+        end
+        table.sort(items, function(a, b) return a[1] < b[1] end)
+        local name = source.name
+        if not name and DB then   -- not seen by name while looting: Questie may know it
+          local ok, record = pcall(key:sub(1, 1) == "o" and DB.GetObject or DB.GetNPC, DB, tonumber(key:sub(2)))
+          name = ok and type(record) == "table" and record.name or nil
+        end
+        sources[#sources + 1] = { key = key, name = name, n = source.n, items = items }
+      end
+      table.sort(sources, function(a, b) return a.key < b.key end)
+      out[#out + 1] = { day = tonumber(day:sub(2)), map = tonumber(mapKey:sub(2)), zone = place.zone,
+                        secs = place.secs, copper = place.copper, sources = sources }
+    end
+  end
+  table.sort(out, function(a, b) if a.day ~= b.day then return a.day < b.day end return a.map < b.map end)
+  return out
+end
+
+-- What a vendor pays for each of these items, where Auctionator has noted it. For loot nobody lists.
+local function vendorPrices(ids)
+  local api = auctionator()
+  if not (api and api.GetVendorPriceByItemID) then return nil end
+  local out = {}
+  for id in pairs(ids) do
+    local ok, price = pcall(api.GetVendorPriceByItemID, "Wisp", id)
+    if ok and type(price) == "number" and price > 0 then out[#out + 1] = { id, price } end
+  end
+  table.sort(out, function(a, b) return a[1] < b[1] end)
+  return out
+end
+
 local function myMarket() return tostring(GetRealmName()) .. "-" .. tostring((UnitFactionGroup("player"))) end
 
 -- Auctionator's day-by-day record: for each day it scanned, each item's lowest and highest price
@@ -548,8 +684,12 @@ local function buildSnapshot()
       for _, need in ipairs(quest.items or {}) do wanted[need.id] = true end
     end
   end
+  local okL, looted = pcall(lootRecord, wanted, DB)
+  if not okL then looted = {} end
   local okS, sources = pcall(itemSources, wanted, DB, ZoneDB)   -- before every priced item joins the list
   if not okS then sources = {} end
+  local okV, vendor = pcall(vendorPrices, wanted)
+  if not okV then vendor = nil end
   local okA, market = pcall(prices, wanted)
   if not okA then market = nil end
   local okM, record = pcall(marketDays)
@@ -579,6 +719,8 @@ local function buildSnapshot()
     prices = market,
     market = record,
     gather = nodes,
+    loot = looted,
+    vendor = vendor,
     quests = log,
     sources = sources,
     completed = C_QuestLog.GetAllCompletedQuestIDs(),
@@ -724,7 +866,10 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("TRADE_SKILL_SHOW")
 frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
-frame:SetScript("OnEvent", function(_, event)
+frame:RegisterEvent("LOOT_OPENED")
+frame:RegisterEvent("LOOT_CLOSED")
+frame:RegisterEvent("UNIT_SPELLCAST_SENT")
+frame:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_LOGOUT" then
     local snapshot = save()
     if snapshot and snapshot.market then   -- these days are now handed over
@@ -734,10 +879,18 @@ frame:SetScript("OnEvent", function(_, event)
     end
   elseif event == "AUCTION_HOUSE_CLOSED" then
     pcall(learnNames)   -- a scan has just shown the game these items
+  elseif event == "LOOT_OPENED" then
+    pcall(lootOpened)
+  elseif event == "LOOT_CLOSED" then
+    pcall(lootClosed)
+  elseif event == "UNIT_SPELLCAST_SENT" then
+    local unit, target = ...
+    if unit == "player" and type(target) == "string" and target ~= "" then lastCast = { name = target, at = time() } end
   elseif event ~= "PLAYER_LOGIN" then
     pcall(captureRecipes)
   else
     C_Timer.After(20, function() pcall(learnNames) end)   -- once the login rush is over
+    pcall(pruneLoot)
     pcall(SetOverrideBindingClick, opener, false, PASTE_KEY, "WispInboxOpener")
   end
 end)

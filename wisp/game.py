@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .crafting import Crafting, coins
+from .farming import Farming
 from .gathering import Gathering
 from .graph import ItemGraph
 from .history import diff
@@ -74,6 +75,7 @@ class Game:
                          if isinstance(d, dict)]
         self.crafting = Crafting(self.snapshot)
         self.gathering = Gathering(self.snapshot)
+        self.farming = Farming(self.snapshot, self.crafting, self.gathering)
         self.routes: dict[str, dict] = {}  # ref -> a walk through several places, made by the gathering tool
         self.graph = ItemGraph(self)       # how items tie recipes, quests, bosses, vendors and drops together
         self.cards: list[dict] = []        # action cards made during the current answer
@@ -647,6 +649,68 @@ class Game:
                 "note": note + " Give the route's ref to the waypoint tool to show the whole route as one card: nodes close "
                                "together are one stop, and each stop follows the nearest one before it."}
 
+    def tool_farming(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        farm, view, days = self.farming, args.get("view"), args.get("days", 30)
+        if view not in ("spots", "sources", "gathering"):
+            return {"error": "view must be spots, sources or gathering"}
+        if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 60:
+            return {"error": "days must be a whole number from 1 to 60"}
+        priced = ("Worth is the lowest auction listing where there is one, else what a vendor pays: what the loot is listed "
+                  "for, not what it sold for, and selling a lot at once pushes a price down.")
+        zone = _clean(args.get("zone"), 60) if isinstance(args.get("zone"), str) else ""
+        table = None
+        if view == "gathering":
+            if not self.gathering.nodes:
+                return self.tool_gathering({})
+            maps = self.gathering.zone(zone) if zone else []
+            if zone and len(maps) != 1:
+                return {"error": f"no single zone with nodes on record is named like '{zone}'"}
+            ranked, unknown = farm.gathering_worth(maps[0] if maps else None)
+            out = {"view": "gathering", "worth": [{k: v for k, v in e.items() if k[0] != "_"} for e in ranked[:25]],
+                   "nodes_without_a_price": unknown[:30],
+                   "note": "The nodes GatherMate2 has on record, priced. worth_all is every known node of a zone gathered once: "
+                           "a way to compare zones, not an hourly rate, since it says nothing of respawns, competition or the "
+                           "walking. " + priced + " For the route through one, call gathering with what and zone."}
+            table = {"title": "What known nodes are worth", "sub": maps and self.gathering.zone_name(maps[0]) or "every zone on record",
+                     "columns": ["Node", "Zone", "Nodes", "Each", "All"],
+                     "rows": [[e["node"], e["zone"], e["known_nodes"], e["worth_each"], e["worth_all"]] for e in ranked[:15]],
+                     "notes": ["Every known node gathered once, at your auction prices. Not an hourly rate."]}
+        else:
+            if not farm.records:
+                return {"error": "No looting has been measured yet. From now on Wisp's addon notes what the character loots "
+                                 "(what, from what, where, and the time it took) and it arrives here at each logout. There are "
+                                 "no drop rates for ordinary loot anywhere else: for places the player has not farmed, say so; "
+                                 "a research run can look for what other players report."}
+            found = farm.zone(zone) if zone else []
+            if zone and len(found) != 1:
+                return {"error": f"no single zone the character has looted in is named like '{zone}'",
+                        "zones": sorted({r["zone"] for r in farm.records})}
+            if view == "spots":
+                spots = farm.spots(days)
+                out = {"view": "spots", "spots": [{k: v for k, v in e.items() if k[0] != "_"} for e in spots],
+                       "note": "Measured from the character's own looting in the last " + f"{days} days. time_looting is the time "
+                               "between one loot and the next when under five minutes, so travel and long fights are partly "
+                               "left out and per_hour is a little generous. " + priced}
+                table = {"title": "Your farming spots", "sub": f"last {days} days, measured from your own loot",
+                         "columns": ["Zone", "Time", "Looted", "Total", "Per hour"],
+                         "rows": [[e["zone"], e["time_looting"], e["looted"], e["total"], e["per_hour"]] for e in spots[:15]],
+                         "notes": ["Coins plus loot at your auction prices, or what a vendor pays. Listed worth, not sales."]}
+            else:
+                sources = farm.sources(days, found[0][0] if found else None)
+                out = {"view": "sources", "sources": [{k: v for k, v in e.items() if k[0] != "_"} for e in sources[:30]],
+                       "note": "Measured from the character's own looting: per_loot is how many of the item came per corpse or "
+                               "node looted. With few looted it is rough: say how many it rests on. " + priced}
+                table = {"title": "What you looted from what", "sub": (found[0][1] if found else "everywhere") + f", last {days} days",
+                         "columns": ["Source", "Zone", "Looted", "Per loot"],
+                         "rows": [[e["source"], e["zone"], e["looted"], e["worth_per_loot"]] for e in sources[:15]],
+                         "notes": ["Worth per corpse or node looted, at your auction prices."]}
+        if args.get("show") is True and table and table["rows"]:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "table": table})
+            out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
+        return out
+
     def tool_craft_plan(self, args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
@@ -894,6 +958,24 @@ TOOLS = [
         },
     },
     {
+        "name": "farming",
+        "description": "What farming is worth, measured. spots: the zones the character has farmed, with time spent "
+                       "looting, coins, loot worth and gold per hour. sources: each kind of creature and node the "
+                       "character looted, with the measured rate of every item and the worth per loot. gathering: "
+                       "the gathering nodes on record priced, by zone. The rates here are the player's own "
+                       "measurements and the only drop rates there are: never quote a drop rate from memory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "view": {"type": "string", "enum": ["spots", "sources", "gathering"]},
+                "zone": {"type": "string", "description": "Narrow to one zone."},
+                "days": {"type": "integer", "minimum": 1, "maximum": 60, "description": "How far back. Default 30."},
+                "show": {"type": "boolean", "description": "true to also show the player the result as a table card."},
+            },
+            "required": ["view"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "craft_plan",
         "description": "The arithmetic of a crafting plan, done in code: for each recipe and how many times to craft "
                        "it, the total materials, what the plan's own crafts supply (a bolt made in one step and used "
@@ -1018,6 +1100,12 @@ that ask for it, the bosses, creatures and objects that drop it, who sells it, a
 spans several of these, follow the links one item at a time rather than guessing the chain. When a crafting plan has \
 materials with no auction price, look them up there: a vendor may sell them, and the plan's card can be followed by a \
 waypoint to that vendor.
+
+What to farm for gold comes from the farming tool: what the character's own looting has measured (gold per hour by \
+zone, how often each item came from each creature or node) and what the known gathering nodes are worth. Nobody has \
+drop rates for ordinary loot, so the player's measurements are the only ones: for a place they have not farmed, say \
+that there is no measurement, and offer a /research run to see what other players report. When you answer from it, \
+call it with show set to true and keep your text to what it means.
 
 Where to gather comes only from the gathering tool: the places the player's GatherMate2 addon has on record. Item \
 links name the node an item is gathered from; from there, ask gathering for its zones and then for a route.

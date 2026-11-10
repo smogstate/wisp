@@ -312,7 +312,7 @@ def test_crafting(wow: Path, tmp: Path):
     assert [f["item"] for f in silk["found"]] == ["Silk Cloth", "Azure Silk Hood", "Bolt of Silk Cloth"], "closest names, shortest first"
     assert silk["found"][0]["in_bags"] == 32 and silk["found"][0]["bags_worth"] == "1g 44s"
     assert old["found"][0]["seen"] == "over three weeks ago" and none == {"asked": "nothing like this", "found": [], "note": "no price under that name"}
-    assert asked["items_with_a_price"] == 6 and "error" in run_tool(game, "auction_prices", {"items": []})
+    assert asked["items_with_a_price"] == 8 and "error" in run_tool(game, "auction_prices", {"items": []})
     assert not Game.load(wow).crafting.find("Bolt of Linen Cloth"), "an item the game had not loaded has no name yet"
     learned = Game.load(make_wow_dir(tmp / "c", flags="visitauction"))
     assert run_tool(learned, "auction_prices", {"items": ["Bolt of Linen Cloth"]})["prices"][0]["found"][0]["lowest_price"] == "3s", \
@@ -321,9 +321,9 @@ def test_crafting(wow: Path, tmp: Path):
     # prices over time: every scan day Auctionator hands over is kept in one SQLite file
     market = Market(tmp / "market.sqlite")
     assert "no price history yet" in run_tool(game, "price_history", {"item": "Silk Cloth"})["error"]
-    assert market.ingest(game.snapshot) == 7 and market.ingest(game.snapshot) == 0, "the same logout is filed once"
+    assert market.ingest(game.snapshot) == 9 and market.ingest(game.snapshot) == 0, "the same logout is filed once"
     game.market = market
-    assert market.size(game.snapshot)["items"] == 5 and market.size(game.snapshot)["days_covered"] == 6
+    assert market.size(game.snapshot)["items"] == 7 and market.size(game.snapshot)["days_covered"] == 6
     silk = run_tool(game, "price_history", {"item": "silk cloth"})
     assert [(p["low"], p.get("high"), p["listed"]) for p in silk["series"]] == [("3s 80c", "4s", 200), ("4s 30c", None, 80), ("4s 50c", "4s 70c", 120)]
     assert (silk["now"], silk["usual_price"], silk["now_against_usual"], silk["usually_listed"], silk["in_bags"]) == ("4s 50c", "4s 30c", "+5%", 120, 32)
@@ -382,7 +382,7 @@ def test_crafting(wow: Path, tmp: Path):
     asked = run_tool(far, "market_query", {"sql": "SELECT name, coins(low) AS now, listed FROM p WHERE days_ago = 0 AND low >= 100 ORDER BY low DESC"})
     assert asked["columns"] == ["name", "now", "listed"] and asked["rows"] == [["Rising Gem", "34s 50c", 5], ["Weekly Herb", "9s", 300], ["Steady Ore", "7s", 50]]
     assert run_tool(far, "market_query", {"sql": "SELECT count(*), min(date), max(days_ago) FROM p"})["rows"] == [[120, "2024-09-05", 29]]
-    assert run_tool(far, "market_query", {"sql": "SELECT count(*) FROM price"})["rows"] == [[127]], "the raw table can be read too"
+    assert run_tool(far, "market_query", {"sql": "SELECT count(*) FROM price"})["rows"] == [[129]], "the raw table can be read too"
     for refused in ("DELETE FROM price", "UPDATE item SET name = 'x'", "DROP TABLE price", "ATTACH DATABASE 'x.db' AS x",
                     "PRAGMA journal_mode = DELETE", "INSERT INTO item VALUES (9, 'x')", "SELECT 1; DELETE FROM price", "not sql", ""):
         assert "error" in run_tool(far, "market_query", {"sql": refused}), refused
@@ -404,7 +404,7 @@ def test_crafting(wow: Path, tmp: Path):
     assert len(far.cards) == before + 2 and "wisp" not in far.cards[-1], "nothing to paste: these cards only show"
     for bad in ({"find": "x"}, {"find": "rising", "days": 1}, {"find": "rising", "limit": 0}, {"find": "rising", "among": "x"}):
         assert "error" in run_tool(far, "market_scan", bad), bad
-    assert market.size(game.snapshot)["rows"] == 7, "each realm and faction is its own market"
+    assert market.size(game.snapshot)["rows"] == 9, "each realm and faction is its own market"
 
     # the addon checks a pasted list as strictly as a waypoint
     def paste(cmd, flags=""):
@@ -501,6 +501,59 @@ def test_gathering(wow: Path, tmp: Path):
     assert "error" in gather(what="Mithril") and "error" in gather(zone="Nowhere") and "zones_with_it" in gather(what="Silverleaf", zone="Westfall")
     without = Game.load(make_wow_dir(tmp, flags="nogathermate"))
     assert without.snapshot["addons"]["gathermate"] is False and "not installed" in run_tool(without, "gathering", {})["error"]
+
+
+def test_farming(wow: Path, tmp: Path):
+    """What the character really looted, turned into worth per loot, per hour and per gathering node."""
+    game = Game.load(wow)
+    day = game.snapshot["loot"][0]
+    assert (day["zone"], day["secs"], day["copper"]) == ("Elwynn Forest", 200, 155), "a 13-minute break is not looting time"
+    by_key = {s["key"]: s for s in day["sources"]}
+    assert by_key["n118"]["n"] == 2 and by_key["n118"]["name"] == "Prowler" and by_key["n118"]["items"] == [
+        [750, 1, "Tough Wolf Meat"], [2589, 2, "Linen Cloth"]], "a corpse opened twice counts once"
+    assert by_key["n100"] == {"key": "n100", "name": "Defias Weaver 100", "n": 2, "items": [[4306, 3, "Silk Cloth"]]}, \
+        "three looted at once are told apart; a name not seen while looting comes from Questie"
+    assert by_key["o1731"]["name"] == "Copper Vein" and by_key["o1731"]["items"] == [[2770, 5, "Copper Ore"], [2835, 1, "Rough Stone"]]
+    assert game.snapshot["vendor"] == [[750, 6], [2835, 2], [4306, 100]]
+
+    def farm(**args):
+        out = run_tool(game, "farming", args)
+        out.pop("note", None)
+        return out
+    spot = farm(view="spots")["spots"][0]
+    assert (spot["coins"], spot["loot_worth"], spot["total"], spot["looted"]) == ("1s 55c", "19s 98c", "21s 53c", 6)
+    assert spot["per_hour"] == "too little time to say" and spot["main_loot"][0] == "3 × Silk Cloth"
+    weaver, vein, wolf = farm(view="sources")["sources"]
+    assert (weaver["source"], weaver["worth_per_loot"], weaver["drops"]) == (
+        "Defias Weaver 100", "6s 75c", [{"item": "Silk Cloth", "per_loot": 1.5, "worth_each": "4s 50c"}]), "the auction price, not the vendor's"
+    assert vein["kind"] == "node" and vein["drops"][0] == {"item": "Copper Ore", "per_loot": 2.5, "worth_each": "80c"}
+    assert wolf["drops"][1] == {"item": "Tough Wolf Meat", "per_loot": 0.5, "worth_each": "6c"}, "nobody lists it: what a vendor pays"
+
+    worth = farm(view="gathering", show=True)
+    assert worth["worth"][0] == {"node": "Copper Vein", "profession": "Mining", "zone": "Elwynn Forest", "known_nodes": 5,
+                                 "worth_each": "2s 1c", "worth_all": "10s 5c", "basis": "measured over 2 of your gathers"}
+    assert worth["worth"][1]["basis"].startswith("assumed one per node") and worth["nodes_without_a_price"] == ["Silverleaf"]
+    assert game.cards[-1]["table"]["rows"][0] == ["Copper Vein", "Elwynn Forest", 5, "2s 1c", "10s 5c"]
+    assert [w["zone"] for w in farm(view="gathering", zone="Westfall")["worth"]] == ["Westfall"]
+
+    # with enough time behind it, a per-hour figure; zones ranked by it; old days fall out of the period
+    snapshot = dict(game.snapshot, loot=[
+        {"day": day["day"], "map": 1429, "zone": "Elwynn Forest", "secs": 3600, "copper": 5000,
+         "sources": [{"key": "n100", "name": "Defias Weaver", "n": 100, "items": [[4306, 150, "Silk Cloth"]]}]},
+        {"day": day["day"] - 1, "map": 1436, "zone": "Westfall", "secs": 1800, "copper": 0,
+         "sources": [{"key": "n7", "name": "Harvest Golem", "n": 40, "items": [[2589, 400, "Linen Cloth"]]}]},
+        {"day": day["day"] - 40, "map": 1436, "zone": "Westfall", "secs": 9999, "copper": 999999, "sources": []}])
+    long = Game(snapshot)
+    spots = run_tool(long, "farming", {"view": "spots", "show": True})["spots"]
+    assert [(s["zone"], s["per_hour"], s["time_looting"]) for s in spots] == [("Westfall", "9g 60s", "0h 30m"), ("Elwynn Forest", "7g 25s", "1h 0m")]
+    assert long.cards[-1]["table"]["rows"][0] == ["Westfall", "0h 30m", 40, "4g 80s", "9g 60s"]
+    assert run_tool(long, "farming", {"view": "spots", "days": 60})["spots"][0]["days_farmed"] == 2
+    assert [s["source"] for s in run_tool(long, "farming", {"view": "sources", "zone": "westfall"})["sources"]] == ["Harvest Golem"]
+    for bad in ({"view": "x"}, {"view": "spots", "days": 0}, {"view": "spots", "zone": "Nowhere"}):
+        assert "error" in run_tool(long, "farming", bad), bad
+    quiet = Game.load(make_wow_dir(tmp, flags="noloot"))
+    assert "No looting has been measured yet" in run_tool(quiet, "farming", {"view": "spots"})["error"]
+    assert run_tool(quiet, "farming", {"view": "gathering"})["worth"][0]["node"] == "Peacebloom", "without loot, a herb is priced by its own name"
 
 
 def test_inbox_is_strict():
@@ -785,6 +838,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as g:
             test_history(wow, Path(g))
         test_inbox_is_strict()
+        with tempfile.TemporaryDirectory() as k:
+            test_farming(wow, Path(k))
         with tempfile.TemporaryDirectory() as j:
             test_gathering(wow, Path(j))
         with tempfile.TemporaryDirectory() as i:

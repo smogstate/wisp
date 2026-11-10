@@ -13,7 +13,13 @@ local here = (arg[0] or "tests/wow_stub.lua"):match("^(.*)[/\\][^/\\]*$") or "."
 local LOG, FRAMES, TIMERS, WAYS, LISTS = {}, {}, {}, {}, {}
 local out = print
 print = function(s) LOG[#LOG + 1] = (s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
-time = os.time
+local clock = os.time()   -- the game's clock, which the looting below moves forward
+time = function() return clock end
+function strsplit(sep, text)
+  local parts = {}
+  for part in (text .. sep):gmatch("(.-)%" .. sep) do parts[#parts + 1] = part end
+  return (table.unpack or unpack)(parts)
+end
 
 local function widget()
   return setmetatable({ scripts = {}, text = "" }, { __index = function(_, k)
@@ -166,7 +172,8 @@ function UnitXPMax() return 10000 end
 function GetProfessions() return 4, nil, nil, 7 end   -- with empty slots, as the game returns them
 function GetProfessionInfo(i) if i == 4 then return "Tailoring", nil, 150, 225 end return "Fishing", nil, 31, 75 end
 function UnitFactionGroup() return "Alliance", "Альянс" end
-function GetMoney() return 153422 end
+local purse = 153422   -- at logout: the looting below starts 1s 55c short of it
+function GetMoney() return purse end
 function GetSubZoneText() return "Златоземье" end
 local maps = { [1429] = "Elwynn Forest", [1453] = "Stormwind City", [1436] = "Westfall", [1455] = "Ironforge" }
 C_Map = {
@@ -330,8 +337,10 @@ C_Container = {
 if not flags:find("noauctionator") then
   local function caller(id) if type(id) ~= "string" or id == "" then error("Invalid callerID. Use the name of your add-on.") end end
   -- copper, days since seen. 2589 is nothing this character carries or crafts; 31 was last seen too long ago to say
-  local seen = { [4306] = { 450, 0 }, [4305] = { 2100, 3 }, [7048] = { 9000, 1 }, [2589] = { 120, 2 }, [2996] = { 300, 0 }, [31] = { 77 } }
-  itemNames[2589], itemNames[31] = "Linen Cloth", "Old Thing"
+  local seen = { [4306] = { 450, 0 }, [4305] = { 2100, 3 }, [7048] = { 9000, 1 }, [2589] = { 120, 2 }, [2996] = { 300, 0 }, [31] = { 77 },
+                 [2770] = { 80, 0 }, [2447] = { 35, 0 } }
+  itemNames[2589], itemNames[31], itemNames[2447] = "Linen Cloth", "Old Thing", "Peacebloom"
+  local vendorPays = { [2835] = 2, [750] = 6, [4306] = 100 }   -- what a vendor gives, for loot nobody lists
   -- its own price table, keyed by text: item ids, and other keys for pets and item-level variants
   local db = { ["g:1234:20"] = { m = 5, h = {} }, ["p:77"] = { m = 9, h = {} } }
   for id, row in pairs(seen) do db[tostring(id)] = { m = row[1], h = {}, l = {}, a = {} } end
@@ -359,6 +368,7 @@ if not flags:find("noauctionator") then
   Auctionator = { Constants = { SCAN_DAY_0 = day0 }, Database = { db = db }, API = { v1 = {
     GetAuctionPriceByItemID = function(id, item) caller(id); return seen[item] and seen[item][1] end,
     GetAuctionAgeByItemID = function(id, item) caller(id); return seen[item] and seen[item][2] end,
+    GetVendorPriceByItemID = function(id, item) caller(id); return vendorPays[item] end,
     ConvertToSearchString = function(id, term)
       caller(id)
       return (term.isExact and '"' .. term.searchString .. '"' or term.searchString) .. ";" .. tostring(term.quantity)
@@ -392,6 +402,37 @@ if not flags:find("nogathermate") then
     DecodeLoc = function(_, id) return math.floor(id / 1000000) / 10000, math.floor(id % 1000000 / 100) / 10000 end,
   }
 end
+-- Looting. Each call is one loot window: its slots as { item id or nil for coins, { guid, count, ... } }.
+itemNames[750], itemNames[2770], itemNames[2835] = "Tough Wolf Meat", "Copper Ore", "Rough Stone"
+local lootSlots, targetGuid = {}, nil
+function GetNumLootItems() return #lootSlots end
+function GetLootSlotLink(slot) return lootSlots[slot][1] and ("|cffffffff|Hitem:" .. lootSlots[slot][1] .. "::::|h[x]|h|r") or nil end
+function GetLootSourceInfo(slot) return (table.unpack or unpack)(lootSlots[slot][2]) end
+function UnitGUID(unit) return unit == "target" and targetGuid or nil end
+local function creature(npc, spawn) return "Creature-0-1-2-3-" .. npc .. "-" .. spawn end
+local function lootWindow(boot, after, coins, slots, target, targetName)
+  clock = clock + after
+  lootSlots, targetGuid = slots, target
+  local real = UnitName
+  if targetName then UnitName = function(unit) if unit == "target" then return targetName end return real(unit) end end
+  boot.scripts.OnEvent(boot, "LOOT_OPENED", true)
+  UnitName = real
+  purse = purse + coins
+  boot.scripts.OnEvent(boot, "LOOT_CLOSED")
+end
+local function goLooting(boot)
+  purse = purse - 155
+  local a, b, c, d = creature(118, "A"), creature(118, "B"), creature(100, "C"), creature(100, "D")
+  local vein1, vein2 = "GameObject-0-1-2-3-1731-V1", "GameObject-0-1-2-3-1731-V2"
+  lootWindow(boot, 0, 35, { { 750, { a, 1 } }, { nil, { a, 0 } } }, a, "Prowler")
+  -- three corpses looted at once: cloth from one wolf, silk from two weavers
+  lootWindow(boot, 60, 120, { { 2589, { b, 2 } }, { 4306, { c, 1, d, 2 } } })
+  lootWindow(boot, 60, 0, { { 2589, { b, 2 } } })   -- the same corpse opened again: nothing new
+  boot.scripts.OnEvent(boot, "UNIT_SPELLCAST_SENT", "player", "Copper Vein", "cast-1", 2575)
+  lootWindow(boot, 80, 0, { { 2770, { vein1, 2 } }, { 2835, { vein1, 1 } } })
+  boot.scripts.OnEvent(boot, "UNIT_SPELLCAST_SENT", "player", "Copper Vein", "cast-2", 2575)
+  lootWindow(boot, 800, 0, { { 2770, { vein2, 3 } } })   -- after a long break: that break is not looting time
+end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end
@@ -406,6 +447,7 @@ if mode == "snapshot" then
     boot.scripts.OnEvent(boot, "AUCTION_HOUSE_CLOSED")
     runTimers()
   end
+  if not flags:find("noloot") then goLooting(boot) end
   if not flags:find("noprofession") then
     boot.scripts.OnEvent(boot, "TRADE_SKILL_SHOW")
     boot.scripts.OnEvent(boot, "TRADE_SKILL_LIST_UPDATE")   -- it comes again and again: said in chat once
