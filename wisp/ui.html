@@ -284,6 +284,10 @@
   <div class="hint" id="opacity-hint"></div>
   <label class="check"><input id="plain" type="checkbox"> Use an ordinary window, with a title bar and no transparency</label>
   <div class="hint">Takes effect the next time Wisp starts.</div>
+  <label for="language">Language / Язык</label>
+  <div class="row"><select id="language" aria-label="Language">
+    <option value="auto">Same as the game / Как в игре</option><option value="ru">Русский</option><option value="en">English</option>
+  </select></div>
   <label class="check"><input id="auto-update" type="checkbox"> Keep Wisp up to date by itself</label>
   <div class="hint" id="version"></div>
   <div class="problem" id="settings-problem" role="alert"></div>
@@ -454,6 +458,8 @@ async function refresh() {
   document.body.classList.toggle("fade", fade);
   applyLook(s.theme, s.opacity);
   document.getElementById("quit").hidden = !s.window.own;
+  lang = s.lang || "en";
+  document.documentElement.lang = lang;
   spend = s.spend; showMeter();
   // which Wisp this is: the commit it was built from, always in sight
   const up = s.update || {};
@@ -503,31 +509,31 @@ function planBlock(plan) {
   const make = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
   const block = make("div", "plan");
   block.append(make("div", "plan-title", plan.title), make("div", "plan-sub", plan.sub));
-  block.append(make("h3", "", "Craft, in this order"));
+  block.append(make("h3", "", T("Craft, in this order")));
   const steps = make("ol", "steps");
   for (const step of plan.steps) {
     const li = make("li"), head = make("span");
     const dot = make("span", "dot " + (step.colour || ""));
-    dot.title = step.colour ? step.colour + " recipe" : "";
+    dot.title = step.colour ? T(step.colour) + T(" recipe") : "";
     head.append(dot, step.text);
     li.append(head);
-    if (step.each) li.append(make("span", "detail", (step.colour ? step.colour + " · " : "") + "each: " + step.each));
+    if (step.each) li.append(make("span", "detail", (step.colour ? T(step.colour) + " · " : "") + T("each: ") + step.each));
     if (step.warning) li.append(make("span", "warning", step.warning));
     steps.append(li);
   }
   block.append(steps);
   if (plan.materials.length) {
-    block.append(make("h3", "", "Materials"));
+    block.append(make("h3", "", T("Materials")));
     const table = make("table"), head = make("tr");
     const banked = plan.materials.some(row => row.bank);   // a column for the bank only when it supplies something
-    for (const name of ["Item", "Need", "In bags", ...(banked ? ["Bank"] : []), "Buy", "Cost"]) head.append(make("th", "", name));
+    for (const name of ["Item", "Need", "In bags", ...(banked ? ["Bank"] : []), "Buy", "Cost"]) head.append(make("th", "", T(name)));
     table.append(head);
     for (const row of plan.materials) {
       const tr = make("tr");
       tr.append(make("td", "", row.item), make("td", "", row.need), make("td", row.bags ? "" : "none", row.bags || "–"),
                 ...(banked ? [make("td", row.bank ? "" : "none", row.bank || "–")] : []),
                 make("td", row.buy ? "buy" : "none", row.buy || "–"),
-                make("td", row.cost ? "" : "none", row.cost || (row.unpriced ? "no price" : "–")));
+                make("td", row.cost ? "" : "none", row.cost || (row.unpriced ? T("no price") : "–")));
       table.append(tr);
     }
     block.append(table);
@@ -537,11 +543,31 @@ function planBlock(plan) {
   return block;
 }
 
+// The language of what the window itself writes. English text is the key; a text with no entry stays English.
+let lang = "en";
+const RU = {
+  "For the game": "Для игры", "Crafting plan": "План изготовления", "Price history": "История цены", "Market": "Рынок",
+  "Research": "Исследование", "Sources": "Источники", "Route": "Маршрут",
+  "Craft, in this order": "Изготовить по порядку", "Materials": "Материалы", "Item": "Предмет", "Need": "Нужно", "In bags": "В сумках",
+  "Bank": "В банке", "Buy": "Купить", "Cost": "Цена", "no price": "нет цены", "each: ": "на одно: ",
+  "orange": "оранжевый", "yellow": "жёлтый", "green": "зелёный", "grey": "серый", " recipe": " рецепт",
+  "usual": "обычно", "next week": "через неделю", "Every scan day": "Все дни сканирования",
+  "Day": "День", "Lowest": "Минимум", "Highest": "Максимум", "Listed": "Выставлено", " · up to ": " · до ", " listed": " выставлено",
+  ": lowest listed price per scan day. ": ": минимальная цена по дням сканирования. ",
+  "Next steps": "Что делать дальше",
+  "Copy, then in the game: Ctrl+V twice": "«Копировать», затем в игре: дважды Ctrl+V",
+  "Copy for the game": "Копировать для игры", "Copied": "Скопировано", "Copy failed": "Не удалось скопировать",
+  "Copied. Now in the game: Ctrl+V twice": "Скопировано. Теперь в игре: дважды Ctrl+V",
+  "Could not reach the clipboard": "Не удалось обратиться к буферу обмена",
+};
+const T = text => (lang === "ru" && RU[text]) || text;
+
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const svgEl = (tag, attrs, text) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; return e; };
 const coins = c => { c = Math.round(c); const g = Math.floor(c / 10000), s = Math.floor(c % 10000 / 100), r = c % 100;
-  return [g ? g + "g" : "", s ? s + "s" : "", r && !g ? r + "c" : ""].filter(Boolean).join(" ") || "0c"; };
-const dayDate = day => new Date(day * 86400000).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  const [G, S, C] = lang === "ru" ? ["з", "с", "м"] : ["g", "s", "c"];
+  return [g ? g + G : "", s ? s + S : "", r && !g ? r + C : ""].filter(Boolean).join(" ") || "0" + C; };
+const dayDate = day => new Date(day * 86400000).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
 // A ranking as a table: the first column is the name, the rest are figures.
 function tableBlock(t) {
@@ -565,7 +591,7 @@ function chartBlock(c) {
   const stats = el("div", "stats");
   for (const [label, value] of c.stats) { const tile = el("div"); tile.append(el("span", "", label), el("b", "", value)); stats.append(tile); }
   const wrap = el("div", "chart"), tip = el("div", "tip");
-  const svg = svgEl("svg", { role: "img", tabindex: "0", "aria-label": `${c.title}: lowest listed price per scan day. ${c.stats.map(s => s.join(" ")).join(", ")}.` });
+  const svg = svgEl("svg", { role: "img", tabindex: "0", "aria-label": c.title + T(": lowest listed price per scan day. ") + c.stats.map(s => s.join(" ")).join(", ") + "." });
   tip.hidden = true;
   wrap.append(svg, tip);
   const pts = c.points, est = c.estimate, last = pts[pts.length - 1];
@@ -588,11 +614,11 @@ function chartBlock(c) {
     }
     if (est) {
       svg.append(svgEl("rect", { class: "range", x: x(last[0]), width: x(day1) - x(last[0]), y: yy(est.high), height: Math.max(2, yy(est.low) - yy(est.high)), rx: 2 }),
-                 svgEl("text", { x: x(day1), y: Math.max(10, yy(est.high) - 5), "text-anchor": "end" }, "next week"));
+                 svgEl("text", { x: x(day1), y: Math.max(10, yy(est.high) - 5), "text-anchor": "end" }, T("next week")));
     }
     svg.append(svgEl("line", { class: "usual", x1: L, x2: x(last[0]), y1: yy(c.usual), y2: yy(c.usual) }),
                // the label goes on the side of the line the first prices are not on
-               svgEl("text", { x: L + 4, y: yy(c.usual) + (pts.slice(0, 5).reduce((sum, p) => sum + p[1], 0) / Math.min(5, pts.length) > c.usual ? 12 : -5) }, c.line || "usual"),
+               svgEl("text", { x: L + 4, y: yy(c.usual) + (pts.slice(0, 5).reduce((sum, p) => sum + p[1], 0) / Math.min(5, pts.length) > c.usual ? 12 : -5) }, c.line || T("usual")),
                svgEl("path", { class: "price", d: pts.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + " " + yy(p[1]).toFixed(1)).join("") }),
                svgEl("text", { x: L, y: H - 6 }, dayDate(day0)));
     if (pts.length > 1) svg.append(svgEl("text", { x: x(last[0]), y: H - 6, "text-anchor": "end" }, dayDate(last[0])));
@@ -602,7 +628,7 @@ function chartBlock(c) {
     tip.hidden = active < 0;
     if (active >= 0) {
       tip.textContent = "";
-      tip.append(el("b", "", coins(p[1])), el("span", "", dayDate(p[0]) + (p[2] > p[1] ? " · up to " + coins(p[2]) : "") + (p[3] != null ? " · " + p[3] + " listed" : "")));
+      tip.append(el("b", "", coins(p[1])), el("span", "", dayDate(p[0]) + (p[2] > p[1] ? T(" · up to ") + coins(p[2]) : "") + (p[3] != null ? " · " + p[3] + T(" listed") : "")));
       tip.style.left = Math.max(0, Math.min(W - tip.offsetWidth, x(p[0]) - tip.offsetWidth / 2)) + "px";
     }
     svg._x = x;
@@ -625,8 +651,8 @@ function chartBlock(c) {
   });
   new ResizeObserver(draw).observe(wrap);
   const details = el("details"), table = el("table"), head = el("tr");
-  details.append(el("summary", "", "Every scan day"));
-  for (const name of ["Day", "Lowest", "Highest", "Listed"]) head.append(el("th", "", name));
+  details.append(el("summary", "", T("Every scan day")));
+  for (const name of ["Day", "Lowest", "Highest", "Listed"]) head.append(el("th", "", T(name)));
   table.append(head);
   for (const p of pts.slice().reverse()) {
     const tr = el("tr");
@@ -684,12 +710,12 @@ function reportBlock(r) {
     block.append(points);
   }
   if (r.next_steps.length) {
-    block.append(el("h3", "", "Next steps"));
+    block.append(el("h3", "", T("Next steps")));
     const todo = el("ol", "todo");
     for (const step of r.next_steps) todo.append(el("li", "", step));
     block.append(todo);
   }
-  if (r.sources.length) block.append(el("h3", "", "Sources"), sourcesList(r.sources));
+  if (r.sources.length) block.append(el("h3", "", T("Sources")), sourcesList(r.sources));
   return block;
 }
 
@@ -697,8 +723,8 @@ function showCard(card, into = log) {
   if (into === log && card.wisp) lastCard = card;
   const el = add("section", "card", undefined, into);
   const h = document.createElement("h2");
-  h.textContent = card.heading ? card.heading : card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market"
-    : card.report ? "Research" : card.sources ? "Sources" : card.route ? "Route" : "For the game";
+  h.textContent = card.heading ? card.heading : T(card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market"
+    : card.report ? "Research" : card.sources ? "Sources" : card.route ? "Route" : "For the game");
   const list = document.createElement("ul");
   for (const line of card.lines) {
     const li = document.createElement("li");
@@ -711,15 +737,15 @@ function showCard(card, into = log) {
   }
   const foot = document.createElement("footer");
   const hint = document.createElement("span");
-  hint.textContent = card.hint || "Copy, then in the game: Ctrl+V twice";
+  hint.textContent = card.hint || T("Copy, then in the game: Ctrl+V twice");
   const button = document.createElement("button");
   button.type = "button"; button.className = "primary icon";
-  setIcon(button, "copy", "Copy for the game");
+  setIcon(button, "copy", T("Copy for the game"));
   button.onclick = async () => {
     const ok = await copy(card.wisp);
     button.dataset.state = ok ? "copied" : "failed";
-    setIcon(button, ok ? "check" : "x", ok ? "Copied" : "Copy failed");
-    hint.textContent = ok ? "Copied. Now in the game: Ctrl+V twice" : "Could not reach the clipboard";
+    setIcon(button, ok ? "check" : "x", T(ok ? "Copied" : "Copy failed"));
+    hint.textContent = T(ok ? "Copied. Now in the game: Ctrl+V twice" : "Could not reach the clipboard");
   };
   foot.append(hint, button);
   el.append(h, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
@@ -1003,6 +1029,7 @@ function showSettings(s) {
     : "Transparency needs Wisp's own window.";
   $("plain").checked = s.plain_window;
   $("auto-update").checked = s.auto_update;
+  $("language").value = s.language || "auto";
   $("cap").value = s.spend.cap;
   $("cap-hint").textContent = "Spent today: " + dollars(s.spend.today) + ". Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. "
     + "It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.";
@@ -1072,7 +1099,7 @@ $("gear").onclick = openSettings;
 $("provider").onchange = () => showModels($("provider").value);
 $("close").onclick = () => dialog.close();
 const lookNow = () => ({ theme: $("theme").value, opacity: parseInt($("opacity").value, 10), plain_window: $("plain").checked,
-                         auto_update: $("auto-update").checked,
+                         auto_update: $("auto-update").checked, language: $("language").value,
                          ...(Number.isFinite(parseFloat($("cap").value)) ? { daily_cap: parseFloat($("cap").value) } : {}) });
 $("theme").onchange = $("opacity").oninput = () => applyLook($("theme").value, parseInt($("opacity").value, 10));   // see it before saving
 $("save").onclick = async () => {

@@ -30,7 +30,7 @@ from .game import Game, find_saved_file
 from .history import History, ago_words, diff, recap
 from .assets import Assets
 from .market import Market
-from . import update
+from . import i18n, update
 from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
 from .sessions import Sessions, record
 
@@ -191,6 +191,8 @@ class App:
                       "opacity": saved.get("opacity") if isinstance(saved.get("opacity"), int) else 85,
                       "plain_window": bool(saved.get("plain_window")),
                       "auto_update": saved.get("auto_update") is not False,
+                      # auto: the language of the game client, as the addon reported it; else Windows' own
+                      "language": saved.get("language") if saved.get("language") in i18n.LANGUAGES else "auto",
                       # dollars a day across every conversation; 0 is "no limit", which the player must choose
                       "daily_cap": saved["daily_cap"] if isinstance(saved.get("daily_cap"), (int, float))
                                    and not isinstance(saved.get("daily_cap"), bool) and 0 <= saved["daily_cap"] <= 1000 else DAILY_CAP}
@@ -309,6 +311,13 @@ class App:
     def spend(self) -> dict:
         return {"today": round(self.spent_today(), 4), "cap": self.prefs["daily_cap"]}
 
+    def language(self, snapshot: dict | None = None) -> str:
+        """The language Wisp writes in: the one chosen, else the game client's, else this PC's."""
+        if self.prefs["language"] in i18n.LANGUAGES:
+            return self.prefs["language"]
+        game_locale = ((snapshot or {}).get("client") or {}).get("locale")
+        return i18n.language_of(game_locale) if game_locale else local.system_language()
+
     def ensure_addon(self):
         """One package: Wisp carries its addon and keeps the game's copy current,
         without being asked. Only ever writes its own Interface\\AddOns\\Wisp folder."""
@@ -351,6 +360,10 @@ class App:
     def load_game(self) -> Game:
         """The current snapshot, filed into the history the first time it is seen."""
         game = Game.load(self.wow_dir)
+        wanted = self.language(game.snapshot)
+        if wanted != i18n.LANG:
+            i18n.set_language(wanted)
+            game = Game.load(self.wow_dir)   # the names it gives to places are written in that language too
         if game.snapshot:
             self.history.ingest(game.snapshot)
             game.history = self.history
@@ -402,6 +415,7 @@ class App:
             "usage": dict(self.chat.usage) if self.chat is not None else None,
             "update": dict(self.update),
             "spend": self.spend(),
+            "lang": i18n.LANG,
         }
 
     def settings(self) -> dict:
@@ -420,6 +434,7 @@ class App:
             "opacity": self.prefs["opacity"],
             "plain_window": self.prefs["plain_window"],
             "auto_update": self.prefs["auto_update"],
+            "language": self.prefs["language"],
             "update": dict(self.update),
             "spend": self.spend(),
             "glass": self.frameless,   # either way of being see-through: the slider applies
@@ -443,6 +458,8 @@ class App:
             self.prefs["plain_window"] = body["plain_window"]
         if isinstance(body.get("auto_update"), bool):
             self.prefs["auto_update"] = body["auto_update"]
+        if body.get("language") in ("auto", *i18n.LANGUAGES):
+            self.prefs["language"] = body["language"]
         cap = body.get("daily_cap")
         if isinstance(cap, (int, float)) and not isinstance(cap, bool) and 0 <= cap <= 1000:
             self.prefs["daily_cap"] = round(float(cap), 2)

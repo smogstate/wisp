@@ -32,7 +32,11 @@ CREATE TABLE IF NOT EXISTS trade(id INTEGER PRIMARY KEY AUTOINCREMENT, market TE
 CREATE TABLE IF NOT EXISTS mail(who TEXT, id INTEGER, market TEXT, kind TEXT, item INTEGER, name TEXT, count INTEGER, n INTEGER,
                                 bid INTEGER, deposit INTEGER, cut INTEGER, sent INTEGER, PRIMARY KEY (who, id)) WITHOUT ROWID;
 """
-UNITS = {"g": 10000, "gold": 10000, "s": 100, "silver": 100, "c": 1, "copper": 1}
+UNITS = {"g": 10000, "gold": 10000, "s": 100, "silver": 100, "c": 1, "copper": 1,
+         # as a Russian player writes them: 3с 50м, 2 золотых 5 серебра
+         "з": 10000, "зол": 10000, "золото": 10000, "золота": 10000, "золотых": 10000, "золотой": 10000,
+         "с": 100, "сер": 100, "серебро": 100, "серебра": 100, "серебряных": 100,
+         "м": 1, "мед": 1, "медь": 1, "меди": 1, "медных": 1}
 
 
 def parse_money(text) -> int | None:
@@ -40,9 +44,9 @@ def parse_money(text) -> int | None:
     a bare number could be gold or copper, and guessing would be a hundredfold mistake."""
     if not isinstance(text, str):
         return None
-    amount = r"(\d+(?:\.\d+)?)\s*(gold|silver|copper|g|s|c)\b"
+    amount = r"(\d+(?:\.\d+)?)\s*(" + "|".join(sorted(UNITS, key=len, reverse=True)) + r")\b\.?"
     parts = re.findall(amount, text.lower())
-    if not parts or re.sub(amount + r"|\s|\band\b", "", text.lower()):   # anything left over, a thousands comma included: not sure enough
+    if not parts or re.sub(amount + r"|\s|\band\b|\bи\b", "", text.lower()):   # anything left over, a thousands comma included: not sure enough
         return None
     total = round(sum(float(number) * UNITS[unit] for number, unit in parts))
     return total if 0 < total <= 10**11 else None

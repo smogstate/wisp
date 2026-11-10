@@ -14,6 +14,7 @@ Worth is the lowest auction listing where there is one, else what a vendor
 pays. It is what the loot is listed for, not what it sold for.
 """
 from .crafting import _int, _list, _text, coins
+from .i18n import t
 
 ENOUGH = 600   # seconds of looting before a per-hour figure means anything
 
@@ -80,14 +81,14 @@ class Farming:
         for z in zones.values():
             total = z["coins"] + z["loot"]
             best = sorted(z["items"].items(), key=lambda kv: -kv[1] * self.worth(kv[0]))[:4]
-            entry = {"zone": z["zone"], "days_farmed": len(z["days"]), "time_looting": f"{z['secs'] // 3600}h {z['secs'] % 3600 // 60}m",
+            entry = {"zone": z["zone"], "days_farmed": len(z["days"]), "time_looting": t("{h}h {m}m", h=z["secs"] // 3600, m=z["secs"] % 3600 // 60),
                      "looted": z["looted"], "coins": coins(z["coins"]), "loot_worth": coins(z["loot"]), "total": coins(total),
                      "main_loot": [f"{count} × {self.crafting.name(item)}" for item, count in best], "_per_hour": None}
             if z["secs"] >= ENOUGH:
                 entry["_per_hour"] = total * 3600 / z["secs"]
                 entry["per_hour"] = coins(entry["_per_hour"])
             else:
-                entry["per_hour"] = "too little time to say"
+                entry["per_hour"] = t("too little time to say")
             out.append(entry)
         return sorted(out, key=lambda e: (-(e["_per_hour"] or -1), e["zone"]))
 

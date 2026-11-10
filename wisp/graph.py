@@ -10,6 +10,7 @@ ponytail: not kept between snapshots; into the SQLite file beside the prices
 once the addon hands over more items than the ones that matter today.
 """
 from .crafting import _text, coins
+from .i18n import t
 
 
 def _list(value) -> list:
@@ -74,9 +75,9 @@ class ItemGraph:
                 continue
             label = self.names.get(item, f"item {item}")
             found = {
-                "sold_by": game._who(f"i{item}.vendor", entry.get("vendors"), f"sells {label}"),
-                "dropped_by": game._who(f"i{item}.drop", entry.get("drops"), f"drops {label}"),
-                "found_in": game._who(f"i{item}.object", entry.get("objects"), f"holds {label}"),
+                "sold_by": game._who(f"i{item}.vendor", entry.get("vendors"), t("sells {item}", item=label)),
+                "dropped_by": game._who(f"i{item}.drop", entry.get("drops"), t("drops {item}", item=label)),
+                "found_in": game._who(f"i{item}.object", entry.get("objects"), t("holds {item}", item=label)),
             }
             for key, total in (("dropped_by", entry.get("dropCount")), ("found_in", entry.get("objectCount"))):
                 if isinstance(total, int) and total > len(found[key]):

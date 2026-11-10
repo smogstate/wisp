@@ -292,6 +292,18 @@ def copy_to_clipboard(text: str) -> bool:
 
 # -- a sample game folder, for --fake and for testing a build -----------------
 
+def system_language() -> str:
+    """'ru' when this PC's own interface is Russian, else 'en'. Used before the game has said which language it runs in."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            return "ru" if ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF == 0x19 else "en"
+        import locale
+        return "ru" if (locale.getlocale()[0] or "").lower().startswith("ru") else "en"
+    except Exception:
+        return "en"
+
+
 def sample_game_folder() -> Path:
     """A temporary folder that looks like a game install whose Wisp addon saved
     a small snapshot. Lets the interface be seen with no game."""

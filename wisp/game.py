@@ -13,6 +13,7 @@ from .farming import Farming
 from .gathering import Gathering
 from .graph import ItemGraph
 from .history import diff
+from .i18n import num, t, tn
 
 SNAPSHOT_VERSION = 1
 
@@ -117,7 +118,7 @@ class Game:
 
     def _share_of_level(self, xp: int) -> str | None:
         bar = (self.snapshot.get("character") or {}).get("xpMax")
-        return f"{xp / bar:.0%} of a level" if isinstance(bar, int) and bar > 0 and xp else None
+        return t("{share} of a level", share=f"{xp / bar:.0%}") if isinstance(bar, int) and bar > 0 and xp else None
 
     def colour(self, level) -> str | None:
         """How hard a quest of this level is for the character, as the quest log colours it:
@@ -165,17 +166,17 @@ class Game:
             "complete": bool(q.get("complete")), **self._reward(q),
             "objectives": [{"text": _clean(o.get("text"), 160), "done": bool(o.get("done"))}
                            for o in _as_list(q.get("objectives")) if isinstance(o, dict)],
-            "starts": self._who(f"q{qid}.start", q.get("starts"), "quest giver"),
-            "ends": self._who(f"q{qid}.end", q.get("ends"), "turn in"),
+            "starts": self._who(f"q{qid}.start", q.get("starts"), t("quest giver")),
+            "ends": self._who(f"q{qid}.end", q.get("ends"), t("turn in")),
         }
         way = q.get("gameWaypoint")
         if isinstance(way, dict):
-            out["game_pointer"] = self._place(f"q{qid}.pointer", way, f"{title} (next step)")
+            out["game_pointer"] = self._place(f"q{qid}.pointer", way, t("{title} (next step)", title=title))
         nxt = q.get("next")
         if isinstance(nxt, dict):
             out["next_in_chain"] = {
                 "id": nxt.get("id"), "title": _clean(nxt.get("title"), 80), "level": nxt.get("level"),
-                "starts": self._who(f"q{qid}.next", nxt.get("starts"), "next quest"),
+                "starts": self._who(f"q{qid}.next", nxt.get("starts"), t("next quest")),
             }
         return out
 
@@ -183,7 +184,7 @@ class Game:
         """A quest the character could pick up, as Questie has it."""
         qid = q.get("id")
         title = _clean(q.get("title"), 80)
-        starts = self._who(f"a{qid}.start", q.get("starts"), "quest giver")
+        starts = self._who(f"a{qid}.start", q.get("starts"), t("quest giver"))
         return {"id": qid, "title": title, "level": q.get("level") if isinstance(q.get("level"), int) else None,
                 "colour": self.colour(q.get("level")), **self._reward(q),
                 "requires_level": q.get("requiredLevel") if isinstance(q.get("requiredLevel"), int) else None,
@@ -208,7 +209,7 @@ class Game:
             needs.append({
                 "id": step.get("id"), "name": step_name, "done": step.get("state") == "done",
                 "in_log": step.get("state") == "log", "pickup": _clean(step.get("pickup"), 160) or None,
-                "where": self._journal_place(f"dq{step.get('id')}.start", step.get("start"), f"{step_name} (quest start)"),
+                "where": self._journal_place(f"dq{step.get('id')}.start", step.get("start"), t("{name} (quest start)", name=step_name)),
             })
         missing = [n for n in needs if not n["done"]]
         requires = q.get("requires")
@@ -226,7 +227,7 @@ class Game:
             "id": qid, "name": name, "status": status, "level": q.get("level"), "requires_level": requires,
             "objective": _clean(q.get("objective"), 240), "pickup": _clean(q.get("pickup"), 200),
             "turn_in": _clean(q.get("turnin"), 200), "rewards": _clean(str(q.get("rewards") or "").replace("\n", "; "), 240),
-            "pickup_where": self._journal_place(f"dq{qid}.start", q.get("start"), f"{name} (quest start)"),
+            "pickup_where": self._journal_place(f"dq{qid}.start", q.get("start"), t("{name} (quest start)", name=name)),
         }
         if q.get("class"):
             out["class_only"] = _clean(q.get("class"), 40)
@@ -245,7 +246,7 @@ class Game:
             bosses.append({"name": _clean(b.get("name"), 80), "rare": bool(b.get("rare")), "loot": loot})
         return {
             "name": name, "level": _clean(d.get("level"), 20), "location": _clean(d.get("location"), 120),
-            "entrance": self._journal_place(f"d{index + 1}.entrance", d.get("entrance"), f"{name} entrance"),
+            "entrance": self._journal_place(f"d{index + 1}.entrance", d.get("entrance"), t("{name} entrance", name=name)),
             "entrance_hint": _clean(d.get("entranceHint"), 300) or None,
             "quests": [self._dungeon_quest(q) for q in _as_list(d.get("quests")) if isinstance(q, dict)],
             "bosses": bosses,
@@ -373,7 +374,7 @@ class Game:
         quest_xp, quests = sum(d.get("questXp") or 0 for d in days), sum(d.get("quests") or 0 for d in days)
         rows = []
         for d in sorted(days, key=lambda d: -d["day"]):
-            rows.append({"date": date_of(d["day"]), "gained": d["gained"], "time_gaining": f"{d['secs'] // 3600}h {d['secs'] % 3600 // 60}m",
+            rows.append({"date": date_of(d["day"]), "gained": d["gained"], "time_gaining": t("{h}h {m}m", h=d["secs"] // 3600, m=d["secs"] % 3600 // 60),
                          "per_hour": round(d["gained"] * 3600 / d["secs"]) if d["secs"] >= 600 else "too little time to say",
                          "quests_handed_in": d.get("quests") or 0, **({"levels_gained": d["levels"]} if d.get("levels") else {})})
         out.update(period_days=days_back, gained=gained, quests_handed_in=quests, days=rows,
@@ -385,20 +386,24 @@ class Game:
             out["per_hour"] = round(rate)
             if isinstance(out.get("to_next_level"), int):
                 hours = out["to_next_level"] / rate
-                out["next_level_in"] = f"about {int(hours)}h {int(hours % 1 * 60)}m of play at this pace" if hours >= 1 else f"about {max(1, round(hours * 60))} minutes of play at this pace"
+                out["next_level_in"] = (t("about {h}h {m}m of play at this pace", h=int(hours), m=int(hours % 1 * 60)) if hours >= 1
+                                        else t("about {m} minutes of play at this pace", m=max(1, round(hours * 60))))
         else:
             out["per_hour"] = "too little time measured to say"
             note += "A rate needs ten minutes of gaining behind it. "
         out["note"] = note + "For what to do next, questing_route says how much experience a zone's quests hold."
         if args.get("show") is True:
-            headline = f"level {level} · {out.get('into_this_level', '?')} in" + (f" · {out['next_level_in']}" if "next_level_in" in out else "")
-            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Leveling", "table": {
-                "title": f"{out['per_hour']:,} XP an hour" if isinstance(out["per_hour"], int) else "Your leveling", "sub": headline,
-                "columns": ["Day", "Gained", "Time", "Per hour", "Quests"],
-                "rows": [[r["date"][5:], f"{r['gained']:,}", r["time_gaining"], f"{r['per_hour']:,}" if isinstance(r["per_hour"], int) else "–",
+            headline = t("level {level} · {share} in", level=level, share=out.get("into_this_level", "?")) \
+                + (f" · {out['next_level_in']}" if "next_level_in" in out else "")
+            resting = (" " + t("{xp} XP of rested bonus ({share} of a level)", xp=num(rested), share=f"{rested / bar:.0%}") + "."
+                       if "rested" in out else "")
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Leveling"), "table": {
+                "title": t("{xp} XP an hour", xp=num(out["per_hour"])) if isinstance(out["per_hour"], int) else t("Your leveling"), "sub": headline,
+                "columns": [t("Day"), t("Gained"), t("Time"), t("Per hour"), t("Quests")],
+                "rows": [[r["date"][5:], num(r["gained"]), r["time_gaining"], num(r["per_hour"]) if isinstance(r["per_hour"], int) else "–",
                           r["quests_handed_in"]] for r in rows[:14]],
-                "notes": [f"{out['from_quests']} of it from handing in quests." + (" " + out["rested"].split(":")[0] + "." if "rested" in out else ""),
-                          "Time between gains, breaks over five minutes left out."]}})
+                "notes": [t("{share} of it from handing in quests.", share=out["from_quests"]) + resting,
+                          t("Time between gains, breaks over five minutes left out.")]}})
             out["shown"] = "a table card with these figures is now shown to the player: do not repeat them in your text"
         return out
 
@@ -433,13 +438,14 @@ class Game:
             if q["complete"]:
                 found = first_in_zone(q["ends"])
                 if found:
-                    hub(found, f"Hand in: {q['title']}" + (f" ({q['xp']:,} XP)" if q.get("xp") else ""), "hand_in")
+                    hub(found, t("Hand in: {quest}", quest=q["title"]) + (t(" ({xp} XP)", xp=num(q["xp"])) if q.get("xp") else ""), "hand_in")
                     gains["now"] += q.get("xp", 0)
             elif isinstance(q.get("game_pointer"), dict) and q["game_pointer"]["zone"] == zone:
                 todo = next((o["text"] for o in q["objectives"] if not o["done"]), "")
                 w = q["game_pointer"]
                 fields.append({"who": q["title"], "x": w["x"], "y": w["y"], "ref": w["ref"],
-                               "actions": ["Go on: " + (todo or q["title"]) + (f" ({q['xp']:,} XP when handed in)" if q.get("xp") else "")]})
+                               "actions": [t("Go on: {what}", what=todo or q["title"])
+                                           + (t(" ({xp} XP when handed in)", xp=num(q["xp"])) if q.get("xp") else "")]})
                 counts["go_on"] += 1
         skipped = {"grey": 0, "red": 0}
         for q in self.available:
@@ -449,8 +455,9 @@ class Game:
             if q["colour"] in skipped:   # nothing to gain, or not yet possible
                 skipped[q["colour"]] += 1
                 continue
-            kind = "" if q["kind"] == "normal" else f", {q['kind']}"
-            hub(found, f"Pick up: {q['title']} (level {q['level']}{kind}" + (f", {q['xp']:,} XP" if q.get("xp") else "") + ")", "pick_up")
+            kind = "" if q["kind"] == "normal" else ", " + t(q["kind"])
+            hub(found, t("Pick up: {quest} (level {level}{kind}{xp})", quest=q["title"], level=q["level"], kind=kind,
+                         xp=t(", {xp} XP", xp=num(q["xp"])) if q.get("xp") else ""), "pick_up")
             gains["later"] += q.get("xp", 0)
         if not hubs and not fields:
             return {"zone": zone, "nothing_to_do": "No quest in the log leads here and none worth doing is open here.",
@@ -471,20 +478,23 @@ class Game:
         outings, _ = walk(fields[:10], last)
         stops = givers + outings
         steps = [{"text": s["who"], "detail": " · ".join(s["actions"]), "where": f"{s['x']}, {s['y']}"} for s in stops]
-        said = [f"{n} to hand in" * bool(n) for n in (counts["hand_in"],)] + [f"{counts['pick_up']} to pick up"] * bool(counts["pick_up"]) \
-            + [f"{counts['go_on']} to go on with"] * bool(counts["go_on"])
+        said = [t("{n} to hand in", n=counts["hand_in"])] * bool(counts["hand_in"]) + [t("{n} to pick up", n=counts["pick_up"])] * bool(counts["pick_up"]) \
+            + [t("{n} to go on with", n=counts["go_on"])] * bool(counts["go_on"])
         places = [self.places[s["ref"]] for s in stops]
-        worth = [f"{gains['now']:,} XP to hand in ({self._share_of_level(gains['now'])})" if gains["now"] and self._share_of_level(gains["now"]) else "",
-                 f"{gains['later']:,} XP in the quests picked up ({self._share_of_level(gains['later'])})" if gains["later"] and self._share_of_level(gains["later"]) else ""]
+        worth = [t("{xp} XP to hand in ({share})", xp=num(gains["now"]), share=self._share_of_level(gains["now"]))
+                 if gains["now"] and self._share_of_level(gains["now"]) else "",
+                 t("{xp} XP in the quests picked up ({share})", xp=num(gains["later"]), share=self._share_of_level(gains["later"]))
+                 if gains["later"] and self._share_of_level(gains["later"]) else ""]
         worth = [w for w in worth if w]
         self.cards.append({
             "id": f"card{len(self.cards) + 1}", "lines": [],
-            "route": {"title": f"Questing in {zone}", "sub": f"level {me.get('level', '?')} · " + ", ".join(p for p in said if p),
+            "route": {"title": t("Questing in {zone}", zone=zone),
+                      "sub": t("level {level}", level=me.get("level", "?")) + " · " + ", ".join(p for p in said if p),
                       "steps": steps,
-                      "notes": worth + ["As of your last logout. Quest givers first, then the quests under way, each time the nearest."
-                                + (f" Left out: {skipped['grey']} grey" + (f" and {skipped['red']} red" if skipped["red"] else "") + "."
+                      "notes": worth + [t("As of your last logout. Quest givers first, then the quests under way, each time the nearest.")
+                                + (t(" Left out: {grey} grey", grey=skipped["grey"]) + (t(" and {red} red", red=skipped["red"]) if skipped["red"] else "") + "."
                                    if skipped["grey"] or skipped["red"] else "")]},
-            "hint": "Waypoints for TomTom: Copy, then in the game Ctrl+V twice",
+            "hint": t("Waypoints for TomTom: Copy, then in the game Ctrl+V twice"),
             "wisp": encode_wisp1([{"do": "tomtom.waypoint", "map": p["map"], "x": s["x"], "y": s["y"],
                                    "title": f"{i + 1}. {_clean(s['who'], 50)}"} for i, (s, p) in enumerate(zip(stops, places))]),
         })
@@ -512,7 +522,7 @@ class Game:
                              unsold_gain_percent=f"{(now - p['average']) / p['average']:+.0%}" if p["average"] else "–",
                              _worth=now * p["held"], _gain=gain)
             elif p["held"]:
-                entry["now_each"] = "no listing known"
+                entry["now_each"] = t("no listing known")
             past = self.market.series(self.snapshot, p["item"], max(2, today - p["since"] + 1)) if self.market and p["held"] else []
             if len(past) >= 2:   # how the price has behaved since it was bought
                 lows = [low for _, low, _, _ in past]
@@ -561,7 +571,7 @@ class Game:
         total = steps[-1][1]
         age = max(0, int(self.snapshot.get("takenAt", 0)) - ladder["at"])
         out = {"item": self.graph.names[item], "lowest": coins(lowest), "listed_in_all": total, "auctions": ladder["auctions"],
-               "seen": "in the last session" if age < 6 * 3600 else f"{round(age / 86400, 1)} days before the last logout",
+               "seen": t("in the last session") if age < 6 * 3600 else t("{days} days before the last logout", days=round(age / 86400, 1)),
                "ladder": [{"up_to": coins(price), "listed": listed, "above_the_lowest": f"{(price - lowest) / lowest:+.0%}"} for price, listed in steps]}
         if ladder["partial"]:
             out["partial"] = "only the first page of listings was loaded: there are more, at higher prices"
@@ -593,12 +603,14 @@ class Game:
                        "are listed up to that price, counted from the lowest; to_buy is priced at the top of each step, so it is "
                        "the most it would cost. Listings change by the minute: this is that moment, not now.")
         if args.get("show") is True:
-            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Market depth", "table": {
-                "title": out["item"], "sub": f"{total} listed in {ladder['auctions']} auctions · from {out['lowest']} · seen {out['seen']}",
-                "columns": ["Up to", "Listed", "Above the lowest"],
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Market depth"), "table": {
+                "title": out["item"], "sub": t("{total} listed in {auctions} · from {lowest} · seen {seen}", total=total,
+                                               auctions=tn(ladder["auctions"], "{n} auction", "{n} auctions"), lowest=out["lowest"], seen=out["seen"]),
+                "columns": [t("Up to"), t("Listed"), t("Above the lowest")],
                 "rows": [[r["up_to"], r["listed"], r["above_the_lowest"]] for r in out["ladder"]],
-                "notes": ["How many are listed up to each price, counted from the cheapest."
-                          + (f" Yours: {ladder['mine']} from {coins(ladder['mine_at'])}, with {out['yours']['listed_below_yours']} listed for less." if ladder["mine"] else "")]}})
+                "notes": [t("How many are listed up to each price, counted from the cheapest.")
+                          + (t(" Yours: {mine} from {price}, with {less} listed for less.", mine=ladder["mine"], price=coins(ladder["mine_at"]),
+                               less=out["yours"]["listed_below_yours"]) if ladder["mine"] else "")]}})
             out["shown"] = "a table card of the ladder is now shown to the player: do not repeat its rows"
         return out
 
@@ -621,19 +633,22 @@ class Game:
             entry = {"item": name, "quantity": qty, "each": coins(each), "total": coins(each * qty), "_total": each * qty}
             lowest = craft.prices.get(a["item"], (None,))[0]
             if a.get("sold"):
-                entry["status"] = "sold: the money is in the mail"
+                entry["status"], entry["_short"] = "sold: the money is in the mail", t("sold")
                 waiting += each * qty
             else:
                 left = (a["secondsLeft"] - since) if isinstance(a.get("secondsLeft"), (int, float)) else None
                 entry["status"] = ("time left unknown" if left is None else "has run out by now" if left <= 0
                                    else f"about {max(1, round(left / 3600))}h left" if left >= 3600 else "under an hour left")
+                entry["_short"] = (t("time left unknown") if left is None else t("run out") if left <= 0
+                                   else t("{h}h left", h=max(1, round(left / 3600))) if left >= 3600 else t("under an hour left"))
                 if a.get("bidder"):
                     entry["status"] += ", has a bid"
+                    entry["_short"] += t(", has a bid")
                 listed += each * qty
                 if not lowest:
                     entry["against_the_market"] = "no listing seen to compare with"
                 elif each <= lowest:
-                    entry["against_the_market"] = "the lowest, or level with it"
+                    entry["against_the_market"], entry["_lowest"] = "the lowest, or level with it", True
                 else:
                     entry.update(lowest_seen=coins(lowest), against_the_market=f"undercut: {(each - lowest) / each:.0%} dearer than the lowest")
                     undercut += 1
@@ -649,13 +664,14 @@ class Game:
                        "own Auctionator scans, which may be older or newer than that look and includes the player's own listing. "
                        "The price is for one. An auction may have sold, been bid on or run out since."}
         if args.get("show") is True and rows:
-            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Your auctions", "table": {
-                "title": f"{len(rows)} auction{'s' if len(rows) != 1 else ''} up", "sub": f"listed for {out['listed_for']}"
-                + (f" · {undercut} undercut" if undercut else "") + (f" · {out['sold_and_waiting_in_the_mail']} sold, in the mail" if waiting else ""),
-                "columns": ["Item", "Qty", "Each", "Lowest", "Status"],
-                "rows": [[r["item"], r["quantity"], r["each"], r.get("lowest_seen", "you" if r.get("against_the_market", "").startswith("the lowest") else "–"),
-                          r["status"].split(":")[0].replace("about ", "")] for r in rows[:20]],
-                "notes": ["As your Auctions tab last showed them. Lowest is from your own scans and may be older."]}})
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Your auctions"), "table": {
+                "title": tn(len(rows), "{n} auction up", "{n} auctions up"), "sub": t("listed for {sum}", sum=out["listed_for"])
+                + (t(" · {n} undercut", n=undercut) if undercut else "")
+                + (t(" · {sum} sold, in the mail", sum=out["sold_and_waiting_in_the_mail"]) if waiting else ""),
+                "columns": [t("Item"), t("Qty"), t("Each"), t("Lowest"), t("Status")],
+                "rows": [[r["item"], r["quantity"], r["each"], r.get("lowest_seen", t("you") if r.get("_lowest") else "–"), r["_short"]]
+                         for r in rows[:20]],
+                "notes": [t("As your Auctions tab last showed them. Lowest is from your own scans and may be older.")]}})
             out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
         return out
 
@@ -712,19 +728,22 @@ class Game:
                             **({"cut_rate": f"{cut / gross:.1%}"} if gross else {}), "most_money_from": by_item(sold)},
                    "bought": {"auctions": sum(d["_auctions"] for d in bought), "paid": coins(spent), "most_money_on": by_item(bought)},
                    "balance": self._signed(gross - cut - spent), "note": note}
-            table = {"title": "Auction house, in and out", "sub": f"last {days} days · received {coins(gross - cut)} · paid {coins(spent)} · balance {out['balance']}",
-                     "columns": ["Item", "Sold", "Received", "Each"],
+            table = {"title": t("Auction house, in and out"),
+                     "sub": t("last {days} days · received {received} · paid {paid} · balance {balance}", days=days,
+                              received=coins(gross - cut), paid=coins(spent), balance=out["balance"]),
+                     "columns": [t("Item"), t("Sold"), t("Received"), t("Each")],
                      "rows": [[e["item"], e["quantity"], e["total"], e["each_on_average"]] for e in out["sold"]["most_money_from"]],
-                     "notes": ["Real sales from your auction mail, after the house's cut" + (f" ({cut / gross:.1%})" if gross else "") + "."]}
+                     "notes": [t("Real sales from your auction mail, after the house's cut{rate}.", rate=f" ({cut / gross:.1%})" if gross else "")]}
         else:
             some = sold if view == "sales" else bought
             out = {"view": view, "period_days": days, "deals": rows(some), **({"left_out": len(some) - 40} if len(some) > 40 else {}), "note": note}
-            table = {"title": "What you sold" if view == "sales" else "What you bought", "sub": f"last {days} days, from your auction mail",
-                     "columns": ["Item", "Qty", "Each", "Received" if view == "sales" else "Paid", "Days ago"],
+            table = {"title": t("What you sold") if view == "sales" else t("What you bought"),
+                     "sub": t("last {days} days, from your auction mail", days=days),
+                     "columns": [t("Item"), t("Qty"), t("Each"), t("Received") if view == "sales" else t("Paid"), t("Days ago")],
                      "rows": [[d["item"], d["quantity"], d["each"], coins(d["_net"] if view == "sales" else d["_total"]), d["days_ago"]] for d in some[:20]],
-                     "notes": ["Received is the sale price less the auction house's cut." if view == "sales" else "What each auction really cost."]}
+                     "notes": [t("Received is the sale price less the auction house's cut.") if view == "sales" else t("What each auction really cost.")]}
         if args.get("show") is True and table["rows"]:
-            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Auction house", "table": table})
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Auction house"), "table": table})
             out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
         return out
 
@@ -804,10 +823,10 @@ class Game:
             by_number = isinstance(args.get("trade"), int) and not isinstance(args.get("trade"), bool)
             if by_number:   # a purchase that a later sale rests on cannot go before the sale does
                 held = {}
-                for t in self.assets.trades(market):
-                    if t["id"] != args["trade"]:
-                        held[t["item"]] = held.get(t["item"], 0) + (t["qty"] if t["kind"] == "buy" else -t["qty"])
-                        if held[t["item"]] < 0:
+                for row in self.assets.trades(market):
+                    if row["id"] != args["trade"]:
+                        held[row["item"]] = held.get(row["item"], 0) + (row["qty"] if row["kind"] == "buy" else -row["qty"])
+                        if held[row["item"]] < 0:
                             return {"error": "a later sale rests on that purchase: remove the sale first"}
             removed = self.assets.remove(market, trade=args["trade"]) if by_number else self.assets.remove(market, item=item)
             if not removed:
@@ -841,22 +860,23 @@ class Game:
                                **({"note": t["note"]} if t["note"] else {})} for t in position["trades"]]}
             past = self.market.series(self.snapshot, item, max(14, int(time.time()) // 86400 - position["since"] + 8)) if self.market else []
             if args.get("show") is True and len(past) >= 2:
-                self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Investment", "chart": {
-                    "title": chosen["item"], "sub": f"{chosen['held']} held · bought {chosen['days_held']} days ago",
-                    "points": [list(row) for row in past[-180:]], "usual": round(position["average"]), "line": "paid", "estimate": None,
-                    "stats": [["Paid", chosen["paid_each"]], ["Now", chosen.get("now_each", "–")], ["Gain", chosen.get("unsold_gain_percent", "–")],
-                              ["Unsold gain", chosen.get("unsold_gain", "–")]],
-                    "notes": ["The line is the day's lowest listing from your own scans; the level marked is what you paid. Listed worth, before the auction house's cut."]}})
+                self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Investment"), "chart": {
+                    "title": chosen["item"], "sub": t("{held} held · bought {days} days ago", held=chosen["held"], days=chosen["days_held"]),
+                    "points": [list(row) for row in past[-180:]], "usual": round(position["average"]), "line": t("paid"), "estimate": None,
+                    "stats": [[t("Bought at"), chosen["paid_each"]], [t("Now"), chosen.get("now_each", "–")],
+                              [t("Gain"), chosen.get("unsold_gain_percent", "–")], [t("Unsold gain"), chosen.get("unsold_gain", "–")]],
+                    "notes": [t("The line is the day's lowest listing from your own scans; the level marked is what you paid. Listed worth, before the auction house's cut.")]}})
                 out["shown"] = "a chart card of its price against what was paid is now shown to the player"
             return out
         if args.get("show") is True or action in ("buy", "sell", "remove"):
-            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Investments", "table": {
-                "title": "Your investments",
-                "sub": f"paid {totals['invested_in_what_is_held']} · worth {totals['worth_now']} · made {totals['made_in_all']} in all",
-                "columns": ["Item", "Held", "Paid", "Now", "Gain"],
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Investments"), "table": {
+                "title": t("Your investments"),
+                "sub": t("paid {paid} · worth {worth} · made {made} in all", paid=totals["invested_in_what_is_held"],
+                         worth=totals["worth_now"], made=totals["made_in_all"]),
+                "columns": [t("Item"), t("Held"), t("Bought at"), t("Now"), t("Profit")],
                 "rows": [[r["item"], r["held"], r["paid_each"], r.get("now_each", "–"),
-                          r.get("unsold_gain", r["made_on_sales"]) if r["held"] else "sold: " + r["made_on_sales"]] for r in rows[:20]],
-                "notes": ["At the lowest listing from your own scans, before the auction house's cut. \"Made in all\" adds what your sales brought."]}})
+                          r.get("unsold_gain", r["made_on_sales"]) if r["held"] else t("sold: {made}", made=r["made_on_sales"])] for r in rows[:20]],
+                "notes": [t("At the lowest listing from your own scans, before the auction house's cut. \"Made in all\" adds what your sales brought.")]}})
             out["shown"] = "a table card of the investments is now shown to the player: do not repeat its rows"
         return out
 
@@ -907,9 +927,10 @@ class Game:
                    "left_out": {"bound_to_the_character": bound, "no_price_known": unpriced},
                    "note": caveat + (" The bank is counted as it was when last opened." if craft.bank_seen
                                      else " The bank is not known: it is counted once the player has opened it.")}
-            table = {"title": "What your bags and bank would fetch" if craft.bank else "What your bags would fetch", "sub": f"about {coins(total)} in all, at auction or from a vendor",
-                     "columns": ["Item", "Have", "Each", "Worth"], "rows": [[r["item"], r["have"], r["each"], r["worth"]] for r in rows[:15]],
-                     "notes": ["Lowest listings from your own scans, or what a vendor pays. Listed worth, not sales."]}
+            table = {"title": t("What your bags and bank would fetch") if craft.bank else t("What your bags would fetch"),
+                     "sub": t("about {sum} in all, at auction or from a vendor", sum=coins(total)),
+                     "columns": [t("Item"), t("Have"), t("Each"), t("Worth")], "rows": [[r["item"], r["have"], r["each"], r["worth"]] for r in rows[:15]],
+                     "notes": [t("Lowest listings from your own scans, or what a vendor pays. Listed worth, not sales.")]}
         else:
             rows, unknown = [], 0
             for recipe in craft.recipes.values():
@@ -929,10 +950,10 @@ class Game:
                    "recipes_without_full_prices": unknown,
                    "note": caveat + " Profit is the result's listing minus every material bought at auction, per craft. Only the "
                            "character's own learned recipes, and only those where the result and every material have a price."}
-            table = {"title": "Crafting for profit", "sub": "your recipes, at your auction prices",
-                     "columns": ["Recipe", "Materials", "Sells for", "Profit"],
+            table = {"title": t("Crafting for profit"), "sub": t("your recipes, at your auction prices"),
+                     "columns": [t("Recipe"), t("Materials"), t("Sells for"), t("Profit")],
                      "rows": [[r["recipe"], r["materials"], r["sells_for"], r["profit"]] for r in rows[:15]],
-                     "notes": ["Per craft, materials bought at auction. Listed prices, before the auction house's cut."]}
+                     "notes": [t("Per craft, materials bought at auction. Listed prices, before the auction house's cut.")]}
         if args.get("show") is True and table["rows"]:
             self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "table": table})
             out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
@@ -1009,11 +1030,11 @@ class Game:
         for ref in dict.fromkeys(refs):
             if ref in self.routes:   # a route is one line on the card and a waypoint for each of its stops
                 route = self.routes[ref]
-                shown.append({"addon": "TomTom", "text": f"Route: {route['title']}", "detail": route["detail"]})
+                shown.append({"addon": "TomTom", "text": t("Route: {title}", title=route["title"]), "detail": route["detail"]})
                 points += route["stops"]
             else:
                 p = self.places[ref]
-                shown.append({"addon": "TomTom", "text": f"Waypoint: {p['title']}", "detail": f"{p['zone']}  {p['x']}, {p['y']}"})
+                shown.append({"addon": "TomTom", "text": t("Waypoint: {title}", title=p["title"]), "detail": f"{p['zone']}  {p['x']}, {p['y']}"})
                 points.append(p)
         if len(points) > 50:
             return {"error": "that is more than 50 waypoints at once: ask for fewer routes"}
@@ -1180,10 +1201,10 @@ class Game:
         shown = {}
         if args.get("show") is True and found:
             self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "table": {
-                "title": SCAN_TITLES[kind], "sub": f"last {days} days" + (f" · {among.replace('_', ' ')}" if only is not None else ""),
-                "columns": ["Item", "Now", "Usual", "Against usual", "Listed"],
+                "title": t(SCAN_TITLES[kind]), "sub": t("last {days} days", days=days) + ({"my_bags": t(" · my bags"), "my_materials": t(" · my materials"), "what_i_craft": t(" · what i craft")}[among] if only is not None else ""),
+                "columns": [t("Item"), t("Now"), t("Usual"), t("Against usual"), t("Listed")],
                 "rows": [[e["item"], e["now"], e["usual"], e["now_against_usual"], e.get("usually_listed", "–")] for e in found],
-                "notes": ["Lowest listings from your own Auctionator scans. A listing is not a sale."]}})
+                "notes": [t("Lowest listings from your own Auctionator scans. A listing is not a sale.")]}})
             shown = {"shown": "a table card with these rows is now shown to the player: do not repeat them in your text"}
         return {"find": kind, "what_it_means": SCANS[kind], "items": found, "kept_by_wisp": self.market.size(self.snapshot), **shown,
                 "note": "Ranked in code over every item with at least 4 scan days in the period, seen in the last 3 days and "
@@ -1249,7 +1270,8 @@ class Game:
         sources = [{"n": n, "title": _clean(self.web_seen[url], 120) or url, "url": url, "site": url.split("//", 1)[-1].split("/", 1)[0].removeprefix("www.")}
                    for url, n in order.items()]
         report = {"title": title, "summary": summary, "sections": laid, "next_steps": steps, "sources": sources,
-                  "basis": "Your own game data" + (f" and {len(sources)} web page{'s' if len(sources) != 1 else ''}" if sources else ", no web pages")}
+                  "basis": t("Your own game data") + (t(" and {pages}", pages=tn(len(sources), "{n} web page", "{n} web pages")) if sources
+                                                      else t(", no web pages"))}
         saved = None
         if self.notes_dir is not None:
             lines = [f"# {title}", "", time.strftime("%Y-%m-%d %H:%M") + " · " + report["basis"], "", summary, ""]
@@ -1265,7 +1287,7 @@ class Game:
                 slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "report"
                 saved = self.notes_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}.md"
                 saved.write_text("\n".join(lines), encoding="utf-8")
-                report["saved"] = "Kept in your notes"
+                report["saved"] = t("Kept in your notes")
             except OSError:
                 saved = None
         self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "report": report})
@@ -1344,8 +1366,8 @@ class Game:
         start = (me["x"], me["y"]) if me.get("map") == map_id and isinstance(me.get("x"), (int, float)) and isinstance(me.get("y"), (int, float)) else None
         stops = gather.route(name, map_id, start)
         ref = f"g{map_id}." + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-        self.routes[ref] = {"title": f"{name}, {len(stops)} stop{'s' if len(stops) != 1 else ''}",
-                            "detail": f"{place['zone']} · {len(place['at'])} known node{'s' if len(place['at']) != 1 else ''}",
+        self.routes[ref] = {"title": t("{name}, {stops}", name=name, stops=tn(len(stops), "{n} stop", "{n} stops")),
+                            "detail": t("{zone} · {nodes}", zone=place["zone"], nodes=tn(len(place["at"]), "{n} known node", "{n} known nodes")),
                             "stops": [{"map": map_id, "zone": place["zone"], "x": s["x"], "y": s["y"], "title": f"{name} {i + 1}"}
                                       for i, s in enumerate(stops)]}
         return {"node": name, "zone": place["zone"], "known_nodes": len(place["at"]),
@@ -1378,10 +1400,10 @@ class Game:
                    "note": "The nodes GatherMate2 has on record, priced. worth_all is every known node of a zone gathered once: "
                            "a way to compare zones, not an hourly rate, since it says nothing of respawns, competition or the "
                            "walking. " + priced + " For the route through one, call gathering with what and zone."}
-            table = {"title": "What known nodes are worth", "sub": maps and self.gathering.zone_name(maps[0]) or "every zone on record",
-                     "columns": ["Node", "Zone", "Nodes", "Each", "All"],
+            table = {"title": t("What known nodes are worth"), "sub": maps and self.gathering.zone_name(maps[0]) or t("every zone on record"),
+                     "columns": [t("Node"), t("Zone"), t("Nodes"), t("Each"), t("All")],
                      "rows": [[e["node"], e["zone"], e["known_nodes"], e["worth_each"], e["worth_all"]] for e in ranked[:15]],
-                     "notes": ["Every known node gathered once, at your auction prices. Not an hourly rate."]}
+                     "notes": [t("Every known node gathered once, at your auction prices. Not an hourly rate.")]}
         else:
             if not farm.records:
                 return {"error": "No looting has been measured yet. From now on Wisp's addon notes what the character loots "
@@ -1398,19 +1420,20 @@ class Game:
                        "note": "Measured from the character's own looting in the last " + f"{days} days. time_looting is the time "
                                "between one loot and the next when under five minutes, so travel and long fights are partly "
                                "left out and per_hour is a little generous. " + priced}
-                table = {"title": "Your farming spots", "sub": f"last {days} days, measured from your own loot",
-                         "columns": ["Zone", "Time", "Looted", "Total", "Per hour"],
+                table = {"title": t("Your farming spots"), "sub": t("last {days} days, measured from your own loot", days=days),
+                         "columns": [t("Zone"), t("Time"), t("Looted"), t("Total"), t("Per hour")],
                          "rows": [[e["zone"], e["time_looting"], e["looted"], e["total"], e["per_hour"]] for e in spots[:15]],
-                         "notes": ["Coins plus loot at your auction prices, or what a vendor pays. Listed worth, not sales."]}
+                         "notes": [t("Coins plus loot at your auction prices, or what a vendor pays. Listed worth, not sales.")]}
             else:
                 sources = farm.sources(days, found[0][0] if found else None)
                 out = {"view": "sources", "sources": [{k: v for k, v in e.items() if k[0] != "_"} for e in sources[:30]],
                        "note": "Measured from the character's own looting: per_loot is how many of the item came per corpse or "
                                "node looted. With few looted it is rough: say how many it rests on. " + priced}
-                table = {"title": "What you looted from what", "sub": (found[0][1] if found else "everywhere") + f", last {days} days",
-                         "columns": ["Source", "Zone", "Looted", "Per loot"],
+                table = {"title": t("What you looted from what"),
+                         "sub": t("{where}, last {days} days", where=found[0][1] if found else t("everywhere"), days=days),
+                         "columns": [t("Source"), t("Zone"), t("Looted"), t("Per loot")],
                          "rows": [[e["source"], e["zone"], e["looted"], e["worth_per_loot"]] for e in sources[:15]],
-                         "notes": ["Worth per corpse or node looted, at your auction prices."]}
+                         "notes": [t("Worth per corpse or node looted, at your auction prices.")]}
         if args.get("show") is True and table and table["rows"]:
             self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "table": table})
             out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
@@ -1453,16 +1476,17 @@ class Game:
         title = _clean(args.get("name"), 40).replace(";", "") or "Wisp"
         total = sum(craft.prices[item][0] * count for item, _, count in buy if item in craft.prices)
         priced = sum(1 for item, _, _ in buy if item in craft.prices)
-        about = (f"about {coins(total)}" + ("" if priced == len(buy) else f" · {len(buy) - priced} without a price")) if priced else "prices unknown"
-        header = {"addon": "Auctionator", "text": f"Shopping list: {title}",
-                  "detail": f"{len(buy)} item{'s' if len(buy) != 1 else ''} · {about}"}
+        about = (t("about {sum}", sum=coins(total)) + ("" if priced == len(buy) else t(" · {n} without a price", n=len(buy) - priced))
+                 if priced else t("prices unknown"))
+        header = {"addon": "Auctionator", "text": t("Shopping list: {title}", title=title),
+                  "detail": t("{items} · {about}", items=tn(len(buy), "{n} item", "{n} items"), about=about)}
         card = {"id": f"card{len(self.cards) + 1}", "lines": []}
         if plan:   # the whole plan, laid out: the steps, a table of materials, the total
             card["plan"] = {"title": title, **plan["_card"]}
-            card["hint"] = "Shopping list for Auctionator: Copy, then in the game Ctrl+V twice"
+            card["hint"] = t("Shopping list for Auctionator: Copy, then in the game Ctrl+V twice")
         else:
             card["lines"] = [header] + [{"text": f"{count} × {name}",
-                                         "detail": f"{coins(craft.prices[item][0])} each" if item in craft.prices else ""}
+                                         "detail": t("{price} each", price=coins(craft.prices[item][0])) if item in craft.prices else ""}
                                         for item, name, count in buy]
         if buy:
             card["wisp"] = encode_wisp1([{"do": "auctionator.shopping_list", "name": title,

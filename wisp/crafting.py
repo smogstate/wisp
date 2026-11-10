@@ -4,6 +4,8 @@ is done here, in code: the model chooses what to craft and never adds anything u
 """
 import re
 
+from .i18n import coin_units, t
+
 COLOURS = ("orange", "yellow", "green", "grey")
 
 
@@ -11,7 +13,8 @@ def coins(copper) -> str:
     """Copper as the game writes money: 12g 40s, 85s, 7c."""
     copper = int(round(copper))
     gold, silver, rest = copper // 10000, copper % 10000 // 100, copper % 100
-    return " ".join([f"{gold}g"] * bool(gold) + [f"{silver}s"] * bool(silver) + [f"{rest}c"] * bool(rest and not gold)) or "0c"
+    g, s, c = coin_units()   # g s c, or the player's own language's letters
+    return " ".join([f"{gold}{g}"] * bool(gold) + [f"{silver}{s}"] * bool(silver) + [f"{rest}{c}"] * bool(rest and not gold)) or f"0{c}"
 
 
 def _text(value, limit: int) -> str:
@@ -184,10 +187,10 @@ class Crafting:
                 step["makes"] = f"{times * recipe['makes_count']} × {self.name(recipe['makes'])}"
             skill = next((b["skill"] for b in self.books if b["profession"] == recipe["profession"]), None)
             if recipe["colour"] == "grey":
-                step["warning"] = "grey: crafting it gives no skill"
+                step["warning"] = t("grey: crafting it gives no skill")
             elif recipe["grey_at"] and skill is not None and times > recipe["grey_at"] - skill:
-                step["warning"] = (f"turns grey at skill {recipe['grey_at']}: at most the first "
-                                   f"{recipe['grey_at'] - skill} crafts can give skill")
+                step["warning"] = t("turns grey at skill {grey}: at most the first {n} crafts can give skill",
+                                    grey=recipe["grey_at"], n=recipe["grey_at"] - skill)
             if not recipe["learned"]:
                 step["not_learned"] = True
             for item, count in recipe["reagents"]:
@@ -197,7 +200,7 @@ class Crafting:
             # the same step as the player sees it on the plan card
             shown.append({"text": f"{times} × {recipe['name']}", "colour": recipe["colour"],
                           "each": ", ".join(f"{count} {self.name(item)}" for item, count in recipe["reagents"]),
-                          "warning": step.get("warning") or ("not learned yet" if not recipe["learned"] else "")})
+                          "warning": step.get("warning") or (t("not learned yet") if not recipe["learned"] else "")})
         materials, total, unpriced, oldest, buy, rows = [], 0, [], 0, [], []
         for item, wanted in need.items():
             from_plan = min(made.get(item, 0), wanted)
@@ -219,14 +222,15 @@ class Crafting:
             if wanted > from_plan:   # what the plan makes for itself is a step, not something to gather
                 rows.append({"item": self.name(item), "need": wanted - from_plan, "bags": from_bags, "bank": from_bank, "buy": to_buy,
                              "cost": line.get("cost", ""), "unpriced": bool(to_buy) and "cost" not in line})
-        card = {"sub": " · ".join(f"{name}, skill {skill}" if skill is not None else name for name, skill in professions.items()),
+        card = {"sub": " · ".join(t("{name}, skill {skill}", name=name, skill=skill) if skill is not None else name
+                                  for name, skill in professions.items()),
                 "steps": shown, "materials": rows,
-                "total": ("Nothing to buy" if not buy else
-                          (f"To buy: about {coins(total)}" if total else "To buy")
-                          + (f" · {len(unpriced)} without an auction price" if unpriced else "")),
-                "notes": [("As of your last logout; the bank as it was when you last opened it."
-                           if self.bank_seen else "As of your last logout; the bank is not known: open it once and Wisp counts it.")
-                          + (" Only orange gives a point on every craft: the rest may take more."
+                "total": (t("Nothing to buy") if not buy else
+                          (t("To buy: about {sum}", sum=coins(total)) if total else t("To buy"))
+                          + (t(" · {n} without an auction price", n=len(unpriced)) if unpriced else "")),
+                "notes": [(t("As of your last logout; the bank as it was when you last opened it.")
+                           if self.bank_seen else t("As of your last logout; the bank is not known: open it once and Wisp counts it."))
+                          + (t(" Only orange gives a point on every craft: the rest may take more.")
                              if any(step["colour"] != "orange" for step in shown) else "")]}
         out = {"steps": steps, "materials": materials, "to_buy_cost": coins(total), "_buy": buy, "_card": card,
                "note": "Counted in code from the recipes and the bags as of the last logout, and the bank as it was when last "

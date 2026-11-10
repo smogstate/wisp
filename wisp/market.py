@@ -17,6 +17,7 @@ import statistics
 from pathlib import Path
 
 from .crafting import coins
+from .i18n import t, tn
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS price(market TEXT, item INTEGER, day INTEGER, low INTEGER, high INTEGER, listed INTEGER,
@@ -86,8 +87,8 @@ def forecast(rows: list, summary: dict) -> dict | None:
     low, high = _quantile(recent, 0.2) + drift, _quantile(recent, 0.8) + drift
     span = rows[-1][0] - rows[0][0] + 1
     return {"expected": max(1, level + drift), "low": max(1, low), "high": max(1, high),
-            "based_on": f"{len(rows)} days of scans over {span} days",
-            "confidence": "weak" if len(rows) < 10 else "moderate" if len(rows) < 30 else "fair"}
+            "based_on": t("{n} days of scans over {span} days", n=len(rows), span=span),
+            "confidence": t("weak" if len(rows) < 10 else "moderate" if len(rows) < 30 else "fair")}
 
 
 class Market:
@@ -277,13 +278,14 @@ class Market:
             out["series_note"] = f"the last 45 of {len(rows)} days are listed; the figures above use all of them"
         # the same thing for the player's eyes: a chart card, drawn by the window from these numbers
         out["_chart"] = {
-            "title": name, "sub": f"last {days} days · {len(rows)} scan day{'s' if len(rows) != 1 else ''}",
+            "title": name, "sub": t("last {days} days · {scans}", days=days, scans=tn(len(rows), "{n} scan day", "{n} scan days")),
             "points": [list(row) for row in rows[-180:]], "usual": round(s["usual"]),
             "estimate": {k: round(guess[k]) for k in ("low", "high", "expected")} if guess else None,
-            "stats": [["Now", out["now"]], ["Usual", out["usual_price"]], ["Against usual", out["now_against_usual"]]]
-                     + ([["Next week", f"{coins(guess['low'])} – {coins(guess['high'])}"]] if guess else []),
-            "notes": ["Lowest listing on each day you scanned, from your own Auctionator scans. A listing is not a sale."
-                      + (f" The estimate rests on {guess['based_on']}: confidence {guess['confidence']}." if guess else "")]}
+            "stats": [[t("Now"), out["now"]], [t("Usual"), out["usual_price"]], [t("Against usual"), out["now_against_usual"]]]
+                     + ([[t("Next week"), f"{coins(guess['low'])} – {coins(guess['high'])}"]] if guess else []),
+            "notes": [t("Lowest listing on each day you scanned, from your own Auctionator scans. A listing is not a sale.")
+                      + (t(" The estimate rests on {based}: confidence {confidence}.", based=guess["based_on"], confidence=guess["confidence"])
+                         if guess else "")]}
         return out
 
     def scan(self, snapshot: dict, kind: str, days: int, limit: int, name: str = "", only: set | None = None,

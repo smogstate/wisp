@@ -659,7 +659,7 @@ def test_investments(wow: Path, tmp: Path):
         ("buy", 200, "3s", 5), ("buy", 100, "5s", 0), ("sell", 150, "5s", 0)]
     chart = game.cards[-1]["chart"]
     assert (chart["title"], chart["line"], chart["usual"], chart["estimate"]) == ("Silk Cloth", "paid", 367, None)
-    assert [s[0] for s in chart["stats"]] == ["Paid", "Now", "Gain", "Unsold gain"] and len(chart["points"]) == 3
+    assert [s[0] for s in chart["stats"]] == ["Bought at", "Now", "Gain", "Unsold gain"] and len(chart["points"]) == 3
 
     # a mistake undone; a whole record forgotten; and another realm is another book
     assert "remove the sale first" in invest(action="remove", trade=1)["error"], "the 150 sold cannot rest on the 100 left"
@@ -984,6 +984,92 @@ def test_spending_cap(wow: Path):
     assert len(kept) == 60 and kept[time.strftime("%Y-%m-%d")] == 0.25 and "2026-01-01" not in kept
     app.spend_file.write_text("not json")
     assert app.spent_today() == 0.0, "a damaged file is an empty one"
+
+
+def test_localization(tmp: Path):
+    """What Wisp writes itself is in the player's language: the game client's, unless Settings says otherwise."""
+    import re
+    from wisp import i18n
+    # every text marked for translation has its Russian, in the code and in the window
+    missing = []
+    for file in (ROOT / "wisp").glob("*.py"):
+        source = file.read_text(encoding="utf-8")
+        for key in re.findall(r'(?<![\w.])t\(\s*"((?:[^"\\]|\\.)*)"', source):
+            key = key.encode().decode("unicode_escape").encode("latin-1").decode("utf-8") if "\\" in key else key
+            if key not in i18n.RU:
+                missing.append(f"{file.name}: {key}")
+        for key in re.findall(r'(?<![\w.])tn\([^"]*"(?:[^"\\]|\\.)*",\s*"((?:[^"\\]|\\.)*)"', source):
+            if key not in i18n.RU_COUNTED:
+                missing.append(f"{file.name}: counted: {key}")
+    page = (ROOT / "wisp" / "ui.html").read_text(encoding="utf-8")
+    window = page[page.index("const RU = {"):page.index("const T = ")]
+    for key in re.findall(r'(?<![\w.])T\("((?:[^"\\]|\\.)*)"', page):
+        if f'"{key}":' not in window:
+            missing.append(f"ui.html: {key}")
+    assert not missing, "no Russian for: " + "; ".join(missing[:12])
+    assert all(len(forms) == 3 for forms in i18n.RU_COUNTED.values())
+
+    try:
+        app = App(make_wow_dir(tmp / "ru", flags="russian"), fake=True)
+        game = app.load_game()
+        assert i18n.LANG == "ru" and app.state()["lang"] == "ru", "a Russian game client: Russian, without being asked"
+        run_tool(game, "questing_route", {})
+        route = game.cards[-1]["route"]
+        assert route["title"] == "Задания: Elwynn Forest" and route["sub"] == "уровень 12 · сдать: 1, взять: 3, продолжить: 1"
+        assert route["steps"][0]["detail"] == "Взять: A Fishy Peril (10 ур., 620 опыта)"
+        assert route["steps"][2]["detail"] == "Сдать: Wolves Across the Border (450 опыта)"
+        assert route["notes"][1] == "2\u00a0060 опыта во взятых заданиях (21% уровня)" and "Пропущено: серых — 1, красных — 1." in route["notes"][2]
+        assert game.cards[-1]["hint"] == "Метки для TomTom: «Копировать», затем в игре дважды Ctrl+V"
+        assert game.places["q33.end.1.1"]["title"] == "Eagan Peltskinner (принимает задание)", "the waypoint's name in the game too"
+        crafts = [{"recipe_id": 3839, "times": 25}, {"recipe_id": 8760, "times": 10}]
+        run_tool(game, "shopping_list", {"name": "Портняжное дело 150-170", "crafts": crafts})
+        plan = game.cards[-1]["plan"]
+        assert plan["sub"] == "Tailoring, навык 150" and plan["total"] == "Купить: около 3з 6с · без цены на аукционе: 2"
+        assert plan["steps"][0]["warning"] == "становится серым на навыке 170: навык дадут не больше первых 20 изготовлений"
+        assert plan["materials"][0]["cost"] == "3з 6с", "money in the game's own letters"
+        assert [i18n.tn(n, "{n} stop", "{n} stops") for n in (1, 2, 5, 11, 21, 104)] == [
+            "1 остановка", "2 остановки", "5 остановок", "11 остановок", "21 остановка", "104 остановки"]
+        # every card kind, in Russian: nothing of Wisp's own left in English
+        for name, args in (("leveling", {"show": True}), ("gold", {"view": "bags", "show": True}), ("gold", {"view": "crafts", "show": True}),
+                           ("my_auctions", {"show": True}), ("farming", {"view": "spots", "show": True}), ("farming", {"view": "sources", "show": True}),
+                           ("farming", {"view": "gathering", "show": True}),
+                           ("price_history", {"item": "Silk Cloth", "show": True}),
+                           ("investments", {"action": "buy", "item": "Silk Cloth", "quantity": 10, "price_each": "3с 50м"}),
+                           ("investments", {"item": "Silk Cloth", "show": True}), ("auction_ledger", {"show": True}),
+                           ("waypoint", {"refs": ["q33.end.1.1"]})):
+            before = len(game.cards)
+            out = run_tool(game, name, args)
+            assert "error" not in out and len(game.cards) == before + 1, (name, args, out.get("error"))
+        names = set(game.crafting.names.values()) | {"TomTom", "Auctionator", "XP", "PvP", "Eagan Peltskinner", "Scout through the Jasperlode Mine"}
+
+        def from_the_game(value):   # names the game itself gave: the fixture's are English, a Russian client's are not
+            if isinstance(value, str):
+                names.add(value)
+            for inner in value.values() if isinstance(value, dict) else value if isinstance(value, list) else ():
+                from_the_game(inner)
+        from_the_game(game.snapshot)
+        for card in game.cards:
+            text = json.dumps({k: v for k, v in card.items() if k not in ("wisp", "id")}, ensure_ascii=False)
+            for known in sorted((n for n in names if len(n) >= 4 or n in ("XP", "PvP")), key=len, reverse=True):
+                text = text.replace(known, "")
+            text = text.replace("Ctrl+V", "")
+            english = re.findall(r"[A-Za-z]{3,}", re.sub(r'"(points|usual|estimate|low|high|expected|title|sub|columns|rows|notes|stats|line|lines|'
+                                                         r'heading|table|chart|plan|route|steps|text|detail|where|hint|addon|materials|item|need|bags|bank|'
+                                                         r'buy|cost|unpriced|colour|each|warning|total|null|false|true|orange|yellow|green|grey)"', "", text))
+            english = [word for word in english if word not in ("false", "true", "null", "Wisp")]
+            assert not english, f"left in English on a card: {english[:8]} in {text[:300]}"
+        assert run_tool(game, "investments", {})["investments"][0]["paid_each"] == "3с 50м", "and a price given in Russian is understood"
+
+        app.save_settings({"language": "en"})
+        app.load_game()
+        assert i18n.LANG == "en" and app.settings()["language"] == "en", "Settings can say otherwise"
+        app.save_settings({"language": "nonsense"})
+        assert app.prefs["language"] == "en"
+        english = App(make_wow_dir(tmp / "en"), fake=True)
+        english.load_game()
+        assert i18n.LANG == "en"
+    finally:
+        i18n.set_language("en")
 
 
 def test_update(tmp: Path):
@@ -1434,6 +1520,8 @@ if __name__ == "__main__":
         test_bank(Path(bk))
     with tempfile.TemporaryDirectory() as md:
         test_market_depth(Path(md))
+    with tempfile.TemporaryDirectory() as loc:
+        test_localization(Path(loc))
     with tempfile.TemporaryDirectory() as u:
         test_update(Path(u))
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

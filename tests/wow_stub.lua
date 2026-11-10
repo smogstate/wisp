@@ -161,7 +161,7 @@ end
 
 -- the character: a level 12 human in Elwynn with two quests
 function GetBuildInfo() return "1.60.1", "70862", "Nov 1 2026", 16001 end
-function GetLocale() return "ruRU" end
+function GetLocale() return flags:find("russian") and "ruRU" or "enUS" end   -- the character's name is Russian either way
 function UnitClass() return "Маг", "MAGE" end
 function UnitRace() return "Человек", "Human" end
 function UnitLevel() return 12 end
