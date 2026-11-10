@@ -268,8 +268,9 @@ class App:
     def toggle_from_hotkey(self):
         if self.window is None:
             return
+        opening = self.collapsed
         self.window.evaluate_js("window.toggleCollapsed && toggleCollapsed()")
-        if self.collapsed:   # it is about to open: take the keyboard
+        if opening:   # take the keyboard, so you can type at once
             local.bring_to_front(self.window)
 
     def remember_position(self):

@@ -238,6 +238,15 @@ def test_this_pc(tmp: Path):
     (installed / "Wisp.toc").unlink()
     assert "install the addon first" in why(forever)
 
+    # the window helpers do nothing without a window, and the global key can be registered on Windows
+    local.set_window_alpha(None, 0.5)
+    local.set_window_round(None, True)
+    local.round_window_corners(None)
+    assert local.window_handle(object()) is None
+    pressed = []
+    registered = local.start_hotkey(lambda: pressed.append(1))
+    assert registered is (os.name == "nt"), f"the show/hide key: registered={registered}"
+
     app = App(None, fake=True)   # persist is off: real settings and keys are never touched
     assert "error" in app.save_settings({"wow_dir": str(tmp)})
     assert local.addon_state(forever) == "missing"

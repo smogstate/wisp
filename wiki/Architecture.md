@@ -71,6 +71,8 @@ A card is a box in the conversation for something the model produced that is not
 ## Themes and transparency
 
 > Built 2026-11-10. Wisp's window has no title bar and a see-through background; the header is its handle. Theme and transparency are in Settings and in `/theme` and `/opacity`. An ordinary framed, opaque window remains available as a setting, in case a PC draws the see-through one badly.
+>
+> **On Windows the whole window fades, text included.** The first plan was a see-through background under solid text. A web view on Windows cannot blend single pixels with the desktop, which the first Windows screenshots showed: an opaque window and a white square around the wisp. So the window's own opacity is used: solid while the mouse is over it or it has the keyboard, and as see-through as the setting says otherwise. The collapsed wisp is a window cut to a disc. On systems that do blend pixels the page's translucent background is used, with the same meaning for the setting.
 
 - **Themes: dark, light, and auto.** Auto follows the Windows setting and is the default. `/theme` switches.
 - **Transparency is of the panel's background, not of the text.** The game shows through the panel; text, cards and buttons stay fully solid so they remain readable over a busy scene. A see-through window with see-through text is the thing to avoid.

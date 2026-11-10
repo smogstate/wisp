@@ -37,7 +37,7 @@ Every conversation is kept on your PC (`%APPDATA%\Wisp\sessions`). The clock ico
 
 ### The window
 
-Wisp's window has no title bar: drag it by its header. The background is see-through and fades further when you are not using it; text and cards stay solid. **Collapse** it to a small glowing wisp with the header button, Esc, or **Ctrl+Shift+Space** from anywhere, including inside the game; click the wisp to bring it back. The wisp breathes while Wisp is thinking and shows a mark when an answer or instructions are waiting. Theme (dark, light, or following Windows) and transparency are in Settings, and as `/theme` and `/opacity 70`. If the see-through window misbehaves on your PC, Settings has *Use an ordinary window*.
+Wisp's window has no title bar: drag it by its header. It turns see-through when you are not using it, so the game shows behind it, and is solid again as soon as the mouse is over it or you type. **Collapse** it to a small glowing wisp with the header button, Esc, or **Ctrl+Shift+Space** from anywhere, including inside the game; click the wisp to bring it back. The wisp breathes while Wisp is thinking and shows a mark when an answer or instructions are waiting. Theme (dark, light, or following Windows) and transparency are in Settings, and as `/theme` and `/opacity 70`. If the see-through window misbehaves on your PC, Settings has *Use an ordinary window*.
 
 ### Things to know
 
