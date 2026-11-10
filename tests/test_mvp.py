@@ -95,6 +95,16 @@ def test_question_to_waypoint(wow: Path):
     assert message == {"cmds": [{"do": "tomtom.waypoint", "map": 1429, "x": 48.9, "y": 40.2,
                                  "title": "Eagan Peltskinner (turn in)"}]}
 
+    usage = [e["usage"] for e in events if e["type"] == "usage"]
+    assert [u["requests"] for u in usage] == [1, 2, 3] and usage[-1]["output"] == 360 and usage[-1]["cost"] > 0
+
+    from wisp.llm import add_usage, new_usage
+    total = new_usage()
+    add_usage(total, "claude-opus-5-5", input_tokens=1_000_000, output_tokens=500_000, cache_read=1_000_000)
+    assert total["cost"] == 4 + 10 + 0.20 and total["priced"]
+    add_usage(total, "some-other-model", input_tokens=10)
+    assert total["input"] == 1_000_010 and not total["priced"], "an unknown model is counted but not priced"
+
     lines = stub("paste", card["wisp"])
     assert "WAY tomtom 1429 0.489 0.402 Eagan Peltskinner (turn in)" in lines, lines
     assert "CHAT Wisp waypoint: Eagan Peltskinner (turn in)" in lines, lines

@@ -4,6 +4,22 @@
 
 A `/` at the start of the input means Wisp is being told what to do, not asked a question. Same model as kintale's assistant.
 
+## Built so far (2026-11-10)
+
+Typing `/` lists every command that exists, filtered as you type; arrows move, Enter runs, Tab completes, Esc closes. Asked for by Denis after the MVP worked.
+
+| Command | Does |
+|---|---|
+| `/new` | Start a new conversation |
+| `/cost` | Tokens and cost of this conversation |
+| `/copy` | Copy the last game instructions again |
+| `/check` | Check that everything is set up |
+| `/settings` | Game folder, addon and API key |
+
+**Tokens and cost** are also shown all the time, in a line above the input: tokens used and dollars spent in this conversation. Tokens come from what the provider reports for each response; the price is Wisp's own table, and a model without a price there is shown in tokens only.
+
+Not built yet: everything below that is not in this table, `/sessions` and `/fork` included.
+
 ## How commands behave
 
 - **`/` opens a palette** above the input, filtered as you type. Enter runs the top match.

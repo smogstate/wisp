@@ -136,6 +136,11 @@ def main():
         assert third[1]["content"][1]["type"] == "tool_use", "the assistant turn is sent back whole"
         assert third[4]["content"][0]["type"] == "tool_result" and third[4]["content"][0]["is_error"] is False
 
+        # three responses of 10 input and 30 output tokens each, at $4 and $20 per million
+        usage = [e["usage"] for e in events if e["type"] == "usage"][-1]
+        assert usage["requests"] == 3 and usage["input"] == 30 and usage["output"] == 90 and usage["priced"]
+        assert abs(usage["cost"] - (30 * 4 + 90 * 20) / 1_000_000) < 1e-12, usage
+
         # a second question in the same conversation keeps the history
         events = list(answer(chat, game, "and again?"))
         assert events[-1]["type"] == "done" and len(REQUESTS[-1]["body"]["messages"]) > 5

@@ -65,6 +65,14 @@
     border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; max-height: 140px; min-height: 38px;
   }
   #send { min-width: 68px; height: 38px; }
+  #meter { padding: 4px var(--gutter) 0; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; text-align: right; }
+  #meter + form { border-top: 0; padding-top: 6px; }
+  #palette { list-style: none; margin: 0; padding: 6px var(--gutter); background: var(--panel); border-top: 1px solid var(--line); }
+  #palette li { display: flex; gap: 12px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+  #palette li[aria-selected="true"] { background: var(--user); }
+  #palette b { font-weight: 600; min-width: 84px; }
+  #palette span { color: var(--muted); }
+  [hidden] { display: none !important; }
   dialog { width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 16px;
     background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px; }
   dialog::backdrop { background: rgba(0, 0, 0, .45); }
@@ -94,8 +102,10 @@
   <button id="new" type="button" title="Start a new conversation">New</button>
 </header>
 <main id="log" aria-live="polite"></main>
+<ul id="palette" role="listbox" aria-label="Commands" hidden></ul>
+<div id="meter" hidden></div>
 <form id="form">
-  <textarea id="input" rows="1" placeholder="Ask about your quests…" aria-label="Your question"></textarea>
+  <textarea id="input" rows="1" placeholder="Ask, or type / for commands" aria-label="Your question"></textarea>
   <button id="send" class="primary" type="submit">Send</button>
 </form>
 <dialog id="settings" aria-labelledby="settings-title">
@@ -129,7 +139,20 @@
 const token = new URLSearchParams(location.search).get("t") || "";
 const log = document.getElementById("log"), input = document.getElementById("input");
 const send = document.getElementById("send"), statusEl = document.getElementById("status");
-let running = false;
+let running = false, usage = null, lastCard = null;
+
+function showMeter() {
+  const meter = document.getElementById("meter");
+  meter.hidden = !usage || !usage.requests;
+  if (meter.hidden) return;
+  const tokens = usage.input + usage.output + usage.cache_read + usage.cache_write;
+  meter.textContent = tokens.toLocaleString("en-US") + " tokens · " + money(usage) + " this conversation";
+}
+
+function money(u) {
+  if (!u.priced) return "cost unknown";
+  return u.cost < 0.005 ? "under $0.01" : "$" + u.cost.toFixed(2);
+}
 
 const api = (path, body) => fetch(path, {
   method: body === undefined ? "GET" : "POST",
@@ -159,6 +182,7 @@ async function refresh() {
   statusEl.textContent = s.snapshot_problem ? "no character data"
     : `level ${s.level ?? "?"} · ${s.quests} quests · saved ${age(s.snapshot_age_minutes ?? 0)}`;
   statusEl.title = s.snapshot_problem || "Your character as of your last logout";
+  if (!running) { usage = s.usage; showMeter(); }
   if (!log.querySelector(".msg, .card")) {
     log.textContent = "";
     const hello = add("div", "hello");
@@ -189,6 +213,7 @@ async function copy(text) {
 }
 
 function showCard(card) {
+  lastCard = card;
   const el = add("section", "card");
   const h = document.createElement("h2");
   h.textContent = "For the game";
@@ -244,6 +269,7 @@ async function ask(text) {
         if (event.type === "text") { bubble.textContent += event.text; log.scrollTop = log.scrollHeight; }
         else if (event.type === "tool") { add("div", "trace", (event.ok ? "looked up: " : "lookup failed: ") + event.name); bubble = add("div", "msg wisp"); }
         else if (event.type === "card") { showCard(event.card); bubble = add("div", "msg wisp"); }
+        else if (event.type === "usage") { usage = event.usage; showMeter(); }
         else if (event.type === "error") add("div", "msg error", event.message);
         else if (event.type === "done" && event.reason === "stopped") add("div", "note", "stopped");
       }
@@ -255,26 +281,106 @@ async function ask(text) {
   input.focus();
 }
 
+// ---- commands: a "/" at the start tells Wisp what to do instead of asking it something ----
+async function newChat() {
+  if (running) return;
+  await api("/api/new", {});
+  log.textContent = "";
+  lastCard = null;
+  refresh();
+}
+
+function showCost() {
+  log.querySelector(".hello")?.remove();
+  if (!usage || !usage.requests) { add("div", "trace", "Nothing spent yet in this conversation."); return; }
+  add("div", "trace", `This conversation: ${usage.requests} model requests · ${usage.input.toLocaleString("en-US")} tokens in · ${usage.output.toLocaleString("en-US")} out · ${money(usage)}`);
+  add("div", "trace", usage.priced ? "Prices: Claude Opus 5.5, $4 in and $20 out per million tokens. Your Anthropic bill is the final word."
+    : "Part of this was answered by a model Wisp has no price for, so only tokens are shown.");
+}
+
+async function copyLast() {
+  log.querySelector(".hello")?.remove();
+  if (!lastCard) { add("div", "trace", "There are no game instructions to copy yet."); return; }
+  add("div", "trace", (await copy(lastCard.wisp)) ? "Copied the last instructions. In the game: Ctrl+V twice." : "Could not reach the clipboard.");
+}
+
+const commands = [
+  { name: "new", help: "Start a new conversation", run: newChat },
+  { name: "cost", help: "Tokens and cost of this conversation", run: showCost },
+  { name: "copy", help: "Copy the last game instructions again", run: copyLast },
+  { name: "check", help: "Check that everything is set up", run: async () => { await openSettings(); document.getElementById("check").click(); } },
+  { name: "settings", help: "Game folder, addon and API key", run: () => openSettings() },
+];
+const palette = document.getElementById("palette");
+let matches = [], selected = 0;
+
+function showPalette() {
+  const typed = input.value;
+  matches = /^\/\S*$/.test(typed) ? commands.filter(c => c.name.startsWith(typed.slice(1).toLowerCase())) : [];
+  selected = Math.min(selected, Math.max(matches.length - 1, 0));
+  palette.hidden = matches.length === 0;
+  palette.textContent = "";
+  matches.forEach((c, i) => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", i === selected ? "true" : "false");
+    const name = document.createElement("b"); name.textContent = "/" + c.name;
+    const help = document.createElement("span"); help.textContent = c.help;
+    li.append(name, help);
+    li.onmousedown = (e) => { e.preventDefault(); runCommand(c); };
+    palette.append(li);
+  });
+}
+
+function runCommand(command) {
+  input.value = "";
+  input.style.height = "";
+  showPalette();
+  command.run();
+}
+
 document.getElementById("form").onsubmit = (e) => {
   e.preventDefault();
   if (running) { api("/api/stop", {}); return; }
   const text = input.value.trim();
   if (!text) return;
+  if (text.startsWith("/")) {
+    const command = matches[selected] || commands.find(c => "/" + c.name === text.toLowerCase());
+    if (command) { runCommand(command); return; }
+    input.value = "";
+    showPalette();
+    add("div", "trace", "There is no command " + text.split(/\s/)[0] + ". Type / to see the commands.");
+    return;
+  }
   input.value = "";
   input.style.height = "";
   ask(text);
 };
 input.onkeydown = (e) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("form").requestSubmit(); }
+  if (!palette.hidden && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+    e.preventDefault();
+    selected = (selected + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length;
+    showPalette();
+  } else if (!palette.hidden && e.key === "Tab") {
+    e.preventDefault();
+    input.value = "/" + matches[selected].name;
+    showPalette();
+  } else if (!palette.hidden && e.key === "Escape") {
+    e.stopPropagation();
+    input.value = "";
+    showPalette();
+  } else if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById("form").requestSubmit();
+  }
 };
-input.oninput = () => { input.style.height = ""; input.style.height = Math.min(input.scrollHeight + 2, 140) + "px"; };
+input.oninput = () => {
+  input.style.height = ""; input.style.height = Math.min(input.scrollHeight + 2, 140) + "px";
+  selected = 0;
+  showPalette();
+};
 document.onkeydown = (e) => { if (e.key === "Escape" && running) api("/api/stop", {}); };
-document.getElementById("new").onclick = async () => {
-  if (running) return;
-  await api("/api/new", {});
-  log.textContent = "";
-  refresh();
-};
+document.getElementById("new").onclick = newChat;
 // ---- settings ----
 const dialog = document.getElementById("settings"), $ = (id) => document.getElementById(id);
 

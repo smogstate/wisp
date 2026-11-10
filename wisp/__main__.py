@@ -153,6 +153,7 @@ class App:
             "level": character.get("level"),
             "questie": (game.snapshot.get("addons") or {}).get("questie"),
             "needs_setup": self.wow_dir is None or (self.chat is None and not self.fake),
+            "usage": dict(self.chat.usage) if self.chat is not None else None,
         }
 
     def settings(self) -> dict:

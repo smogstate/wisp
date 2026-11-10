@@ -12,12 +12,35 @@ from .game import SYSTEM, TOOLS, Game, run_tool
 MODEL = "claude-opus-5-5"
 MAX_HOPS = 6   # tool rounds per question
 
+# US dollars per million tokens, from Anthropic's price list as of 2026-11-03.
+# A model that is not listed here is counted in tokens and shown without a price:
+# a missing number is better than a confident wrong one.
+PRICES = {"claude-opus-5-5": {"input": 4.00, "output": 20.00, "cache_read": 0.20}}
+
+
+def new_usage() -> dict:
+    return {"requests": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "cost": 0.0, "priced": True}
+
+
+def add_usage(total: dict, model: str, input_tokens=0, output_tokens=0, cache_read=0, cache_write=0):
+    """Add one model response to a conversation's running total."""
+    counts = {"input": input_tokens or 0, "output": output_tokens or 0,
+              "cache_read": cache_read or 0, "cache_write": cache_write or 0}
+    total["requests"] += 1
+    price = PRICES.get(model, {})
+    for kind, tokens in counts.items():
+        total[kind] += tokens
+        if tokens and kind not in price:
+            total["priced"] = False
+        total["cost"] += tokens * price.get(kind, 0) / 1_000_000
+
 
 class AnthropicChat:
     def __init__(self, api_key: str | None = None):
         import anthropic   # imported here so everything else works without the SDK
 
         self.sdk = anthropic
+        self.usage = new_usage()   # tokens and cost of this conversation so far
         # without a key given, the SDK looks in ANTHROPIC_API_KEY
         self.client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
         self.messages = []
@@ -81,6 +104,9 @@ class AnthropicChat:
             yield {"type": "error", "message": "The model sent a tool call that could not be read. Ask again."}
             return
 
+        used = message.usage
+        add_usage(self.usage, message.model, used.input_tokens, used.output_tokens,
+                  getattr(used, "cache_read_input_tokens", 0), getattr(used, "cache_creation_input_tokens", 0))
         self.messages.append({"role": "assistant", "content": message.content})
         calls = [{"id": b.id, "name": b.name, "input": b.input} for b in message.content if b.type == "tool_use"]
         reason = message.stop_reason
@@ -96,6 +122,7 @@ class FakeChat:
     def __init__(self):
         self.turn = 0
         self.first_ref = None
+        self.usage = new_usage()
 
     def user(self, text):
         self.turn = 0
@@ -116,6 +143,7 @@ class FakeChat:
 
     def stream(self, should_stop):
         self.turn += 1
+        add_usage(self.usage, MODEL, input_tokens=900 + 400 * self.turn, output_tokens=120)   # made-up numbers
         if self.turn == 1:
             yield {"type": "text", "text": "Let me look at your quest log. "}
             yield {"type": "end", "reason": "tool_use", "calls": [{"id": "t1", "name": "quests", "input": {}}]}
@@ -153,6 +181,7 @@ def answer(chat, game: Game, question: str, should_stop=lambda: False):
                 return
             else:
                 calls, reason = event["calls"], event["reason"]
+        yield {"type": "usage", "usage": dict(chat.usage)}
         if reason == "stopped":
             chat.stopped(said)
             yield {"type": "done", "reason": "stopped"}

@@ -29,6 +29,10 @@ You need the game on Windows, an Anthropic API key, and the Questie addon. TomTo
 
 To see the interface with a sample character, no key and no game: `Wisp.exe --fake`.
 
+### Commands and cost
+
+Type `/` to see the commands: `/new`, `/cost`, `/copy`, `/check`, `/settings`. The line above the input shows the tokens and dollars this conversation has used so far; `/cost` gives the breakdown. The price is Wisp's estimate from Anthropic's list prices, and your Anthropic bill is the final word.
+
 ### Things to know
 
 - Wisp sees your character **as of your last logout**. Log out and back in to refresh it.
