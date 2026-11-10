@@ -44,7 +44,7 @@ def make_wow_dir(tmp: Path, flags="") -> Path:
     """A fake game folder holding what the addon would have saved at logout."""
     lines = stub("snapshot", flags=flags)
     snapshot = next(l for l in lines if l.startswith("SNAPSHOT ")).split(" ", 1)[1]
-    assert any("snapshot built: 2 quests" in l for l in lines), lines
+    assert any("snapshot built: 2 quests" in l or "снимок собран: заданий: 2, Questie найден" in l for l in lines), lines
     saved = tmp / "WTF/Account/TEST/SavedVariables"
     saved.mkdir(parents=True)
     # the game writes saved variables as Lua assignments
@@ -990,6 +990,7 @@ def test_localization(tmp: Path):
     """What Wisp writes itself is in the player's language: the game client's, unless Settings says otherwise."""
     import re
     from wisp import i18n
+    from wisp.game import RESEARCH_TOOLS, TOOLS
     # every text marked for translation has its Russian, in the code and in the window
     missing = []
     for file in (ROOT / "wisp").glob("*.py"):
@@ -1003,9 +1004,21 @@ def test_localization(tmp: Path):
                 missing.append(f"{file.name}: counted: {key}")
     page = (ROOT / "wisp" / "ui.html").read_text(encoding="utf-8")
     window = page[page.index("const RU = {"):page.index("const T = ")]
-    for key in re.findall(r'(?<![\w.])T\("((?:[^"\\]|\\.)*)"', page):
-        if f'"{key}":' not in window:
+    script = page[page.index("<script>"):]
+    said = re.findall(r'(?<![\w.])T\("((?:[^"\\]|\\.)*)"', script) + re.findall(r'\bhelp: "([^"]*)"', script)
+    # the window's fixed texts: what the markup itself says, and what it says in tooltips and to screen readers
+    markup = page[page.index("<body>"):page.index("<script>")]
+    said += [text.strip() for text in re.findall(r">([^<>]+)<", markup) if text.strip()]
+    said += re.findall(r'(?:title|aria-label|placeholder)="([^"]+)"', markup)
+    said += [tool["name"] for tool in TOOLS + RESEARCH_TOOLS] + ["the web", "a web page", "ok", "FAIL", "note"]
+    own = ("Wisp", "Language / Язык", "Same as the game / Как в игре", "Русский", "English", "…\\World of Warcraft\\_forever_")
+    for key in dict.fromkeys(said):
+        if f'"{key}":' not in window and key not in own:
             missing.append(f"ui.html: {key}")
+    counted = page[page.index("const RU_COUNTED = {"):page.index("const fill = ")]
+    for key in re.findall(r'(?<![\w.])TN\([^"]*"(?:[^"\\]|\\.)*",\s*"((?:[^"\\]|\\.)*)"', script):
+        if f'"{key}":' not in counted:
+            missing.append(f"ui.html: counted: {key}")
     assert not missing, "no Russian for: " + "; ".join(missing[:12])
     assert all(len(forms) == 3 for forms in i18n.RU_COUNTED.values())
 
@@ -1059,6 +1072,23 @@ def test_localization(tmp: Path):
             english = [word for word in english if word not in ("false", "true", "null", "Wisp")]
             assert not english, f"left in English on a card: {english[:8]} in {text[:300]}"
         assert run_tool(game, "investments", {})["investments"][0]["paid_each"] == "3с 50м", "and a price given in Russian is understood"
+
+        # the rest of what Wisp says: since last time, Check setup, what went wrong, the addon's own chat lines
+        from wisp.history import ago_words, recap
+        changes = {"level": {"from": 11, "to": 12}, "quests_finished": 3, "quests_finished_names": ["A", "B", "C"], "quests_picked_up": ["D"],
+                   "quests_abandoned": [], "money_copper": {"change": 12345}, "zone": {"to": "Westfall"}}
+        assert recap(changes) == ["Уровень 11 → 12", "Выполнено 3 задания: A, B, C", "Взято: D", "Деньги +1з 23с", "Сейчас: Westfall"]
+        assert [ago_words(h) for h in (0.5, 1, 3, 30, 72)] == ["меньше часа", "1 час", "3 часа", "30 часов", "3 дня"]
+        checked = {what: (status, detail) for what, status, detail in check(app.wow_dir, call_model=False)}
+        assert checked["Папка игры"][0] == "ok" and checked["Снимок читается"][1].startswith("заданий: 2, сохранён ")
+        assert checked["Аддон Wisp установлен"] == ("FAIL", "не установлен"), "the marks stay as they are: the window words them"
+        assert not [what for what in checked if re.search(r"[A-Za-z]{4,}", what.replace("Wisp", "").replace("Questie", "").replace("TomTom", "")
+                                                           .replace("DungeonJournal", "").replace("Anthropic", "").replace("Moonshot", "").replace("OpenRouter", ""))], checked.keys()
+        app.prefs["daily_cap"] = 0.01
+        app.add_spend(0.02)
+        assert next(app.ask("привет"))["message"].startswith("Сегодняшний лимит расходов $0.01 достигнут (потрачено $0.02).")
+        assert Game.load(None).problem == "папка игры не указана"
+        assert any("это не сообщение Wisp." in line for line in stub("paste", "/run print('hi')", flags="russian"))
 
         app.save_settings({"language": "en"})
         app.load_game()

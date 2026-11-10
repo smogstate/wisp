@@ -13,6 +13,8 @@ import json
 import re
 from pathlib import Path
 
+from .i18n import coin_units, t, tn
+
 REFERENCE = ("dungeons", "recipes", "prices", "market", "gather", "sources", "available", "auctionMail", "loot", "ownAuctions", "xp", "vendor", "listings", "bank")   # large; prices have their own store (market.py)
 
 
@@ -147,39 +149,40 @@ def diff(old: dict, new: dict) -> dict:
 def money_words(copper: int) -> str:
     sign, copper = ("-" if copper < 0 else "+"), abs(copper)
     gold, silver, rest = copper // 10000, copper % 10000 // 100, copper % 100
-    parts = [f"{gold}g"] * bool(gold) + [f"{silver}s"] * bool(silver) + [f"{rest}c"] * bool(rest and not gold)
+    g, s, c = coin_units()
+    parts = [f"{gold}{g}"] * bool(gold) + [f"{silver}{s}"] * bool(silver) + [f"{rest}{c}"] * bool(rest and not gold)
     return sign + " ".join(parts or ["0"])
 
 
 def ago_words(hours: float) -> str:
     if hours < 1:
-        return "less than an hour"
+        return t("less than an hour")
     if hours < 36:
-        return f"{round(hours)} hour{'s' if round(hours) != 1 else ''}"
-    return f"{round(hours / 24)} days"
+        return tn(round(hours), "{n} hour", "{n} hours")
+    return tn(round(hours / 24), "{n} day", "{n} days")
 
 
 def recap(changes: dict) -> list[str]:
     """The same facts as short lines for the window. Empty when nothing changed."""
     lines = []
     if "level" in changes:
-        lines.append(f"Level {changes['level']['from']} → {changes['level']['to']}")
+        lines.append(t("Level {a} → {b}", a=changes["level"]["from"], b=changes["level"]["to"]))
     if changes["quests_finished"]:
         named = changes["quests_finished_names"]
         more = changes["quests_finished"] - len(named[:4])
-        text = f"{changes['quests_finished']} quest{'s' if changes['quests_finished'] != 1 else ''} finished"
+        text = tn(changes["quests_finished"], "{n} quest finished", "{n} quests finished")
         if named:
-            text += ": " + ", ".join(named[:4]) + (f" and {more} more" if more > 0 else "")
+            text += ": " + ", ".join(named[:4]) + (t(" and {n} more", n=more) if more > 0 else "")
         lines.append(text)
     if changes["quests_picked_up"]:
-        lines.append("Picked up: " + ", ".join(changes["quests_picked_up"][:4])
-                     + (f" and {len(changes['quests_picked_up']) - 4} more" if len(changes["quests_picked_up"]) > 4 else ""))
+        lines.append(t("Picked up: ") + ", ".join(changes["quests_picked_up"][:4])
+                     + (t(" and {n} more", n=len(changes["quests_picked_up"]) - 4) if len(changes["quests_picked_up"]) > 4 else ""))
     if changes["quests_abandoned"]:
-        lines.append("Dropped: " + ", ".join(changes["quests_abandoned"][:4]))
+        lines.append(t("Dropped: ") + ", ".join(changes["quests_abandoned"][:4]))
     for p in changes.get("professions", []):
-        lines.append(f"{p['name']}: learned" if p.get("learned") else f"{p['name']} {p['from']} → {p['to']}")
+        lines.append(t("{name}: learned", name=p["name"]) if p.get("learned") else f"{p['name']} {p['from']} → {p['to']}")
     if "money_copper" in changes:
-        lines.append("Money " + money_words(changes["money_copper"]["change"]))
+        lines.append(t("Money {change}", change=money_words(changes["money_copper"]["change"])))
     if "zone" in changes:
-        lines.append(f"Now in {changes['zone']['to']}")
+        lines.append(t("Now in {zone}", zone=changes["zone"]["to"]))
     return lines

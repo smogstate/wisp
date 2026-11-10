@@ -189,3 +189,15 @@ Denis first: "can we automatically update the client when a new version is avail
 - **Tested by the build, on Windows, before anything is published**: the exe runs downloaded code and reports its commit; the exe file is unchanged afterwards; broken code fails the try; and the exe swap still works for the rare case.
 - **What it does not protect against.** Nothing is signed. The hashes prove a download is the published file, not who published it: someone with control of the GitHub repository could publish code that every Wisp would then run. That is the same trust as downloading the exe by hand, now exercised automatically; the switch is for those who prefer to do it by hand.
 
+## Language
+
+Wisp speaks the player's language. The model does that by itself; everything put
+together in code (cards, tables, routes, the window, messages, Check setup, the
+addon's chat lines) goes through one translation table per half, with the English
+text as the key, so a text without a translation shows in English and is never
+blank. The language is the game client's (`GetLocale`, saved in the snapshot),
+unless Settings chooses one; before any snapshot it is Windows' own. Russian is
+the only translation so far. Counted words take Russian's three forms, numbers
+and money the Russian shape (1 200, 3з 50с), and a price typed in Russian units
+is understood.
+

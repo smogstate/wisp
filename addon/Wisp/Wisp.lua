@@ -15,6 +15,26 @@
 local PASTE_KEY = "CTRL-V"
 local E = C_EncodingUtil
 
+-- What Wisp says in the chat frame, in the game's own language. The English is the key.
+local RU = GetLocale and GetLocale() == "ruRU" and {
+  ["read %d %s recipes. They reach Wisp when you log out."] = "рецептов прочитано: %d (%s). Они попадут в Wisp, когда вы выйдете из игры.",
+  ["that is not a Wisp message."] = "это не сообщение Wisp.",
+  ["Wisp: paste now (Ctrl+V). Esc closes."] = "Wisp: вставьте сейчас (Ctrl+V). Esc закрывает.",
+  ["could not read that message."] = "не удалось прочитать это сообщение.",
+  ["stopped after 50 commands."] = "остановлено после 50 команд.",
+  ["skipped"] = "пропущено", ["unknown command"] = "неизвестная команда", ["failed"] = "ошибка",
+  ["snapshot built: %d quests, Questie %s, DungeonJournal %s. It is written to disk when you log out."] =
+    "снимок собран: заданий: %d, Questie %s, DungeonJournal %s. Он запишется на диск, когда вы выйдете из игры.",
+  ["found"] = "найден", ["not found"] = "не найден", ["%d dungeons"] = "подземелий: %d",
+  ["could not build the snapshot:"] = "не удалось собрать снимок:",
+  ["this client has no JSON encoder"] = "в этом клиенте нет кодировщика JSON",
+  ["bad waypoint"] = "неверная метка", ["cannot set a waypoint on that map"] = "на этой карте нельзя поставить метку",
+  ["waypoint: "] = "метка: ", ["Auctionator is not installed"] = "Auctionator не установлен",
+  ["bad shopping list"] = "неверный список покупок", ["Auctionator refused "] = "Auctionator не принял ",
+  ["shopping list \"%s\" with %d items is in Auctionator's Shopping tab"] = "список покупок «%s» (предметов: %d) — на вкладке «Покупки» в Auctionator",
+} or {}
+local function L(text) return RU[text] or text end
+
 local function say(text) print("|cff7fd4ffWisp|r " .. text) end
 
 ------------------------------------------------------------ snapshot ----
@@ -309,7 +329,7 @@ local function captureRecipes()
   end
   if read > 0 and not told[info.professionName] then
     told[info.professionName] = true
-    say(("read %d %s recipes. They reach Wisp when you log out."):format(read, info.professionName))
+    say(L("read %d %s recipes. They reach Wisp when you log out."):format(read, info.professionName))
   end
 end
 
@@ -1134,7 +1154,7 @@ end
 
 -- Returns the snapshot, or nil and the reason. On failure the previous snapshot is kept.
 local function save()
-  if not (E and E.SerializeJSON and E.EncodeBase64) then return nil, "this client has no JSON encoder" end
+  if not (E and E.SerializeJSON and E.EncodeBase64) then return nil, L("this client has no JSON encoder") end
   local ok, snapshot = pcall(buildSnapshot)
   if not ok then return nil, tostring(snapshot) end
   local okJ, text = pcall(function() return E.EncodeBase64(E.SerializeJSON(snapshot)) end)
@@ -1151,7 +1171,7 @@ local commands = {}
 commands["tomtom.waypoint"] = function(a)   -- { map = uiMapID, x = 0-100, y = 0-100, title = text }
   local map, x, y = tonumber(a.map), tonumber(a.x), tonumber(a.y)
   if not (map and x and y and map > 0 and x >= 0 and x <= 100 and y >= 0 and y <= 100) then
-    return false, "bad waypoint"
+    return false, L("bad waypoint")
   end
   local title = "Wisp"
   if type(a.title) == "string" and a.title ~= "" then
@@ -1164,55 +1184,55 @@ commands["tomtom.waypoint"] = function(a)   -- { map = uiMapID, x = 0-100, y = 0
     C_SuperTrack.SetSuperTrackedUserWaypoint(true)
     title = title .. " (map pin: TomTom is not installed)"
   else
-    return false, "cannot set a waypoint on that map"
+    return false, L("cannot set a waypoint on that map")
   end
-  return true, "waypoint: " .. title
+  return true, L("waypoint: ") .. title
 end
 
 -- { name = list name, items = { { id = item id, name = text, quantity = n }, ... } }
 -- Creates (or replaces) one of Auctionator's shopping lists through its public API.
 commands["auctionator.shopping_list"] = function(a)
   local api = auctionator()
-  if not (api and api.CreateShoppingList and api.ConvertToSearchString) then return false, "Auctionator is not installed" end
-  if type(a.items) ~= "table" or #a.items == 0 or #a.items > 60 then return false, "bad shopping list" end
+  if not (api and api.CreateShoppingList and api.ConvertToSearchString) then return false, L("Auctionator is not installed") end
+  if type(a.items) ~= "table" or #a.items == 0 or #a.items > 60 then return false, L("bad shopping list") end
   local clean = function(text, limit) return (text:gsub("[|;%c]", "")):sub(1, limit) end
   local listName = "Wisp"
   if type(a.name) == "string" and clean(a.name, 40) ~= "" then listName = clean(a.name, 40) end
   local searches = {}
   for _, item in ipairs(a.items) do
     local quantity = type(item) == "table" and tonumber(item.quantity)
-    if not (quantity and quantity >= 1 and quantity <= 100000) then return false, "bad shopping list" end
+    if not (quantity and quantity >= 1 and quantity <= 100000) then return false, L("bad shopping list") end
     -- the game's own name for the item where it has one: it is in the player's language
     local name = tonumber(item.id) and itemName(tonumber(item.id))
     if not name and type(item.name) == "string" then name = clean(item.name, 80) end
-    if not name or name == "" then return false, "bad shopping list" end
+    if not name or name == "" then return false, L("bad shopping list") end
     local ok, search = pcall(api.ConvertToSearchString, "Wisp",
                              { searchString = name, isExact = true, quantity = math.floor(quantity) })
-    if not ok then return false, "Auctionator refused " .. name end
+    if not ok then return false, L("Auctionator refused ") .. name end
     searches[#searches + 1] = search
   end
   local ok, why = pcall(api.CreateShoppingList, "Wisp", listName, searches)
   if not ok then return false, "Auctionator: " .. tostring(why) end
-  return true, ("shopping list \"%s\" with %d items is in Auctionator's Shopping tab"):format(listName, #searches)
+  return true, L("shopping list \"%s\" with %d items is in Auctionator's Shopping tab"):format(listName, #searches)
 end
 
 local function receive(text)
-  if text:sub(1, 6) ~= "WISP1:" then return say("that is not a Wisp message.") end
+  if text:sub(1, 6) ~= "WISP1:" then return say(L("that is not a Wisp message.")) end
   local ok, message = pcall(function() return E.DeserializeJSON(E.DecodeBase64(text:sub(7))) end)
   if not ok or type(message) ~= "table" or type(message.cmds) ~= "table" then
-    return say("could not read that message.")
+    return say(L("could not read that message."))
   end
   for i, cmd in ipairs(message.cmds) do
-    if i > 50 then say("stopped after 50 commands."); break end
+    if i > 50 then say(L("stopped after 50 commands.")); break end
     local run = type(cmd) == "table" and commands[cmd["do"]]
     if not run then
-      say("|cffff6060skipped|r unknown command " .. tostring(type(cmd) == "table" and cmd["do"]))
+      say("|cffff6060" .. L("skipped") .. "|r " .. L("unknown command") .. " " .. tostring(type(cmd) == "table" and cmd["do"]))
     else
       local okRun, good, note = pcall(run, cmd)
       if okRun and good then
         say(note)
       else
-        say("|cffff6060failed|r " .. tostring(okRun and note or good))
+        say("|cffff6060" .. L("failed") .. "|r " .. tostring(okRun and note or good))
       end
     end
   end
@@ -1227,7 +1247,7 @@ box:SetMaxBytes(0)
 box:Hide()
 local hint = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 hint:SetPoint("BOTTOM", box, "TOP", 0, 4)
-hint:SetText("Wisp: paste now (Ctrl+V). Esc closes.")
+hint:SetText(L("Wisp: paste now (Ctrl+V). Esc closes."))
 
 local opened = 0   -- counts openings, so an old timer cannot close a newer box
 
@@ -1340,11 +1360,11 @@ SlashCmdList.WISP = function(msg)
   if msg:match("save") then
     local snapshot, why = save()
     if snapshot then
-      say(("snapshot built: %d quests, Questie %s, DungeonJournal %s. It is written to disk when you log out.")
-        :format(#snapshot.quests, snapshot.addons.questie and "found" or "not found",
-                snapshot.dungeons and (#snapshot.dungeons .. " dungeons") or "not found"))
+      say(L("snapshot built: %d quests, Questie %s, DungeonJournal %s. It is written to disk when you log out.")
+        :format(#snapshot.quests, L(snapshot.addons.questie and "found" or "not found"),
+                snapshot.dungeons and L("%d dungeons"):format(#snapshot.dungeons) or L("not found")))
     else
-      say("|cffff6060could not build the snapshot:|r " .. tostring(why))
+      say("|cffff6060" .. L("could not build the snapshot:") .. "|r " .. tostring(why))
     end
   else
     openBox()

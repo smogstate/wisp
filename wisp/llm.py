@@ -12,6 +12,7 @@ import json
 import time
 
 from .game import RESEARCH_TOOLS, SYSTEM, TOOLS, Game, run_tool
+from .i18n import t
 
 MODEL = "claude-opus-5-5"
 MAX_HOPS = 6   # tool rounds per question
@@ -219,19 +220,19 @@ class AnthropicChat:
                     if attempt == 2:
                         raise
         except sdk.AuthenticationError:
-            yield {"type": "error", "message": "The Anthropic key was rejected. Check it in Settings."}
+            yield {"type": "error", "message": t("The {company} key was rejected. Check it in Settings.", company="Anthropic")}
             return
         except sdk.RateLimitError:
-            yield {"type": "error", "message": "Anthropic is rate limiting this key. Wait a moment and ask again."}
+            yield {"type": "error", "message": t("{company} is rate limiting this key. Wait a moment and ask again.", company="Anthropic")}
             return
         except sdk.APIConnectionError:
-            yield {"type": "error", "message": "Could not reach Anthropic. Check the connection and ask again."}
+            yield {"type": "error", "message": t("Could not reach {company}. Check the connection and ask again.", company="Anthropic")}
             return
         except sdk.APIStatusError as e:
-            yield {"type": "error", "message": f"Anthropic answered with an error ({e.status_code}): {e.message}"}
+            yield {"type": "error", "message": t("{company} answered with an error ({code}): {message}", company="Anthropic", code=e.status_code, message=e.message)}
             return
         except ValueError:
-            yield {"type": "error", "message": "The model sent a tool call that could not be read. Ask again."}
+            yield {"type": "error", "message": t("The model sent a tool call that could not be read. Ask again.")}
             return
 
         used = message.usage
@@ -350,16 +351,16 @@ class OpenAIChat:
                         call["arguments"] += piece.function.arguments or ""
                 finish = choice.finish_reason or finish
         except sdk.AuthenticationError:
-            yield {"type": "error", "message": f"The {self.company} key was rejected. Check it in Settings."}
+            yield {"type": "error", "message": t("The {company} key was rejected. Check it in Settings.", company=self.company)}
             return
         except sdk.RateLimitError:
-            yield {"type": "error", "message": f"{self.company} is rate limiting this key. Wait a moment and ask again."}
+            yield {"type": "error", "message": t("{company} is rate limiting this key. Wait a moment and ask again.", company=self.company)}
             return
         except sdk.APIConnectionError:
-            yield {"type": "error", "message": f"Could not reach {self.company}. Check the connection and ask again."}
+            yield {"type": "error", "message": t("Could not reach {company}. Check the connection and ask again.", company=self.company)}
             return
         except sdk.APIStatusError as e:
-            yield {"type": "error", "message": f"{self.company} answered with an error ({e.status_code}): {e.message}"}
+            yield {"type": "error", "message": t("{company} answered with an error ({code}): {message}", company=self.company, code=e.status_code, message=e.message)}
             return
 
         ordered = [calls[i] for i in sorted(calls)]
@@ -586,11 +587,11 @@ def answer(chat, game: Game, question: str, should_stop=lambda: False, research:
             yield {"type": "done", "reason": "stopped"}
             return
         if reason == "refusal":
-            yield {"type": "error", "message": "The model declined to answer that."}
+            yield {"type": "error", "message": t("The model declined to answer that.")}
             yield {"type": "done", "reason": "error"}
             return
         if reason == "truncated":
-            yield {"type": "error", "message": "The answer was cut off before it finished. Ask again."}
+            yield {"type": "error", "message": t("The answer was cut off before it finished. Ask again.")}
             yield {"type": "done", "reason": "error"}
             return
         if reason == "pause_turn":   # the provider paused its own web work: sent back as it is, it carries on
@@ -620,5 +621,5 @@ def answer(chat, game: Game, question: str, should_stop=lambda: False, research:
             results.append({"id": call["id"], "content": json.dumps(result, ensure_ascii=False),
                             "is_error": "error" in result})
         chat.tool_results(results)
-    yield {"type": "error", "message": "That took too many lookups. Try a narrower question."}
+    yield {"type": "error", "message": t("That took too many lookups. Try a narrower question.")}
     yield {"type": "done", "reason": "error"}

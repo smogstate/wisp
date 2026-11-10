@@ -211,13 +211,13 @@
   dialog .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
   dialog .actions .grow { flex: 1; }
   #keys { display: flex; flex-direction: column; gap: 6px; }
-  #keys .row span { width: 78px; flex: none; color: var(--muted); }
+  #keys .row span { width: 92px; flex: none; color: var(--muted); }
   dialog select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   dialog input[type="range"] { padding: 0; accent-color: var(--accent); }
   dialog .check { display: flex; gap: 8px; align-items: center; font-weight: 400; margin-top: 10px; }
   dialog .check input { flex: none; width: 16px; height: 16px; }
   #results { list-style: none; margin: 12px 0 0; padding: 0; font-size: 13px; }
-  #results li { display: grid; grid-template-columns: 44px 1fr; padding: 3px 0; overflow-wrap: anywhere; }
+  #results li { display: grid; grid-template-columns: 50px 1fr; padding: 3px 0; overflow-wrap: anywhere; }
   #results .ok { color: var(--accent); } #results .FAIL { color: var(--danger); font-weight: 600; } #results .note { color: var(--muted); }
   #results small { grid-column: 2; color: var(--muted); }
   #send.stop { background: transparent; color: var(--danger); border-color: var(--danger); }
@@ -349,8 +349,8 @@ function recapBlock(recap) {
   const box = document.createElement("div");
   box.className = "recap";
   const title = document.createElement("h2");
-  title.textContent = "Since last time · " + recap.since + " apart";
-  title.title = "What changed between your last two logouts";
+  title.textContent = T("Since last time · {since} apart", { since: recap.since });
+  title.title = T("What changed between your last two logouts");
   const list = document.createElement("ul");
   for (const line of recap.lines) { const li = document.createElement("li"); li.textContent = line; list.append(li); }
   box.append(title, list);
@@ -411,17 +411,18 @@ function showMeter() {
   meter.textContent = "";   // the line itself stays: it carries the version
   if (!usage || !usage.requests) return;
   const tokens = usage.input + usage.output + usage.cache_read + usage.cache_write;
-  meter.textContent = tokens.toLocaleString("en-US") + " tokens · " + money(usage) + " this conversation" + today();
+  meter.textContent = TN(tokens, "{n} token", "{n} tokens") + " · " + T("{cost} this conversation", { cost: money(usage) }) + today();
 }
 
 // What today has cost across every conversation, against the day's limit when there is one.
 let spend = null;
 const dollars = v => v < 0.005 ? "$0" : "$" + v.toFixed(2);
-const today = () => !spend || (!spend.today && !spend.cap) ? "" : " · " + dollars(spend.today) + (spend.cap ? " of $" + spend.cap.toFixed(2) : "") + " today";
+const today = () => !spend || (!spend.today && !spend.cap) ? "" : " · " + (spend.cap ? T("{spent} of ${cap} today", { spent: dollars(spend.today), cap: spend.cap.toFixed(2) })
+  : T("{spent} today", { spent: dollars(spend.today) }));
 
 function money(u) {
-  if (!u.priced) return "cost unknown";
-  return u.cost < 0.005 ? "under $0.01" : "$" + u.cost.toFixed(2);
+  if (!u.priced) return T("cost unknown");
+  return u.cost < 0.005 ? T("under $0.01") : "$" + u.cost.toFixed(2);
 }
 
 const api = (path, body) => fetch(path, {
@@ -440,48 +441,52 @@ function add(tag, cls, text, into = log) {
 }
 
 function age(minutes) {
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return minutes + " min ago";
-  if (minutes < 48 * 60) return Math.round(minutes / 60) + " h ago";
-  return Math.round(minutes / 1440) + " days ago";
+  if (minutes < 1) return T("just now");
+  if (minutes < 60) return T("{n} min ago", { n: minutes });
+  if (minutes < 48 * 60) return T("{n} h ago", { n: Math.round(minutes / 60) });
+  return TN(Math.round(minutes / 1440), "{n} day ago", "{n} days ago");
 }
 
 async function refresh() {
   let s;
-  try { s = await (await api("/api/state")).json(); } catch { statusEl.textContent = "not connected"; return; }
-  statusEl.textContent = s.snapshot_problem ? "no character data"
-    : `level ${s.level ?? "?"} · ${s.quests} quests · ${age(s.snapshot_age_minutes ?? 0)}`;
-  statusEl.title = (s.snapshot_problem || "Your character as of your last logout") + " · answers from " + s.model;
+  try { s = await (await api("/api/state")).json(); } catch { statusEl.textContent = T("not connected"); return; }
+  if ((s.lang || "en") !== lang) {   // the language is the game's, known once the snapshot is read; or Settings changed it
+    lang = s.lang || "en";
+    localize();
+    log.querySelector(".hello")?.remove();   // drawn again below, in the new language
+  }
+  statusEl.textContent = s.snapshot_problem ? T("no character data")
+    : T("level {level}", { level: s.level ?? "?" }) + " · " + TN(s.quests, "{n} quest", "{n} quests") + " · " + age(s.snapshot_age_minutes ?? 0);
+  // the line is short and may be cut: its tooltip has all of it
+  statusEl.title = (s.snapshot_problem || statusEl.textContent + " · " + T("Your character as of your last logout")) + T(" · answers from {model}", { model: s.model });
   lastRecap = s.recap; snapshotsKept = s.snapshots;
   glass = s.window.glass; fade = s.window.fade;
   document.body.classList.toggle("glass", glass);
   document.body.classList.toggle("fade", fade);
   applyLook(s.theme, s.opacity);
   document.getElementById("quit").hidden = !s.window.own;
-  lang = s.lang || "en";
-  document.documentElement.lang = lang;
   spend = s.spend; showMeter();
   // which Wisp this is: the commit it was built from, always in sight
   const up = s.update || {};
   $("build").textContent = up.version || "dev";
-  $("build").title = !up.version ? "This copy runs from source: it has no version and does not update itself."
-    : "Wisp " + up.version + (up.built ? ", built " + up.built.replace("T", " ").replace("Z", " UTC") : "")
-      + ({ ready: ". Version " + up.new + " is downloaded and starts with the next start.", downloading: ". Fetching " + up.new + "…",
-           failed: ". A newer version could not be fetched.", off: ". Updates are switched off." }[up.state] || ". It is the newest.");
+  $("build").title = !up.version ? T("This copy runs from source: it has no version and does not update itself.")
+    : "Wisp " + up.version + (up.built ? T(", built {when}", { when: up.built.replace("T", " ").replace("Z", " UTC") }) : "")
+      + ({ ready: T(". Version {new} is downloaded and starts with the next start.", up), downloading: T(". Fetching {new}…", up),
+           failed: T(". A newer version could not be fetched."), off: T(". Updates are switched off.") }[up.state] || T(". It is the newest."));
   $("update").hidden = !(s.update && s.update.state === "ready") || running;   // never offered in the middle of an answer
-  document.getElementById("collapse").title = "Collapse" + (s.window.hotkey ? " (" + s.window.hotkey + ")" : " (Esc)");
+  document.getElementById("collapse").title = T("Collapse") + (s.window.hotkey ? " (" + s.window.hotkey + ")" : " (Esc)");
   if (!running) { usage = s.usage; showMeter(); }
   if (!log.querySelector(".msg, .card")) {
     log.textContent = "";
     const hello = add("div", "hello");
     const title = document.createElement("strong");
-    title.textContent = "Ask about your quests";
-    hello.append(title, "Where do I hand this in? What comes next in the chain? Wisp knows your quest log as of your last logout.");
+    title.textContent = T("Ask about your quests");
+    hello.append(title, T("Where do I hand this in? What comes next in the chain? Wisp knows your quest log as of your last logout."));
     const who = document.createElement("div");
-    who.className = "hint"; who.style.marginTop = "8px"; who.textContent = "Answers from " + s.model;
+    who.className = "hint"; who.style.marginTop = "8px"; who.textContent = T("Answers from {model}", { model: s.model });
     hello.append(who);
     if (s.recap) hello.append(recapBlock(s.recap));
-    for (const problem of [s.snapshot_problem, s.model_problem, s.questie === false ? "Questie was not found, so locations will be missing." : null]) {
+    for (const problem of [s.snapshot_problem, s.model_problem, s.questie === false ? T("Questie was not found, so locations will be missing.") : null]) {
       if (!problem) continue;
       const warn = document.createElement("div");
       warn.className = "warn";
@@ -559,8 +564,138 @@ const RU = {
   "Copy for the game": "Копировать для игры", "Copied": "Скопировано", "Copy failed": "Не удалось скопировать",
   "Copied. Now in the game: Ctrl+V twice": "Скопировано. Теперь в игре: дважды Ctrl+V",
   "Could not reach the clipboard": "Не удалось обратиться к буферу обмена",
+  // the window's fixed texts
+  "Open Wisp": "Открыть Wisp", "starting…": "запуск…", "Conversations": "Разговоры", "New conversation": "Новый разговор",
+  "Settings": "Настройки", "Collapse": "Свернуть", "Close Wisp": "Закрыть Wisp", "Commands": "Команды",
+  "The version of Wisp that is running": "Запущенная версия Wisp", "A new version of Wisp is ready.": "Готова новая версия Wisp.",
+  "Restart": "Перезапустить", "Ask, or type / for commands": "Спросите или введите / для команд", "Your question": "Ваш вопрос",
+  "Send": "Отправить", "Stop": "Остановить", "Close": "Закрыть", "Game folder": "Папка игры", "Browse for the folder": "Выбрать папку",
+  "The World of Warcraft folder, or the _forever_ folder inside it.": "Папка World of Warcraft или папка _forever_ внутри неё.",
+  "Wisp addon": "Аддон Wisp", "Install addon": "Установить аддон", "Update addon": "Обновить аддон", "Answers come from": "Кто отвечает",
+  "Provider": "Провайдер", "Model": "Модель", "API keys": "Ключи API",
+  "Kept in this PC's credential store. Each key is sent only to its own provider.": "Хранятся в хранилище учётных данных этого компьютера. Каждый ключ отправляется только своему провайдеру.",
+  "Spending limit per day, in dollars": "Лимит расходов в день, в долларах", "Appearance": "Оформление", "Theme": "Тема",
+  "Follow Windows": "Как в Windows", "Dark": "Тёмная", "Light": "Светлая", "How solid the window is": "Непрозрачность окна",
+  "Use an ordinary window, with a title bar and no transparency": "Обычное окно: с заголовком и без прозрачности",
+  "Takes effect the next time Wisp starts.": "Вступит в силу при следующем запуске Wisp.", "Language": "Язык",
+  "Keep Wisp up to date by itself": "Обновлять Wisp автоматически", "Check setup": "Проверить настройку", "Checking…": "Проверка…",
+  "Save": "Сохранить", "Back to the list": "Назад к списку", "Search conversations": "Поиск по разговорам",
+  "Read only. Open it to continue.": "Только чтение. Откройте, чтобы продолжить.", "Open": "Открыть",
+  // the status line, the footer and the first screen
+  "not connected": "нет связи", "no character data": "нет данных персонажа", "level {level}": "ур. {level}",
+  "just now": "сейчас", "{n} min ago": "{n} мин", "{n} h ago": "{n} ч",
+  "Your character as of your last logout": "Ваш персонаж на момент последнего выхода из игры", " · answers from {model}": " · отвечает {model}",
+  "{cost} this conversation": "{cost} за разговор", "{spent} of ${cap} today": "сегодня {spent} из ${cap}", "{spent} today": "сегодня {spent}",
+  "cost unknown": "цена неизвестна", "under $0.01": "меньше $0.01",
+  "This copy runs from source: it has no version and does not update itself.": "Эта копия запущена из исходников: у неё нет версии, и она не обновляется.",
+  ", built {when}": ", сборка от {when}", ". Version {new} is downloaded and starts with the next start.": ". Версия {new} загружена и запустится при следующем старте.",
+  ". Fetching {new}…": ". Загружается {new}…", ". A newer version could not be fetched.": ". Не удалось загрузить новую версию.",
+  ". Updates are switched off.": ". Обновления выключены.", ". It is the newest.": ". Это последняя версия.",
+  "Ask about your quests": "Спросите о своих заданиях",
+  "Where do I hand this in? What comes next in the chain? Wisp knows your quest log as of your last logout.": "Куда это сдать? Что дальше по цепочке? Wisp знает ваш журнал заданий на момент последнего выхода из игры.",
+  "Answers from {model}": "Отвечает {model}", "Questie was not found, so locations will be missing.": "Questie не найден, поэтому мест на карте не будет.",
+  "Since last time · {since} apart": "С прошлого раза · между выходами {since}",
+  "What changed between your last two logouts": "Что изменилось между двумя последними выходами из игры",
+  // the conversation
+  "Fork from here: continue in a copy of the conversation up to this point": "Ответвить отсюда: продолжить в копии разговора до этого места",
+  "This is a fork. The original is kept under Conversations.": "Это ответвление. Оригинал остаётся в «Разговорах».",
+  "looked up: ": "запрос: ", "lookup failed: ": "запрос не удался: ", "stopped": "остановлено", "request failed": "запрос не выполнен",
+  "Research run: your game data first, then the web where the provider has it. Up to 24 rounds of lookups, 8 web searches (1 cent each) and 6 pages. Stop any time.": "Исследование: сначала ваши игровые данные, затем интернет, если провайдер это умеет. До 24 кругов запросов, 8 поисков в интернете (по 1 центу) и 6 страниц. Остановить можно в любой момент.",
+  " Today so far: {spent} of your ${cap} limit.": " Сегодня потрачено: {spent} из лимита ${cap}.",
+  "Wisp lost the connection to its own engine: ": "Wisp потерял связь со своим движком: ", "Wisp lost the connection to its own engine.": "Wisp потерял связь со своим движком.",
+  "A new conversation with the other provider. The earlier one is kept under Conversations.": "Новый разговор с другим провайдером. Прежний остаётся в «Разговорах».",
+  // what Wisp looked up, by the tool's name
+  "character": "персонаж", "quests": "задания", "available_quests": "доступные задания", "leveling": "прокачка", "questing_route": "маршрут по заданиям",
+  "gold": "золото", "investments": "вложения", "market_depth": "лоты на аукционе", "my_auctions": "мои лоты", "auction_ledger": "покупки и продажи",
+  "quest_done": "выполненное задание", "changes": "изменения", "dungeons": "подземелья", "dungeon": "подземелье", "recipes": "рецепты",
+  "auction_prices": "цены аукциона", "price_history": "история цены", "market_scan": "обзор рынка", "market_query": "запрос к базе цен",
+  "item_links": "связи предмета", "gathering": "места сбора", "farming": "фарм", "craft_plan": "план изготовления", "shopping_list": "список покупок",
+  "notes": "заметки", "waypoint": "метка на карте", "report": "отчёт", "the web": "интернет", "a web page": "веб-страница",
+  // commands
+  "Start a new conversation": "Начать новый разговор", "Earlier conversations: search, peek, reopen": "Прежние разговоры: поиск, просмотр, продолжение",
+  "Continue in a copy of this conversation": "Продолжить в копии этого разговора",
+  "A thorough answer: your data, then the web. Slower, costs more": "Подробный ответ: ваши данные, затем интернет. Дольше и дороже",
+  "Open the folder of kept research reports": "Открыть папку с отчётами исследований", "What changed since your last session": "Что изменилось с прошлой сессии",
+  "Tokens and cost of this conversation": "Токены и стоимость этого разговора", "Copy the last game instructions again": "Ещё раз скопировать последние инструкции для игры",
+  "Shrink to the wisp; click it to come back": "Свернуть в огонёк; щелчок по нему вернёт окно", "dark, light or auto": "dark, light или auto",
+  "How solid the window is, 30 to 100": "Непрозрачность окна, от 30 до 100", "Which provider and model answers": "Какой провайдер и какая модель отвечают",
+  "Check that everything is set up": "Проверить, что всё настроено", "Game folder, addon and API key": "Папка игры, аддон и ключ API",
+  "Research reports are kept as text files in your notes folder.": "Отчёты исследований хранятся текстовыми файлами в папке заметок.",
+  "There is no command {name}. Type / to see the commands.": "Нет команды {name}. Введите /, чтобы увидеть команды.",
+  "Nothing spent yet in this conversation.": "В этом разговоре пока ничего не потрачено.",
+  "This conversation: {requests} model requests · {input} tokens in · {output} out": "Этот разговор: запросов к модели: {requests} · токенов на вход: {input} · на выход: {output}",
+  "Worked out from the provider's list prices. Your bill from the provider is the final word.": "Посчитано по прайс-листу провайдера. Окончательная сумма — в счёте провайдера.",
+  "Wisp has no price list for this model, so only tokens are shown.": "У Wisp нет цен для этой модели, поэтому показаны только токены.",
+  "Today, across every conversation: {spent}": "Сегодня, по всем разговорам: {spent}", " of a limit of ${cap}.": " из лимита ${cap}.",
+  ". There is no daily limit; Settings has one.": ". Дневного лимита нет; его можно задать в настройках.",
+  "Nothing changed between your last two logouts.": "Между двумя последними выходами ничего не изменилось.",
+  "Nothing to compare yet. Wisp keeps a snapshot each time you log out; after the next one there will be a recap.": "Пока не с чем сравнивать. Wisp сохраняет снимок при каждом выходе из игры; после следующего появится сводка.",
+  "There are no game instructions to copy yet.": "Пока нет инструкций для игры.",
+  "Copied the last instructions. In the game: Ctrl+V twice.": "Последние инструкции скопированы. В игре: дважды Ctrl+V.",
+  "Could not reach the clipboard.": "Не удалось обратиться к буферу обмена.",
+  "Theme: {theme}.": "Тема: {theme}.", "following Windows": "как в Windows", "dark": "тёмная", "light": "светлая",
+  "This window cannot be see-through. Wisp's own window can: see Settings.": "Это окно не может быть прозрачным. Собственное окно Wisp может: см. настройки.",
+  "Say how solid, from 30 to 100: /opacity 70": "Укажите непрозрачность от 30 до 100: /opacity 70",
+  "The window is now {n}% solid while you are not using it.": "Теперь окно непрозрачно на {n}%, пока вы им не пользуетесь.",
+  // settings
+  "Found: ": "Найдено: ", "Choose the game folder first": "Сначала выберите папку игры", "Installed": "Установлен",
+  "An older version is installed": "Установлена старая версия", "Not installed": "Не установлен",
+  "Wisp keeps this copy up to date by itself.": "Wisp сам поддерживает эту копию в актуальном состоянии.",
+  "Wisp installs its addon into the game's AddOns folder when you save the game folder.": "Wisp установит свой аддон в папку AddOns игры, когда вы сохраните папку игры.",
+  "How solid the window is while you are not using it. It is fully solid under the mouse and while you type.": "Непрозрачность окна, пока вы им не пользуетесь. Под мышью и при вводе оно полностью непрозрачно.",
+  "Transparency needs Wisp's own window.": "Для прозрачности нужно собственное окно Wisp.",
+  "Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.": "Потрачено сегодня: {spent}. Когда лимит достигнут, Wisp больше ничего не спрашивает до завтра; 0 — без лимита. Считается то, чему Wisp знает цену: цены Kimi неизвестны, поэтому Kimi не считается.",
+  "This copy runs from source and does not update itself.": "Эта копия запущена из исходников и не обновляется.",
+  "This is version {version}": "Это версия {version}", " of {date}": " от {date}", "It is the newest.": "Она последняя.",
+  "Fetching version {new}…": "Загружается версия {new}…", "Version {new} is ready: it starts the next time Wisp does.": "Версия {new} готова: она запустится при следующем старте Wisp.",
+  "A newer one could not be fetched; Wisp will try again.": "Новую версию загрузить не удалось; Wisp попробует ещё раз.",
+  "It looks for a newer one only when this is ticked.": "Новая версия ищется, только когда стоит эта галочка.",
+  " (no key yet)": " (ключа пока нет)", "{company} API key": "Ключ API {company}", "saved on this PC": "сохранён на этом ПК", "environment": "из переменной окружения",
+  "Changing the provider starts a new conversation; the earlier one is kept.": "Смена провайдера начинает новый разговор; прежний сохраняется.",
+  "Paste a key for this provider below to see all its models.": "Вставьте ниже ключ этого провайдера, чтобы увидеть все его модели.",
+  "ok": "ок", "FAIL": "СБОЙ", "note": "нет",
+  // earlier conversations
+  " · fork": " · ответвление", "Nothing matches that.": "Ничего не найдено.",
+  "No conversations yet. They are kept here once you ask something.": "Разговоров пока нет. Они появятся здесь, когда вы что-нибудь спросите.",
+  "Restarting…": "Перезапуск…",
 };
-const T = text => (lang === "ru" && RU[text]) || text;
+// counted texts: Russian has three forms (1 задание, 2 задания, 5 заданий); the key is the English plural
+const RU_COUNTED = {
+  "{n} tokens": ["{n} токен", "{n} токена", "{n} токенов"], "{n} quests": ["{n} задание", "{n} задания", "{n} заданий"],
+  "{n} days ago": ["{n} дн.", "{n} дн.", "{n} дн."], "{n} questions": ["{n} вопрос", "{n} вопроса", "{n} вопросов"],
+  " · {n} web searches": [" · {n} поиск в интернете", " · {n} поиска в интернете", " · {n} поисков в интернете"],
+};
+const fill = (text, values) => values ? text.replace(/\{(\w+)\}/g, (all, key) => key in values ? values[key] : all) : text;
+const T = (text, values) => fill((lang === "ru" && RU[text]) || text, values);
+const num = n => n.toLocaleString(lang === "ru" ? "ru-RU" : "en-US");
+function TN(n, one, many) {
+  let text = n === 1 ? one : many;
+  if (lang === "ru" && RU_COUNTED[many]) {
+    const last = Math.abs(n) % 10, last2 = Math.abs(n) % 100;
+    text = RU_COUNTED[many][last === 1 && last2 !== 11 ? 0 : last >= 2 && last <= 4 && !(last2 >= 12 && last2 <= 14) ? 1 : 2];
+  }
+  return fill(text, { n: num(n) });
+}
+
+// The window's fixed texts. The markup keeps the English, which is also the key; what the
+// conversation holds is never touched.
+function localize() {
+  document.documentElement.lang = lang;
+  const fixed = n => ["log", "peek-log", "session-list", "results", "keys"].includes(n.id) || n.tagName === "SCRIPT" ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, { acceptNode: fixed });
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.nodeType === Node.TEXT_NODE) {
+      n._en ??= n.data;
+      const key = n._en.trim();
+      if (RU[key]) n.data = n._en.replace(key, T(key));
+    } else for (const name of ["title", "aria-label", "placeholder"]) {
+      if (!n.hasAttribute(name)) continue;
+      n._en ??= {};
+      n._en[name] ??= n.getAttribute(name);
+      if (RU[n._en[name]]) n.setAttribute(name, T(n._en[name]));
+    }
+  }
+}
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const svgEl = (tag, attrs, text) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; return e; };
@@ -600,12 +735,12 @@ function chartBlock(c) {
   let lo = Math.min(...values), hi = Math.max(...values);
   const pad = Math.max((hi - lo) * 0.12, hi * 0.02, 1);
   lo = Math.max(0, lo - pad); hi += pad;
-  const unit = hi >= 20000 ? 10000 : hi >= 200 ? 100 : 1, letter = unit === 10000 ? "g" : unit === 100 ? "s" : "c";
+  const unit = hi >= 20000 ? 10000 : hi >= 200 ? 100 : 1, letter = (lang === "ru" ? ["з", "с", "м"] : ["g", "s", "c"])[unit === 10000 ? 0 : unit === 100 ? 1 : 2];
   const rough = (hi - lo) / unit / 3, power = Math.pow(10, Math.floor(Math.log10(rough))), step = [1, 2, 5, 10].find(m => m * power >= rough) * power * unit;
   let active = -1;
   const draw = () => {
-    const W = wrap.clientWidth || 340, H = 150, L = 38, R = 10, T = 16, B = 20;
-    const x = d => L + (day1 === day0 ? 0.5 : (d - day0) / (day1 - day0)) * (W - L - R), yy = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    const W = wrap.clientWidth || 340, H = 150, L = 38, R = 10, TOP = 16, B = 20;
+    const x = d => L + (day1 === day0 ? 0.5 : (d - day0) / (day1 - day0)) * (W - L - R), yy = v => TOP + (1 - (v - lo) / (hi - lo)) * (H - TOP - B);
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     svg.textContent = "";
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
@@ -623,7 +758,7 @@ function chartBlock(c) {
                svgEl("text", { x: L, y: H - 6 }, dayDate(day0)));
     if (pts.length > 1) svg.append(svgEl("text", { x: x(last[0]), y: H - 6, "text-anchor": "end" }, dayDate(last[0])));
     const p = active >= 0 ? pts[active] : last;
-    if (active >= 0) svg.append(svgEl("line", { class: "cross", x1: x(p[0]), x2: x(p[0]), y1: T, y2: H - B }));
+    if (active >= 0) svg.append(svgEl("line", { class: "cross", x1: x(p[0]), x2: x(p[0]), y1: TOP, y2: H - B }));
     svg.append(svgEl("circle", { class: "dot", cx: x(p[0]), cy: yy(p[1]), r: 4 }));
     tip.hidden = active < 0;
     if (active >= 0) {
@@ -770,7 +905,7 @@ function forkButton(turn) {
   const row = add("div", "turn-end");
   const button = document.createElement("button");
   button.type = "button"; button.className = "icon ghost";
-  setIcon(button, "branch", "Fork from here: continue in a copy of the conversation up to this point");
+  setIcon(button, "branch", T("Fork from here: continue in a copy of the conversation up to this point"));
   button.onclick = () => fork(turn);
   row.append(button);
   log.scrollTop = log.scrollHeight;
@@ -792,31 +927,31 @@ async function fork(turn) {
   const view = await post("/api/fork", turn === undefined ? {} : { turn });
   if (view.error) { add("div", "trace", view.error); return; }
   renderSession(view);
-  add("div", "note", "This is a fork. The original is kept under Conversations.");
+  add("div", "note", T("This is a fork. The original is kept under Conversations."));
   refresh();
 }
 
 function setRunning(on) {
   running = on;
   send.dataset.state = on ? "stop" : "send";
-  setIcon(send, on ? "stop" : "send", on ? "Stop" : "Send");
+  setIcon(send, on ? "stop" : "send", T(on ? "Stop" : "Send"));
   send.classList.toggle("stop", on);
   send.classList.toggle("primary", !on);
 }
 
-const traceText = t => (t.ok ? "looked up: " : "lookup failed: ") + t.name + (t.detail ? " · " + t.detail : "");
+const traceText = t => T(t.ok ? "looked up: " : "lookup failed: ") + T(t.name) + (t.detail ? " · " + t.detail : "");
 
 async function ask(text, research = false) {
   log.querySelector(".hello")?.remove();
   add("div", "msg user", text);
-  if (research) add("div", "trace", "Research run: your game data first, then the web where the provider has it. Up to 24 rounds of lookups, 8 web searches (1 cent each) and 6 pages. Stop any time."
-    + (spend && spend.cap ? " Today so far: " + dollars(spend.today) + " of your $" + spend.cap.toFixed(2) + " limit." : ""));
+  if (research) add("div", "trace", T("Research run: your game data first, then the web where the provider has it. Up to 24 rounds of lookups, 8 web searches (1 cent each) and 6 pages. Stop any time.")
+    + (spend && spend.cap ? T(" Today so far: {spent} of your ${cap} limit.", { spent: dollars(spend.today), cap: spend.cap.toFixed(2) }) : ""));
   let bubble = add("div", "msg wisp"), planEl = null;
   setRunning(true);
   if (collapsed) orb.dataset.state = "thinking";
   try {
     const res = await api("/api/ask", { text, research });
-    if (!res.ok) throw new Error((await res.json()).error || "request failed");
+    if (!res.ok) throw new Error((await res.json()).error || T("request failed"));
     const reader = res.body.getReader(), decoder = new TextDecoder();
     let buffer = "";
     for (;;) {
@@ -834,11 +969,11 @@ async function ask(text, research = false) {
         else if (event.type === "card") { const el = showCard(event.card); if (event.card.plan || event.card.chart || event.card.table || event.card.report || event.card.route) planEl = el; bubble = add("div", "msg wisp"); }
         else if (event.type === "usage") { usage = event.usage; showMeter(); }
         else if (event.type === "error") add("div", "msg error", event.message);
-        else if (event.type === "done" && event.reason === "stopped") add("div", "note", "stopped");
+        else if (event.type === "done" && event.reason === "stopped") add("div", "note", T("stopped"));
       }
     }
   } catch (e) {
-    add("div", "msg error", "Wisp lost the connection to its own engine: " + e.message);
+    add("div", "msg error", T("Wisp lost the connection to its own engine: ") + e.message);
   }
   setRunning(false);
   try {
@@ -858,30 +993,32 @@ async function newChat() {
   refresh();
 }
 
+const allToday = () => T("Today, across every conversation: {spent}", { spent: dollars(spend.today) })
+  + (spend.cap ? T(" of a limit of ${cap}.", { cap: spend.cap.toFixed(2) }) : T(". There is no daily limit; Settings has one."));
+
 function showCost() {
   log.querySelector(".hello")?.remove();
   if (!usage || !usage.requests) {
-    add("div", "trace", "Nothing spent yet in this conversation." + (spend && spend.today ? " Today, across every conversation: " + dollars(spend.today)
-      + (spend.cap ? " of a limit of $" + spend.cap.toFixed(2) + "." : ".") : ""));
+    add("div", "trace", T("Nothing spent yet in this conversation.") + (spend && spend.today ? " " + allToday() : ""));
     return;
   }
-  add("div", "trace", `This conversation: ${usage.requests} model requests · ${usage.input.toLocaleString("en-US")} tokens in · ${usage.output.toLocaleString("en-US")} out${usage.searches ? ` · ${usage.searches} web search${usage.searches === 1 ? "" : "es"}` : ""} · ${money(usage)}`);
-  add("div", "trace", usage.priced ? "Worked out from the provider's list prices. Your bill from the provider is the final word."
-    : "Wisp has no price list for this model, so only tokens are shown.");
-  if (spend) add("div", "trace", "Today, across every conversation: " + dollars(spend.today)
-    + (spend.cap ? " of a limit of $" + spend.cap.toFixed(2) + "." : ". There is no daily limit; Settings has one."));
+  add("div", "trace", T("This conversation: {requests} model requests · {input} tokens in · {output} out", { requests: usage.requests, input: num(usage.input), output: num(usage.output) })
+    + (usage.searches ? TN(usage.searches, " · {n} web search", " · {n} web searches") : "") + " · " + money(usage));
+  add("div", "trace", T(usage.priced ? "Worked out from the provider's list prices. Your bill from the provider is the final word."
+    : "Wisp has no price list for this model, so only tokens are shown."));
+  if (spend) add("div", "trace", allToday());
 }
 
 function showRecap() {
   if (lastRecap) { log.append(recapBlock(lastRecap)); log.scrollTop = log.scrollHeight; return; }
-  add("div", "trace", snapshotsKept > 1 ? "Nothing changed between your last two logouts."
-    : "Nothing to compare yet. Wisp keeps a snapshot each time you log out; after the next one there will be a recap.");
+  add("div", "trace", T(snapshotsKept > 1 ? "Nothing changed between your last two logouts."
+    : "Nothing to compare yet. Wisp keeps a snapshot each time you log out; after the next one there will be a recap."));
 }
 
 async function copyLast() {
   log.querySelector(".hello")?.remove();
-  if (!lastCard) { add("div", "trace", "There are no game instructions to copy yet."); return; }
-  add("div", "trace", (await copy(lastCard.wisp)) ? "Copied the last instructions. In the game: Ctrl+V twice." : "Could not reach the clipboard.");
+  if (!lastCard) { add("div", "trace", T("There are no game instructions to copy yet.")); return; }
+  add("div", "trace", T((await copy(lastCard.wisp)) ? "Copied the last instructions. In the game: Ctrl+V twice." : "Could not reach the clipboard."));
 }
 
 async function setTheme(word) {
@@ -890,16 +1027,16 @@ async function setTheme(word) {
   const theme = order.includes(word) ? word : order[(order.indexOf(current) + 1) % 3];   // no word: the next one
   const s = await post("/api/settings", { theme });
   applyLook(s.theme, s.opacity);
-  add("div", "trace", "Theme: " + { auto: "following Windows", dark: "dark", light: "light" }[s.theme] + ".");
+  add("div", "trace", T("Theme: {theme}.", { theme: T({ auto: "following Windows", dark: "dark", light: "light" }[s.theme]) }));
 }
 
 async function setOpacity(word) {
   const value = parseInt(word, 10);
-  if (!glass && !fade) { add("div", "trace", "This window cannot be see-through. Wisp's own window can: see Settings."); return; }
-  if (!(value >= 30 && value <= 100)) { add("div", "trace", "Say how solid, from 30 to 100: /opacity 70"); return; }
+  if (!glass && !fade) { add("div", "trace", T("This window cannot be see-through. Wisp's own window can: see Settings.")); return; }
+  if (!(value >= 30 && value <= 100)) { add("div", "trace", T("Say how solid, from 30 to 100: /opacity 70")); return; }
   const s = await post("/api/settings", { opacity: value });
   applyLook(s.theme, s.opacity);
-  add("div", "trace", "The window is now " + s.opacity + "% solid while you are not using it.");
+  add("div", "trace", T("The window is now {n}% solid while you are not using it.", { n: s.opacity }));
 }
 
 const commands = [
@@ -907,7 +1044,7 @@ const commands = [
   { name: "sessions", help: "Earlier conversations: search, peek, reopen", run: () => openSessions() },
   { name: "fork", help: "Continue in a copy of this conversation", run: () => fork() },
   { name: "research", help: "A thorough answer: your data, then the web. Slower, costs more", run: () => { input.value = "/research "; input.focus(); } },
-  { name: "notes", help: "Open the folder of kept research reports", run: async () => { await api("/api/open", { url: "notes" }); add("div", "trace", "Research reports are kept as text files in your notes folder."); } },
+  { name: "notes", help: "Open the folder of kept research reports", run: async () => { await api("/api/open", { url: "notes" }); add("div", "trace", T("Research reports are kept as text files in your notes folder.")); } },
   { name: "recap", help: "What changed since your last session", run: showRecap },
   { name: "cost", help: "Tokens and cost of this conversation", run: showCost },
   { name: "copy", help: "Copy the last game instructions again", run: copyLast },
@@ -932,7 +1069,7 @@ function showPalette() {
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", i === selected ? "true" : "false");
     const name = document.createElement("b"); name.textContent = "/" + c.name;
-    const help = document.createElement("span"); help.textContent = c.help;
+    const help = document.createElement("span"); help.textContent = T(c.help);
     li.append(name, help);
     li.onmousedown = (e) => { e.preventDefault(); runCommand(c); };
     palette.append(li);
@@ -965,7 +1102,7 @@ document.getElementById("form").onsubmit = (e) => {
     if (command) { runCommand(command, word); return; }
     input.value = "";
     showPalette();
-    add("div", "trace", "There is no command " + text.split(/\s/)[0] + ". Type / to see the commands.");
+    add("div", "trace", T("There is no command {name}. Type / to see the commands.", { name: text.split(/\s/)[0] }));
     return;
   }
   input.value = "";
@@ -1012,46 +1149,45 @@ function showSettings(s) {
   $("guesses").textContent = "";
   for (const guess of s.guesses.filter(g => g !== s.wow_dir)) {
     const b = document.createElement("button");
-    b.type = "button"; b.className = "guess"; b.textContent = "Found: " + guess;
+    b.type = "button"; b.className = "guess"; b.textContent = T("Found: ") + guess;
     b.onclick = () => { $("folder").value = guess; };
     $("guesses").append(b);
   }
-  $("addon").textContent = !s.wow_dir ? "Choose the game folder first"
-    : { installed: "Installed", outdated: "An older version is installed", missing: "Not installed" }[s.addon];
-  $("install").textContent = s.addon === "outdated" ? "Update addon" : "Install addon";
+  $("addon").textContent = T(!s.wow_dir ? "Choose the game folder first"
+    : { installed: "Installed", outdated: "An older version is installed", missing: "Not installed" }[s.addon]);
+  $("install").textContent = T(s.addon === "outdated" ? "Update addon" : "Install addon");
   $("install").hidden = !s.wow_dir || s.addon === "installed";
   $("addon-hint").textContent = s.addon_note
-    || (s.addon === "installed" ? "Wisp keeps this copy up to date by itself." : "Wisp installs its addon into the game's AddOns folder when you save the game folder.");
+    || T(s.addon === "installed" ? "Wisp keeps this copy up to date by itself." : "Wisp installs its addon into the game's AddOns folder when you save the game folder.");
   $("theme").value = s.theme;
   $("opacity").value = s.opacity;
   $("opacity").disabled = !s.glass;
-  $("opacity-hint").textContent = s.glass ? "How solid the window is while you are not using it. It is fully solid under the mouse and while you type."
-    : "Transparency needs Wisp's own window.";
+  $("opacity-hint").textContent = T(s.glass ? "How solid the window is while you are not using it. It is fully solid under the mouse and while you type."
+    : "Transparency needs Wisp's own window.");
   $("plain").checked = s.plain_window;
   $("auto-update").checked = s.auto_update;
   $("language").value = s.language || "auto";
   $("cap").value = s.spend.cap;
-  $("cap-hint").textContent = "Spent today: " + dollars(s.spend.today) + ". Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. "
-    + "It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.";
+  $("cap-hint").textContent = T("Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.", { spent: dollars(s.spend.today) });
   const up = s.update || {};
-  $("version").textContent = !up.version ? "This copy runs from source and does not update itself."
-    : "This is version " + up.version + (up.built ? " of " + up.built.slice(0, 10) : "") + ". "
-      + ({ current: "It is the newest.", downloading: "Fetching version " + up.new + "…", ready: "Version " + up.new + " is ready: it starts the next time Wisp does.",
-           failed: "A newer one could not be fetched; Wisp will try again.", off: "It looks for a newer one only when this is ticked." }[up.state] || "");
+  $("version").textContent = !up.version ? T("This copy runs from source and does not update itself.")
+    : T("This is version {version}", up) + (up.built ? T(" of {date}", { date: up.built.slice(0, 10) }) : "") + ". "
+      + ({ current: T("It is the newest."), downloading: T("Fetching version {new}…", up), ready: T("Version {new} is ready: it starts the next time Wisp does.", up),
+           failed: T("A newer one could not be fetched; Wisp will try again."), off: T("It looks for a newer one only when this is ticked.") }[up.state] || "");
   // who answers: a provider and one of its models; and a key for each provider
   const provider = $("provider");
   provider.textContent = "";
   $("keys").textContent = "";
   for (const one of s.providers) {
     const option = document.createElement("option");
-    option.value = one.id; option.textContent = one.label + (one.key ? "" : " (no key yet)");
+    option.value = one.id; option.textContent = one.label + (one.key ? "" : T(" (no key yet)"));
     provider.append(option);
     const row = document.createElement("div"); row.className = "row";
     const name = document.createElement("span"); name.textContent = one.company;
     const field = document.createElement("input");
     field.type = "password"; field.autocomplete = "off"; field.spellcheck = false; field.dataset.provider = one.id;
-    field.setAttribute("aria-label", one.company + " API key");
-    field.placeholder = one.key ? "•••••••• (" + (one.key === "saved" ? "saved on this PC" : one.key) + ")" : one.hint;
+    field.setAttribute("aria-label", T("{company} API key", one));
+    field.placeholder = one.key ? "•••••••• (" + T(one.key === "saved" ? "saved on this PC" : one.key) + ")" : one.hint;
     row.append(name, field);
     $("keys").append(row);
   }
@@ -1073,8 +1209,8 @@ async function showModels(provider) {
     choices.append(option);
   }
   field.value = field.placeholder = list.current;
-  $("model-hint").textContent = list.has_key ? "Changing the provider starts a new conversation; the earlier one is kept."
-    : "Paste a key for this provider below to see all its models.";
+  $("model-hint").textContent = T(list.has_key ? "Changing the provider starts a new conversation; the earlier one is kept."
+    : "Paste a key for this provider below to see all its models.");
 }
 
 // A provider can have hundreds of models: the field is typed in, and its list narrows as you type.
@@ -1092,7 +1228,7 @@ async function openSettings() {
 }
 
 async function post(path, body) {
-  try { return await (await api(path, body)).json(); } catch { return { error: "Wisp lost the connection to its own engine." }; }
+  try { return await (await api(path, body)).json(); } catch { return { error: T("Wisp lost the connection to its own engine.") }; }
 }
 
 $("gear").onclick = openSettings;
@@ -1108,7 +1244,7 @@ $("save").onclick = async () => {
   dialog.close();
   if (saved.new_conversation) {   // another provider cannot read this one's history
     renderSession({ turns: [], usage: null });
-    add("div", "note", "A new conversation with the other provider. The earlier one is kept under Conversations.");
+    add("div", "note", T("A new conversation with the other provider. The earlier one is kept under Conversations."));
   }
   refresh();
 };
@@ -1125,13 +1261,13 @@ $("check").onclick = async () => {
   const saved = await post("/api/settings", { wow_dir: $("folder").value, ...modelNow() });
   if (!showSettings(saved)) return;
   $("results").textContent = "";
-  $("check").disabled = true; $("check").textContent = "Checking…";
+  $("check").disabled = true; $("check").textContent = T("Checking…");
   const { results = [], error } = await post("/api/check", {});
-  $("check").disabled = false; $("check").textContent = "Check setup";
+  $("check").disabled = false; $("check").textContent = T("Check setup");
   if (error) { $("settings-problem").textContent = error; return; }
   for (const r of results) {
     const li = document.createElement("li");
-    const mark = document.createElement("span"); mark.className = r.status; mark.textContent = r.status;
+    const mark = document.createElement("span"); mark.className = r.status; mark.textContent = T(r.status);
     const what = document.createElement("span"); what.textContent = r.what;
     li.append(mark, what);
     if (r.detail) { const d = document.createElement("small"); d.textContent = r.detail; li.append(d); }
@@ -1147,7 +1283,7 @@ let peeking = null, searchTimer = null;
 function showBrowse() {
   peeking = null;
   $("session-browse").hidden = false; $("session-peek").hidden = true; $("back").hidden = true;
-  $("sessions-title").textContent = "Conversations";
+  $("sessions-title").textContent = T("Conversations");
 }
 
 async function listSessions() {
@@ -1160,15 +1296,15 @@ async function listSessions() {
     button.type = "button";
     const title = document.createElement("b"); title.textContent = one.title;
     const meta = document.createElement("small");
-    meta.textContent = `${one.questions} question${one.questions === 1 ? "" : "s"} · ` +
-      new Date(one.updated * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + (one.forked ? " · fork" : "");
+    meta.textContent = TN(one.questions, "{n} question", "{n} questions") + " · " +
+      new Date(one.updated * 1000).toLocaleString(lang === "ru" ? "ru-RU" : [], { dateStyle: "medium", timeStyle: "short" }) + (one.forked ? T(" · fork") : "");
     button.append(title, meta);
     button.onclick = () => peek(one);
     li.append(button);
     list.append(li);
   }
   $("session-empty").hidden = sessions.length > 0;
-  $("session-empty").textContent = $("session-search").value ? "Nothing matches that." : "No conversations yet. They are kept here once you ask something.";
+  $("session-empty").textContent = T($("session-search").value ? "Nothing matches that." : "No conversations yet. They are kept here once you ask something.");
 }
 
 async function peek(one) {
@@ -1227,7 +1363,7 @@ setInterval(refresh, 30000);
 $("restart").onclick = async () => {
   const done = await (await api("/api/update", {})).json();
   if (done.error) add("div", "msg error", done.error);
-  else $("update").querySelector("span").textContent = "Restarting…";
+  else $("update").querySelector("span").textContent = T("Restarting…");
 };
 input.focus();
 </script>

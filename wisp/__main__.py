@@ -31,6 +31,7 @@ from .history import History, ago_words, diff, recap
 from .assets import Assets
 from .market import Market
 from . import i18n, update
+from .i18n import t
 from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
 from .sessions import Sessions, record
 
@@ -39,8 +40,7 @@ SIZE = (430, 680)   # the open window
 ORB = 64            # the collapsed one: a small square holding the wisp
 THEMES = ("auto", "dark", "light")
 DAILY_CAP = 5.0   # dollars a day unless the player sets another limit: a cap from the first day
-NO_FOLDER = ("That folder has no Interface\\AddOns inside. Choose the World of Warcraft folder "
-             "or its _forever_ folder.")
+NO_FOLDER = "That folder has no Interface\\AddOns inside. Choose the World of Warcraft folder or its _forever_ folder."
 
 
 def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthropic",
@@ -52,83 +52,82 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
     def add(what, ok, good="", bad="", optional=False):
         out.append((what, "ok" if ok else "note" if optional else "FAIL", good if ok else bad))
 
-    add("Game folder", wow_dir is not None, str(wow_dir), "not chosen yet")
+    add(t("Game folder"), wow_dir is not None, str(wow_dir), t("not chosen yet"))
     if wow_dir is not None:
         addons = wow_dir / "Interface" / "AddOns"
         state = local.addon_state(wow_dir)
-        add("Wisp addon installed", state == "installed", bad="not installed" if state == "missing" else
-            "an older version is installed: press Install addon")
-        add("Questie installed", (addons / "Questie").is_dir(), bad="without it Wisp knows almost no locations")
-        add("TomTom installed", (addons / "TomTom").is_dir(), bad="without it the built-in map pin is used", optional=True)
-        add("DungeonJournal installed", (addons / "ForeverDungeonJournal").is_dir(),
-            bad="without it Wisp knows nothing about dungeons: their quests, what those need first, the loot", optional=True)
+        add(t("Wisp addon installed"), state == "installed", bad=t("not installed") if state == "missing" else
+            t("an older version is installed: press Update addon"))
+        add(t("Questie installed"), (addons / "Questie").is_dir(), bad=t("without it Wisp knows almost no locations"))
+        add(t("TomTom installed"), (addons / "TomTom").is_dir(), bad=t("without it the built-in map pin is used"), optional=True)
+        add(t("DungeonJournal installed"), (addons / "ForeverDungeonJournal").is_dir(),
+            bad=t("without it Wisp knows nothing about dungeons: their quests, what those need first, the loot"), optional=True)
         saved = find_saved_file(wow_dir)
         if saved is None:
             # say which step is missing, from what the game has written so far
             seen = local.addon_seen_by_game(wow_dir) if state != "missing" else "missing"
-            add("Snapshot file", False, bad={
-                "missing": "install the addon first",
-                "unseen": "the game has not noticed the addon yet: close the game completely, start it again, and on the "
-                          "character screen open AddOns and tick Wisp",
-                "disabled": "Wisp is switched off in the game: on the character screen open AddOns and tick Wisp",
-                "enabled": "the game has the addon but has not saved yet: log in with your character, then log out to "
-                           "the character screen (the game only writes addon data at logout)",
-                "unknown": "restart the game so it sees the addon, log in with your character, then log out to the "
-                           "character screen (the game only writes addon data at logout)",
+            add(t("Snapshot file"), False, bad={
+                "missing": t("install the addon first"),
+                "unseen": t("the game has not noticed the addon yet: close the game completely, start it again, and on the character screen open AddOns and tick Wisp"),
+                "disabled": t("Wisp is switched off in the game: on the character screen open AddOns and tick Wisp"),
+                "enabled": t("the game has the addon but has not saved yet: log in with your character, then log out to the character screen (the game only writes addon data at logout)"),
+                "unknown": t("restart the game so it sees the addon, log in with your character, then log out to the character screen (the game only writes addon data at logout)"),
             }[seen])
             return _key_checks(out, add, call_model, provider, model)
-        add("Snapshot file", True, str(saved))
+        add(t("Snapshot file"), True, str(saved))
         game = Game.load(wow_dir)
         if game.problem:
-            add("Snapshot readable", False, bad=game.problem)
+            add(t("Snapshot readable"), False, bad=game.problem)
         else:
-            add("Snapshot readable", True, f"{len(game.quests)} quests, saved {game.age_minutes()} minutes ago")
-            add("Questie data in the snapshot", (game.snapshot.get("addons") or {}).get("questie"),
-                bad="Questie was not ready at logout; play a little, then log out again")
-            add("Open quests in the snapshot", bool(game.available), f"{len(game.available)} the character could pick up",
-                "none: Questie's list of available quests was not found; tell Wisp's author which Questie version this is",
+            add(t("Snapshot readable"), True, t("{quests} quests, saved {minutes} minutes ago", quests=len(game.quests), minutes=game.age_minutes()))
+            add(t("Questie data in the snapshot"), (game.snapshot.get("addons") or {}).get("questie"),
+                bad=t("Questie was not ready at logout; play a little, then log out again"))
+            add(t("Open quests in the snapshot"), bool(game.available), t("{n} the character could pick up", n=len(game.available)),
+                t("none: Questie's list of available quests was not found; tell Wisp's author which Questie version this is"),
                 optional=True)
             kept = History(local.APP_DIR / "snapshots").count(game.snapshot)
-            add("Snapshots kept for this character", True, f"{kept}: one per logout Wisp has seen")
+            add(t("Snapshots kept for this character"), True, t("{n}: one per logout Wisp has seen", n=kept))
             if (addons / "ForeverDungeonJournal").is_dir():
-                add("Dungeon data in the snapshot", bool(game.dungeons), f"{len(game.dungeons)} dungeons",
-                    "not yet: log in and out once more with the new Wisp addon")
+                add(t("Dungeon data in the snapshot"), bool(game.dungeons), t("{n} dungeons", n=len(game.dungeons)),
+                    t("not yet: log in and out once more with the new Wisp addon"))
             books = game.crafting.books
-            add("Recipes read from the game", bool(books), ", ".join(f"{b['profession']} {len(b['recipes'])}" for b in books),
-                "none yet: open your profession window in the game once, then log out", optional=True)
+            add(t("Recipes read from the game"), bool(books), ", ".join(f"{b['profession']} {len(b['recipes'])}" for b in books),
+                t("none yet: open your profession window in the game once, then log out"), optional=True)
             if (addons / "Auctionator").is_dir():
                 named = sum(1 for item in game.crafting.prices if item in game.crafting.names)
-                add("Auction prices in the snapshot", bool(game.crafting.prices),
-                    f"for {len(game.crafting.prices)} items, {named} of them with a name so far",
-                    "none yet: scan the auction house with Auctionator, then log out", optional=True)
+                add(t("Auction prices in the snapshot"), bool(game.crafting.prices),
+                    t("for {items} items, {named} of them with a name so far", items=len(game.crafting.prices), named=named),
+                    t("none yet: scan the auction house with Auctionator, then log out"), optional=True)
                 kept = Market(local.APP_DIR / "market.sqlite").size(game.snapshot)
-                add("Price history kept by Wisp", kept["rows"] > 0,
-                    f"{kept['rows']} prices of {kept['items']} items, from {kept['first_day']} to {kept['last_day']}",
-                    "none yet: it grows with every day you scan the auction house", optional=True)
+                add(t("Price history kept by Wisp"), kept["rows"] > 0,
+                    t("{rows} prices of {items} items, from {first} to {last}", rows=kept["rows"], items=kept["items"],
+                      first=kept["first_day"], last=kept["last_day"]),
+                    t("none yet: it grows with every day you scan the auction house"), optional=True)
             if (addons / "GatherMate2").is_dir():
-                add("Gathering nodes in the snapshot", game.gathering.total > 0,
-                    f"{game.gathering.total} places of {len(game.gathering.nodes)} kinds",
-                    "none yet: GatherMate2 notes each herb, vein and pool as you gather; log out after gathering",
+                add(t("Gathering nodes in the snapshot"), game.gathering.total > 0,
+                    t("{places} places of {kinds} kinds", places=game.gathering.total, kinds=len(game.gathering.nodes)),
+                    t("none yet: GatherMate2 notes each herb, vein and pool as you gather; log out after gathering"),
                     optional=True)
             gains = [d for d in ((game.snapshot.get("xp") or {}).get("days") or []) if isinstance(d, dict)]
-            add("Experience measured by Wisp", bool(gains), f"{len(gains)} days of play", "none yet: it starts with your next gain",
+            add(t("Experience measured by Wisp"), bool(gains), t("{n} days of play", n=len(gains)), t("none yet: it starts with your next gain"),
                 optional=True)
             ladders = game.snapshot.get("listings")
-            add("Auction listings in the snapshot", bool(ladders), f"the price ladders of {len(ladders or [])} items, from the last session",
-                "none from the last session: they come from a full Auctionator scan or a search for an item", optional=True)
-            add("Bank contents in the snapshot", game.crafting.bank_seen is not None, f"{len(game.crafting.bank)} kinds of item",
-                "not yet: open your bank once, then log out", optional=True)
+            add(t("Auction listings in the snapshot"), bool(ladders), t("the price ladders of {n} items, from the last session", n=len(ladders or [])),
+                t("none from the last session: they come from a full Auctionator scan or a search for an item"), optional=True)
+            add(t("Bank contents in the snapshot"), game.crafting.bank_seen is not None, t("{n} kinds of item", n=len(game.crafting.bank)),
+                t("not yet: open your bank once, then log out"), optional=True)
             mine = (game.snapshot.get("ownAuctions") or {}).get("list")
-            add("Your auctions in the snapshot", mine is not None, f"{len(mine or [])} as the Auctions tab last showed them",
-                "not yet: look at the Auctions tab at the auction house, then log out", optional=True)
+            add(t("Your auctions in the snapshot"), mine is not None, t("{n} as the Auctions tab last showed them", n=len(mine or [])),
+                t("not yet: look at the Auctions tab at the auction house, then log out"), optional=True)
             mails = game.snapshot.get("auctionMail")
-            add("Auction mail noted by Wisp", bool(mails), f"{len(mails or [])} purchases and sales in the last two months",
-                "none yet: open a mailbox that holds auction mail, then log out", optional=True)
+            add(t("Auction mail noted by Wisp"), bool(mails), t("{n} purchases and sales in the last two months", n=len(mails or [])),
+                t("none yet: open a mailbox that holds auction mail, then log out"), optional=True)
             looted = sum(s["looted"] for r in game.farming.records for s in r["sources"])
-            add("Looting measured by Wisp", looted > 0, f"{looted} corpses and nodes over {len({r['day'] for r in game.farming.records})} days",
-                "none yet: it starts with the first thing you loot after this update", optional=True)
+            add(t("Looting measured by Wisp"), looted > 0,
+                t("{looted} corpses and nodes over {days} days", looted=looted, days=len({r["day"] for r in game.farming.records})),
+                t("none yet: it starts with the first thing you loot after this update"), optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
-            add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
+            add(t("Quest locations found"), places > 0, t("{n} for quest givers and turn-ins", n=places), t("none: is your quest log empty?"))
     return _key_checks(out, add, call_model, provider, model)
 
 
@@ -139,8 +138,8 @@ def provider_key(provider: str) -> tuple[str | None, str | None]:
 def _key_checks(out, add, call_model, provider: str = "anthropic", model: str | None = None):
     for name, info in PROVIDERS.items():
         key, source = provider_key(name)
-        add(f"{info['company']} key", key is not None, f"from {source}" if source == "environment" else "saved on this PC",
-            "not entered yet", optional=name != provider)
+        add(t("{company} key", company=info["company"]), key is not None, t("from environment") if source == "environment" else t("saved on this PC"),
+            t("not entered yet"), optional=name != provider)
     key, _ = provider_key(provider)
     if not call_model or key is None:
         return out
@@ -148,7 +147,7 @@ def _key_checks(out, add, call_model, provider: str = "anthropic", model: str | 
     try:
         chat = CHATS[provider](key, model=model)
     except ImportError as e:
-        add("A real call to the model", False, bad=f"a package is missing: {e.name}")
+        add(t("A real call to the model"), False, bad=t("a package is missing: {name}", name=e.name))
         return out
     # the same code path a question takes, with one plain question and no tools to call
     chat.user("Reply with the single word: ready")
@@ -161,8 +160,8 @@ def _key_checks(out, add, call_model, provider: str = "anthropic", model: str | 
                 problem = event["message"]
     except Exception as e:   # no network
         problem = str(e)[:200]
-    add("A real call to the model", bool(text.strip()) and not problem, f"{model} answered: {text.strip()[:40]}",
-        problem or "the model sent no text")
+    add(t("A real call to the model"), bool(text.strip()) and not problem, t("{model} answered: {reply}", model=model, reply=text.strip()[:40]),
+        problem or t("the model sent no text"))
     return out
 
 
@@ -265,16 +264,16 @@ class App:
     def restart_updated(self) -> dict:
         """Start again as the new version. The window goes with this process."""
         if self.exe is None or self.update["state"] != "ready":
-            return {"error": "There is no downloaded update to restart into."}
+            return {"error": t("There is no downloaded update to restart into.")}
         try:
             if self.update.get("kind") == "exe":
                 new = update.ready(self.stage_dir, getattr(self, "update_sha256", None))
                 if new is None:
-                    return {"error": "The downloaded update is no longer there. Wisp will fetch it again."}
+                    return {"error": t("The downloaded update is no longer there. Wisp will fetch it again.")}
                 update.swap(self.exe, new, self.stage_dir)
             update.relaunch(self.exe, [])   # the launcher picks the new code up by itself
         except OSError as e:
-            return {"error": f"Could not update: {e.strerror or e}. Wisp will try again when it next starts."}
+            return {"error": t("Could not update: {why}. Wisp will try again when it next starts.", why=e.strerror or e)}
         threading.Timer(0.3, self.close_window).start()   # after this answer has gone out
         return {"restarting": True}
 
@@ -330,9 +329,9 @@ class App:
         if problem:
             self.addon_note = problem
         elif before == "missing":
-            self.addon_note = "Wisp installed its addon into the game. Restart the game so it loads."
+            self.addon_note = t("Wisp installed its addon into the game. Restart the game so it loads.")
         else:
-            self.addon_note = "Wisp updated its addon in the game. Restart the game so the new version loads."
+            self.addon_note = t("Wisp updated its addon in the game. Restart the game so the new version loads.")
 
     def new_chat(self, session: dict | None = None):
         """Start a fresh conversation, or continue a saved one. A saved one stays with
@@ -348,14 +347,14 @@ class App:
         info = PROVIDERS[provider]
         key, _ = provider_key(provider)
         if key is None:
-            self.problem = f"No {info['company']} key yet. Open Settings and paste one."
+            self.problem = t("No {company} key yet. Open Settings and paste one.", company=info["company"])
             return
         try:
             self.chat = CHATS[provider](key, model=model, **history)
         except ImportError as e:
-            self.problem = f"A package is missing: {e.name}"
+            self.problem = t("A package is missing: {name}", name=e.name)
         except Exception as e:
-            self.problem = f"Cannot start the model: {e}"
+            self.problem = t("Cannot start the model: {why}", why=e)
 
     def load_game(self) -> Game:
         """The current snapshot, filed into the history the first time it is seen."""
@@ -397,7 +396,7 @@ class App:
         return {
             "recap": self.recap(game),
             "snapshots": self.history.count(game.snapshot) if game.snapshot else 0,
-            "model": "scripted test model" if self.fake or self.chat is None else
+            "model": t("scripted test model") if self.fake or self.chat is None else
                      f"{PROVIDERS[self.chat.provider]['label']} · {self.chat.model}",
             "model_problem": self.problem,
             "snapshot_problem": game.problem,
@@ -424,7 +423,7 @@ class App:
             "guesses": [str(p) for p in local.guess_game_folders()],
             # per provider: its name, what a key looks like, where its key is from (never the key), its model
             "providers": [{"id": name, "label": info["label"], "company": info["company"], "hint": info["hint"],
-                           "key": "scripted model, no key needed" if self.fake else provider_key(name)[1],
+                           "key": t("scripted model, no key needed") if self.fake else provider_key(name)[1],
                            "model": self.models[name]} for name, info in PROVIDERS.items()],
             "provider": self.provider,
             "addon": local.addon_state(self.wow_dir),
@@ -445,7 +444,7 @@ class App:
         if isinstance(body.get("wow_dir"), str) and body["wow_dir"].strip():
             folder = local.game_folder(body["wow_dir"])
             if folder is None:
-                return {"error": NO_FOLDER}
+                return {"error": t(NO_FOLDER)}
             self.wow_dir = folder
             if self.persist:
                 local.save_config({**local.load_config(), "wow_dir": str(folder)})
@@ -570,16 +569,16 @@ class App:
 
     def install_addon(self) -> dict:
         if self.wow_dir is None:
-            return {"error": "Choose the game folder first."}
+            return {"error": t("Choose the game folder first.")}
         problem = local.install_addon(self.wow_dir)
         if problem:
             return {"error": problem}
-        self.addon_note = "The addon is installed. Restart the game so it loads."
+        self.addon_note = t("The addon is installed. Restart the game so it loads.")
         return self.settings()
 
     def browse(self) -> dict:
         if self.window is None:
-            return {"error": "Type or paste the folder path."}
+            return {"error": t("Type or paste the folder path.")}
         import webview
         picked = self.window.create_file_dialog(webview.FOLDER_DIALOG)
         return {"path": picked[0] if picked else ""}
@@ -615,8 +614,8 @@ class App:
             return
         cap = self.prefs["daily_cap"]
         if cap and self.spent_today() >= cap:   # fail closed: not one more request once the day's limit is reached
-            yield {"type": "error", "message": f"Today's spending limit of ${cap:.2f} is reached (${self.spent_today():.2f} spent). "
-                                               "It starts again tomorrow; the limit is in Settings."}
+            yield {"type": "error", "message": t("Today's spending limit of ${cap} is reached (${spent} spent). It starts again tomorrow; the limit is in Settings.",
+                                                 cap=f"{cap:.2f}", spent=f"{self.spent_today():.2f}")}
             yield {"type": "done", "reason": "error"}
             return
         self.stop.clear()
@@ -634,8 +633,8 @@ class App:
                     counted = event["usage"]["cost"]
                     over[0] = bool(cap) and self.spent_today() >= cap
                 if event["type"] == "done" and event["reason"] == "stopped" and over[0] and not self.stop.is_set():
-                    said = {"type": "error", "message": f"Stopped here: today's spending limit of ${cap:.2f} is reached. "
-                                                        "It starts again tomorrow; the limit is in Settings."}
+                    said = {"type": "error", "message": t("Stopped here: today's spending limit of ${cap} is reached. It starts again tomorrow; the limit is in Settings.",
+                                                          cap=f"{cap:.2f}")}
                     record(turn, said)
                     yield said
                 record(turn, event)
@@ -655,18 +654,18 @@ class App:
     def open_session(self, session_id) -> dict:
         session = self.sessions.load(session_id)
         if session is None:
-            return {"error": "That conversation could not be opened."}
+            return {"error": t("That conversation could not be opened.")}
         held_with = session.get("provider")
         if not self.fake and held_with in PROVIDERS and provider_key(held_with)[0] is None:
-            return {"error": f"That conversation was held with {PROVIDERS[held_with]['label']}. "
-                             f"Add a {PROVIDERS[held_with]['company']} key in Settings to continue it."}
+            return {"error": t("That conversation was held with {label}. Add a {company} key in Settings to continue it.",
+                               label=PROVIDERS[held_with]["label"], company=PROVIDERS[held_with]["company"])}
         self.new_chat(session)
         return self.view()
 
     def fork(self, turn) -> dict:
         fork = self.sessions.fork(self.session, turn)
         if fork is None:
-            return {"error": "There is nothing to fork yet."}
+            return {"error": t("There is nothing to fork yet.")}
         self.new_chat(fork)
         return self.view()
 
@@ -755,11 +754,11 @@ def make_handler(app: App, port: int):
                 return self.send_json(400, {"error": "nothing to do"})
             if self.path == "/api/sessions/peek":   # look without switching
                 session = app.sessions.load(body.get("id"))
-                return self.send_json(200, app.view(session) if session else {"error": "That conversation could not be opened."})
+                return self.send_json(200, app.view(session) if session else {"error": t("That conversation could not be opened.")})
             if self.path in ("/api/new", "/api/settings", "/api/install-addon", "/api/browse", "/api/check",
                              "/api/sessions/open", "/api/fork"):
                 if app.busy.locked():
-                    return self.send_json(409, {"error": "Wait for the answer to finish."})
+                    return self.send_json(409, {"error": t("Wait for the answer to finish.")})
                 if self.path == "/api/new":
                     app.new_chat()
                     return self.send_json(200, {})
@@ -779,7 +778,7 @@ def make_handler(app: App, port: int):
                 return self.send_json(404, {"error": "not found"})
             question = body.get("text")
             if not isinstance(question, str) or not question.strip() or len(question) > 4000:
-                return self.send_json(400, {"error": "ask something, up to 4000 characters"})
+                return self.send_json(400, {"error": t("Ask something, up to 4000 characters.")})
             if not app.busy.acquire(blocking=False):
                 return self.send_json(409, {"error": "busy"})
             try:

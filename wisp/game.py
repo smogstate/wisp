@@ -91,10 +91,10 @@ class Game:
     @classmethod
     def load(cls, wow_dir: Path | None) -> "Game":
         if wow_dir is None:
-            return cls(None, "no game folder was given")
+            return cls(None, t("no game folder was given"))
         saved = find_saved_file(wow_dir)
         if saved is None:
-            return cls(None, "no Wisp snapshot found: enable the Wisp addon, log in, then log out once")
+            return cls(None, t("no Wisp snapshot found: enable the Wisp addon, log in, then log out once"))
         try:
             return cls(read_snapshot(saved))
         except ValueError as e:

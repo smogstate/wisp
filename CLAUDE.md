@@ -26,5 +26,6 @@ and architecture decision lives there. Update the wiki when decisions change.
 - `/research` is the only way the web is used: `answer(..., research=True)` raises the round budget, adds Anthropic's server-side web tools with hard `max_uses` caps, and offers `report`, whose sources are checked against the pages actually returned. Keep the caps hard and shown up front.
 - `wisp/graph.py` is the item graph: items tie recipes, quests, bosses, vendors, drops and prices together, and `item_links` returns one step around an item. New data that mentions items should join it.
 - Auction prices over time live in `wisp/market.py` (SQLite, `%APPDATA%\Wisp\market.sqlite`), fed by the per-day record the addon takes from Auctionator at logout. Rankings, trends and the estimate are computed there; the model only words them.
+- Language: everything Wisp writes itself is in the player's language (the game client's locale, unless Settings says otherwise). English text is the key: `t()`/`tn()` in `wisp/i18n.py` for Python, `T()`/`TN()` and the `RU` table in `ui.html` (the markup's fixed texts are translated by `localize()`), `L()` in the addon. A new user-facing text needs its Russian or `test_localization` fails. The model answers in the player's language by itself.
 - `checks/` is throwaway code for milestone 0 (wiki/Checks.md), not part of the product.
 - Does not use Loom.

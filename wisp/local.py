@@ -10,6 +10,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from .i18n import t
+
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".config") / "Wisp"
 CONFIG = APP_DIR / "config.json"
 KEY_SERVICE = "Wisp"   # one entry per provider in the credential store
@@ -59,9 +61,9 @@ def set_key(key: str, provider: str = "anthropic") -> str | None:
                 pass   # there was none
         return None
     except ImportError:
-        return "The keyring package is missing, so the key cannot be saved."
+        return t("The keyring package is missing, so the key cannot be saved.")
     except Exception as e:
-        return f"This machine's credential store refused the key: {e}"
+        return t("This machine's credential store refused the key: {why}", why=e)
 
 
 def key_store_problem() -> str | None:
@@ -263,7 +265,7 @@ def install_addon(wow_dir: Path) -> str | None:
         for source in ADDON_SOURCE.iterdir():
             shutil.copyfile(source, target / source.name)
     except OSError as e:
-        return f"Could not write to {target}: {e.strerror or e}"
+        return t("Could not write to {target}: {why}", target=target, why=e.strerror or e)
     return None
 
 
