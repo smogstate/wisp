@@ -6,6 +6,7 @@
     -> TomTom receives the waypoint.
 
     npm install && python3 tests/test_mvp.py
+    WISP_LUA=/path/to/lua5.1 python3 tests/test_mvp.py     (no Node needed)
 """
 import base64
 import json
@@ -25,10 +26,14 @@ from wisp.game import Game, encode_wisp1, read_snapshot, run_tool  # noqa: E402
 from wisp.llm import FakeChat, answer  # noqa: E402
 
 
+# The addon runs under real Lua 5.1 (what the game uses) when WISP_LUA points
+# at one, and under the fengari VM (Lua 5.3) through Node otherwise.
+LUA = [os.environ["WISP_LUA"], "tests/wow_stub.lua"] if os.environ.get("WISP_LUA") else ["node", "tests/wow_stub.js"]
+
+
 def stub(*args, flags=""):
-    out = subprocess.run(["node", "tests/wow_stub.js", *args], cwd=ROOT, capture_output=True, text=True,
-                         env={**os.environ, "WISP_STUB": flags})
-    assert out.returncode == 0, out.stderr
+    out = subprocess.run([*LUA, *args], cwd=ROOT, capture_output=True, text=True, env={**os.environ, "WISP_STUB": flags})
+    assert out.returncode == 0, out.stderr + out.stdout
     return out.stdout.splitlines()
 
 
@@ -187,4 +192,4 @@ if __name__ == "__main__":
         test_without_questie(Path(b))
         test_bad_files(Path(c))
         test_server(wow)
-    print("mvp: OK")
+    print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

@@ -41,7 +41,7 @@ To see the interface without a key or the game: `python -m wisp --fake`.
 
 Tested on a development machine without the game:
 
-- The addon, run in a Lua interpreter against a faked game, Questie and TomTom.
+- The addon, run under real Lua 5.1 (the version the game uses) and under a Lua 5.3 VM, against a faked game, Questie and TomTom.
 - The whole loop with a scripted model: snapshot → question → card → the card's message pasted back into the addon → TomTom receives the waypoint. `npm install && python3 tests/test_mvp.py`
 - The interface in headless Chrome, every state, light and dark, at three sizes.
 - The real Anthropic SDK (2.7.0) against a local stand-in for the API: the request Wisp builds is accepted, and text, tool calls, several rounds and a rejected key are all read correctly. `python tests/test_anthropic.py`
