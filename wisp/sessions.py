@@ -96,7 +96,8 @@ def record(turn: dict, event: dict):
         else:
             items.append({"type": "wisp", "text": event["text"]})
     elif kind == "tool":
-        items.append({"type": "trace", "name": event["name"], "ok": event["ok"]})
+        items.append({"type": "trace", "name": event["name"], "ok": event["ok"],
+                      **({"detail": event["detail"]} if event.get("detail") else {})})
     elif kind == "card":
         items.append({"type": "card", "card": event["card"]})
     elif kind == "error":

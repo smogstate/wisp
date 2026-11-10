@@ -18,6 +18,7 @@ The model calls them, Python runs them, the model reads the result and can call 
 | `market_scan` | **Built.** The whole kept market ranked in code: below or above usual, rising, falling, swinging, most listed; narrowed to bags, materials or crafts | [Integrations](Integrations.md) |
 | `market_query` | **Built.** One read-only SQL `SELECT` over the kept price history, for anything the fixed tools do not cover | [Integrations](Integrations.md) |
 | `item_links` | **Built.** Everything one step from an item: recipes that use and make it, quests that ask for it, bosses, creatures and objects that drop it, who sells it, its price | [Integrations](Integrations.md) |
+| `report`, `notes` | **Built.** The end of a research run: a structured report with checked sources, kept as a note; and reading the kept notes | below |
 | `craft_plan` | **Built.** The arithmetic of a plan, in code: recipes × times → materials needed, made along the way, covered by the bags, left to buy, and the cost | [Integrations](Integrations.md) |
 | `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state. With a date, the snapshot from then | [Architecture](Architecture.md) |
 | `changes` | **Built.** What changed between two snapshots, computed in code: level, money, quests finished, picked up and dropped, profession skill, zone. For the last session, or looking back a number of days | [Architecture](Architecture.md) |
@@ -134,7 +135,22 @@ What it depends on:
 
 ## Research run
 
-> Proposed 2026-11-09, modelled on kintale's `research` tool. Not for the first version.
+> **First version built 2026-11-10** (Denis: "Research I want to do also in web… what is profitable to buy on start, what will be worth more gold later, what are my best strategies"). What is built is listed here; the design below it is the fuller plan.
+>
+> - **`/research <question>`** starts it; nothing else does. Before it starts the window states the caps: 24 rounds of lookups (an ordinary question has 6), 8 web searches at a cent each, 6 pages read.
+> - **Own data first, then the web.** The prompt sets the order: character, recipes, the kept auction history, the item graph; then the web for what that cannot say.
+> - **The web is the provider's own.** With Claude, Anthropic's server-side `web_search` and `web_fetch` tools run on the player's existing key: no second key, no scraping by Wisp, and Anthropic's fetcher honours `robots.txt`. Both are capped with `max_uses`, called directly so every use counts against the cap, and a page is cut at 8,000 tokens. **Kimi and OpenRouter have no web yet**: a research run there uses the longer budget and the report, and says the web was not consulted.
+> - **Forever first.** The prompt tells the model to prefer pages about WoW Forever and to say in the point itself when a claim comes from Classic or another version. A page is weighed, not obeyed.
+> - **It ends in a report card, kept as a note.** The model calls `report` with a title, a two-sentence summary, sections of short points and next steps. **Sources are checked in code**: a point may cite only pages the web tools really returned in this conversation; any other URL is dropped and the model is told. The card numbers the sources and a click opens the page in the player's browser. The same report is written as a Markdown file under `%APPDATA%\Wisp\notes`; `/notes` opens the folder and the `notes` tool lets a later question read it.
+> - **An answer that cites the web without a report** still gets a Sources card, made by code from the citations.
+> - **The last round is announced to the model** ("call report now with what you have"), so a run that uses its whole budget still ends in an answer. The same now holds for ordinary questions.
+> - **Cost** of searches is added to the meter; `/cost` counts them.
+>
+> Not built from the plan below: the model proposing a research run by itself, the small model per page, reuse of a note without asking, caching of pages, a progress display beyond the trace lines.
+>
+> Tested against a stand-in of Anthropic's API with the real SDK (search blocks, a paused turn, citations, the cap settings). **Not run against the real web search.**
+
+> Proposed 2026-11-09, modelled on kintale's `research` tool.
 
 An ordinary question gets a short, bounded loop: a few lookups, a quick answer. Some questions need more than that — "pre-raid gear for my spec and where each piece comes from", "a route from 40 to 50", "which profession pays". A research run is the deliberate, slower, dearer mode for those.
 

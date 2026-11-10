@@ -69,7 +69,8 @@ Sessions are stored on this PC as plain files, titled automatically from the fir
 
 | Command | Does |
 |---|---|
-| `/research <question>` | A research run: many sources, pages read and cited, a kept report. Slower and dearer than a question; shows its cap before starting ([Tools](Tools.md)) |
+| `/research <question>` | **Built.** A research run: your own data, then the web; a kept report with numbered sources. Slower and dearer than a question; shows its caps before starting ([Tools](Tools.md)) |
+| `/notes` | **Built.** Opens the folder where research reports are kept |
 | `/retry` | Generate the last answer again; with `/model` first, on a different model |
 | `/way <name>` | Find an NPC or place and produce a waypoint card directly, without a conversation |
 | `/actions` | Every instruction sent to the game this session, each with Copy |

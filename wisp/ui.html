@@ -146,6 +146,15 @@
     padding: 5px 8px; font-size: 12px; box-shadow: var(--shadow); white-space: nowrap; }
   .card .tip b { display: block; font-size: 13px; }
   .card .tip span { color: var(--muted); }
+  .card .summary { margin: 6px 0 2px; }
+  .card ul.points { list-style: disc; padding-left: 18px; gap: 5px; }
+  .card ul.points li, .card ol.sources li, .card ol.todo li { display: list-item; }
+  .card sup { color: var(--muted); font-size: 10px; margin-left: 2px; }
+  .card ol.todo, .card ol.sources { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 5px; }
+  .card ol.sources { font-size: 12px; }
+  .card ol.sources a { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; cursor: pointer; }
+  .card ol.sources a:hover { text-decoration-color: var(--accent); }
+  .card ol.sources span { color: var(--muted); }
   .card details { margin-top: 8px; font-size: 12px; }
   .card summary { color: var(--muted); cursor: pointer; }
   .card details table { margin-top: 6px; }
@@ -599,11 +608,50 @@ function chartBlock(c) {
   return block;
 }
 
+// The pages an answer rests on. A click opens the page in the player's own browser.
+function sourcesList(sources) {
+  const list = el("ol", "sources");
+  for (const source of sources) {
+    const li = el("li"), link = el("a", "", source.title);
+    li.value = source.n;
+    link.href = source.url; link.title = source.url;
+    link.onclick = e => { e.preventDefault(); api("/api/open", { url: source.url }); };
+    li.append(link, el("span", "", " · " + source.site));
+    list.append(li);
+  }
+  return list;
+}
+
+// A research report: summary, sections of short points with their source numbers, next steps, sources.
+function reportBlock(r) {
+  const block = el("div", "plan");
+  block.append(el("div", "plan-title", r.title), el("div", "plan-sub", r.basis + (r.saved ? " · " + r.saved : "")), el("div", "summary", r.summary));
+  for (const section of r.sections) {
+    block.append(el("h3", "", section.heading));
+    const points = el("ul", "points");
+    for (const point of section.points) {
+      const li = el("li", "", point.text);
+      if (point.refs.length) li.append(el("sup", "", point.refs.join(", ")));
+      points.append(li);
+    }
+    block.append(points);
+  }
+  if (r.next_steps.length) {
+    block.append(el("h3", "", "Next steps"));
+    const todo = el("ol", "todo");
+    for (const step of r.next_steps) todo.append(el("li", "", step));
+    block.append(todo);
+  }
+  if (r.sources.length) block.append(el("h3", "", "Sources"), sourcesList(r.sources));
+  return block;
+}
+
 function showCard(card, into = log) {
   if (into === log && card.wisp) lastCard = card;
   const el = add("section", "card", undefined, into);
   const h = document.createElement("h2");
-  h.textContent = card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market" : "For the game";
+  h.textContent = card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market"
+    : card.report ? "Research" : card.sources ? "Sources" : "For the game";
   const list = document.createElement("ul");
   for (const line of card.lines) {
     const li = document.createElement("li");
@@ -628,7 +676,8 @@ function showCard(card, into = log) {
   };
   foot.append(hint, button);
   el.append(h, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
-            ...(card.table ? [tableBlock(card.table)] : []), list, ...(card.wisp ? [foot] : []));
+            ...(card.table ? [tableBlock(card.table)] : []), ...(card.report ? [reportBlock(card.report)] : []),
+            ...(card.sources ? [sourcesList(card.sources)] : []), list, ...(card.wisp ? [foot] : []));
   into.scrollTop = into.scrollHeight;
   return el;
 }
@@ -637,7 +686,7 @@ function showCard(card, into = log) {
 function renderItem(item, into) {
   if (item.type === "user") add("div", "msg user", item.text, into);
   else if (item.type === "wisp") add("div", "msg wisp", item.text, into);
-  else if (item.type === "trace") add("div", "trace", (item.ok ? "looked up: " : "lookup failed: ") + item.name, into);
+  else if (item.type === "trace") add("div", "trace", traceText(item), into);
   else if (item.type === "card") showCard(item.card, into);
   else if (item.type === "error") add("div", "msg error", item.text, into);
   else if (item.type === "note") add("div", "note", item.text, into);
@@ -681,14 +730,17 @@ function setRunning(on) {
   send.classList.toggle("primary", !on);
 }
 
-async function ask(text) {
+const traceText = t => (t.ok ? "looked up: " : "lookup failed: ") + t.name + (t.detail ? " · " + t.detail : "");
+
+async function ask(text, research = false) {
   log.querySelector(".hello")?.remove();
   add("div", "msg user", text);
+  if (research) add("div", "trace", "Research run: your game data first, then the web where the provider has it. Up to 24 rounds of lookups, 8 web searches (1 cent each) and 6 pages. Stop any time.");
   let bubble = add("div", "msg wisp"), planEl = null;
   setRunning(true);
   if (collapsed) orb.dataset.state = "thinking";
   try {
-    const res = await api("/api/ask", { text });
+    const res = await api("/api/ask", { text, research });
     if (!res.ok) throw new Error((await res.json()).error || "request failed");
     const reader = res.body.getReader(), decoder = new TextDecoder();
     let buffer = "";
@@ -703,8 +755,8 @@ async function ask(text) {
         if (collapsed && event.type === "card") orb.dataset.state = "card";
         if (collapsed && event.type === "done" && orb.dataset.state !== "card") orb.dataset.state = "ready";
         if (event.type === "text") { bubble.textContent += event.text; log.scrollTop = log.scrollHeight; }
-        else if (event.type === "tool") { add("div", "trace", (event.ok ? "looked up: " : "lookup failed: ") + event.name); bubble = add("div", "msg wisp"); }
-        else if (event.type === "card") { const el = showCard(event.card); if (event.card.plan || event.card.chart || event.card.table) planEl = el; bubble = add("div", "msg wisp"); }
+        else if (event.type === "tool") { add("div", "trace", traceText(event)); bubble = add("div", "msg wisp"); }
+        else if (event.type === "card") { const el = showCard(event.card); if (event.card.plan || event.card.chart || event.card.table || event.card.report) planEl = el; bubble = add("div", "msg wisp"); }
         else if (event.type === "usage") { usage = event.usage; showMeter(); }
         else if (event.type === "error") add("div", "msg error", event.message);
         else if (event.type === "done" && event.reason === "stopped") add("div", "note", "stopped");
@@ -733,7 +785,7 @@ async function newChat() {
 function showCost() {
   log.querySelector(".hello")?.remove();
   if (!usage || !usage.requests) { add("div", "trace", "Nothing spent yet in this conversation."); return; }
-  add("div", "trace", `This conversation: ${usage.requests} model requests · ${usage.input.toLocaleString("en-US")} tokens in · ${usage.output.toLocaleString("en-US")} out · ${money(usage)}`);
+  add("div", "trace", `This conversation: ${usage.requests} model requests · ${usage.input.toLocaleString("en-US")} tokens in · ${usage.output.toLocaleString("en-US")} out${usage.searches ? ` · ${usage.searches} web search${usage.searches === 1 ? "" : "es"}` : ""} · ${money(usage)}`);
   add("div", "trace", usage.priced ? "Worked out from the provider's list prices. Your bill from the provider is the final word."
     : "Wisp has no price list for this model, so only tokens are shown.");
 }
@@ -772,6 +824,8 @@ const commands = [
   { name: "new", help: "Start a new conversation", run: newChat },
   { name: "sessions", help: "Earlier conversations: search, peek, reopen", run: () => openSessions() },
   { name: "fork", help: "Continue in a copy of this conversation", run: () => fork() },
+  { name: "research", help: "A thorough answer: your data, then the web. Slower, costs more", run: () => { input.value = "/research "; input.focus(); } },
+  { name: "notes", help: "Open the folder of kept research reports", run: async () => { await api("/api/open", { url: "notes" }); add("div", "trace", "Research reports are kept as text files in your notes folder."); } },
   { name: "recap", help: "What changed since your last session", run: showRecap },
   { name: "cost", help: "Tokens and cost of this conversation", run: showCost },
   { name: "copy", help: "Copy the last game instructions again", run: copyLast },
@@ -816,6 +870,13 @@ document.getElementById("form").onsubmit = (e) => {
   if (running) { api("/api/stop", {}); return; }
   const text = input.value.trim();
   if (!text) return;
+  if (/^\/research\s+\S/i.test(text)) {   // the one command that takes a whole question
+    input.value = "";
+    input.style.height = "";
+    showPalette();
+    ask(text.replace(/^\/research\s+/i, ""), true);
+    return;
+  }
   if (text.startsWith("/")) {
     const [name, word] = text.slice(1).toLowerCase().split(/\s+/);
     const command = matches[selected] || commands.find(c => c.name === name);

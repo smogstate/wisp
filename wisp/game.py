@@ -76,6 +76,8 @@ class Game:
         self.cards: list[dict] = []        # action cards made during the current answer
         self.history = None                # the snapshot history, when the app has one
         self.market = None                 # the auction prices kept over time, when the app has them
+        self.web_seen: dict[str, str] = {}  # url -> title of every web page this conversation was given
+        self.notes_dir: Path | None = None  # where research reports are kept, when the app has a place
 
     @classmethod
     def load(cls, wow_dir: Path | None) -> "Game":
@@ -493,6 +495,88 @@ class Game:
                        + ("." if addons.get("questie") else "; Questie was not available at the last logout, so those are missing."))
         return out
 
+    def tool_report(self, args: dict) -> dict:
+        """The end of a research run: a structured report, shown as a card and kept as a note.
+        Its sources are checked here: only pages this conversation was really given can be cited."""
+        title, summary = _clean(args.get("title"), 80), _clean(args.get("summary"), 500)
+        sections, steps = args.get("sections"), args.get("next_steps") or []
+        if not title or not summary:
+            return {"error": "the report needs a title and a summary"}
+        if not isinstance(sections, list) or not 1 <= len(sections) <= 8 or not isinstance(steps, list) or len(steps) > 8:
+            return {"error": "the report needs 1 to 8 sections and at most 8 next steps"}
+        order, dropped, laid = {}, [], []
+        for section in sections:
+            points = section.get("points") if isinstance(section, dict) else None
+            heading = _clean(section.get("heading"), 80) if isinstance(section, dict) else ""
+            if not heading or not isinstance(points, list) or not 1 <= len(points) <= 10:
+                return {"error": "every section needs a heading and 1 to 10 points"}
+            out = []
+            for point in points:
+                text = _clean(point.get("text"), 500) if isinstance(point, dict) else ""
+                urls = point.get("sources") or [] if isinstance(point, dict) else None
+                if not text or not isinstance(urls, list) or len(urls) > 6:
+                    return {"error": "every point needs text, and at most 6 source URLs"}
+                refs = []
+                for url in urls:
+                    if isinstance(url, str) and url in self.web_seen:
+                        refs.append(order.setdefault(url, len(order) + 1))
+                    else:
+                        dropped.append(str(url)[:200])
+                out.append({"text": text, "refs": sorted(set(refs))})
+            laid.append({"heading": heading, "points": out})
+        steps = [_clean(step, 300) for step in steps if isinstance(step, str) and _clean(step, 300)]
+        sources = [{"n": n, "title": _clean(self.web_seen[url], 120) or url, "url": url, "site": url.split("//", 1)[-1].split("/", 1)[0].removeprefix("www.")}
+                   for url, n in order.items()]
+        report = {"title": title, "summary": summary, "sections": laid, "next_steps": steps, "sources": sources,
+                  "basis": "Your own game data" + (f" and {len(sources)} web page{'s' if len(sources) != 1 else ''}" if sources else ", no web pages")}
+        saved = None
+        if self.notes_dir is not None:
+            lines = [f"# {title}", "", time.strftime("%Y-%m-%d %H:%M") + " · " + report["basis"], "", summary, ""]
+            for section in laid:
+                lines += [f"## {section['heading']}", ""]
+                lines += ["- " + p["text"] + "".join(f" [{n}]" for n in p["refs"]) for p in section["points"]] + [""]
+            if steps:
+                lines += ["## Next steps", ""] + [f"{i + 1}. {step}" for i, step in enumerate(steps)] + [""]
+            if sources:
+                lines += ["## Sources", ""] + [f"{src['n']}. {src['title']} — {src['url']}" for src in sources] + [""]
+            try:
+                self.notes_dir.mkdir(parents=True, exist_ok=True)
+                slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "report"
+                saved = self.notes_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}.md"
+                saved.write_text("\n".join(lines), encoding="utf-8")
+                report["saved"] = "Kept in your notes"
+            except OSError:
+                saved = None
+        self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "report": report})
+        out = {"shown": "the report, as a card" + (", and kept as a note" if saved else ""),
+               "note": "The player now sees the report. Do not repeat it: add one short sentence at most."}
+        if dropped:
+            out["sources_left_out"] = dropped[:10]
+            out["why"] = "These were not among the pages the web tools returned in this conversation, so they are not cited."
+        return out
+
+    def tool_notes(self, args: dict) -> dict:
+        folder = self.notes_dir
+        files = sorted(folder.glob("*.md"), reverse=True) if folder is not None and folder.is_dir() else []
+        if not files:
+            return {"notes": [], "note": "No research has been kept yet. A /research run ends in a report that is kept here."}
+
+        def heading(file):
+            try:
+                return file.read_text(encoding="utf-8").split("\n", 1)[0].lstrip("# ").strip()[:80]
+            except OSError:
+                return file.stem
+        wanted = args.get("read")
+        if isinstance(wanted, str) and wanted.strip():
+            wanted = wanted.strip().lower()
+            for file in files:
+                if wanted == file.stem.lower() or wanted in heading(file).lower():
+                    return {"note": file.stem, "text": file.read_text(encoding="utf-8")[:8000],
+                            "remember": "This is an earlier report. Its prices and advice are as old as its date."}
+            return {"error": "no kept note matches that", "notes": [heading(f) for f in files[:20]]}
+        return {"notes": [{"note": f.stem, "title": heading(f), "kept": f.stem[:8]} for f in files[:30]],
+                "note": "Read one with read set to its title or its note name."}
+
     def tool_craft_plan(self, args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
@@ -765,6 +849,16 @@ TOOLS = [
         },
     },
     {
+        "name": "notes",
+        "description": "The research reports kept from earlier /research runs: list them, or read one. Look here "
+                       "before researching a question again, and when the player refers to earlier research.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"read": {"type": "string", "description": "A note's title or name, to read it. Leave out to list."}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "waypoint",
         "description": "Offer the player waypoints for the game. Pass location refs from the quests or dungeon tools. This shows "
                        "a card the player can copy and paste into the game, where TomTom sets the waypoints. It does "
@@ -774,6 +868,37 @@ TOOLS = [
             "type": "object",
             "properties": {"refs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 20}},
             "required": ["refs"], "additionalProperties": False,
+        },
+    },
+]
+
+# Offered only in a research run.
+RESEARCH_TOOLS = [
+    {
+        "name": "report",
+        "description": "End a research run: show the player a structured report and keep it as a note. Short "
+                       "points, grouped under headings. A point that rests on the web lists the URLs of the pages "
+                       "it rests on, exactly as the web tools gave them; a URL they did not give is left out. "
+                       "Call it once, when the research is done.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "summary": {"type": "string", "description": "Two sentences: the answer, and how sure it is."},
+                "sections": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
+                    "type": "object",
+                    "properties": {
+                        "heading": {"type": "string"},
+                        "points": {"type": "array", "minItems": 1, "maxItems": 10, "items": {
+                            "type": "object",
+                            "properties": {"text": {"type": "string"},
+                                           "sources": {"type": "array", "items": {"type": "string"}, "maxItems": 6}},
+                            "required": ["text"], "additionalProperties": False}}},
+                    "required": ["heading", "points"], "additionalProperties": False}},
+                "next_steps": {"type": "array", "maxItems": 8, "items": {"type": "string"},
+                               "description": "What the player can do today, most useful first."},
+            },
+            "required": ["title", "summary", "sections"], "additionalProperties": False,
         },
     },
 ]
@@ -820,7 +945,7 @@ markdown symbols and no tables."""
 
 def run_tool(game: Game, name: str, args) -> dict:
     """Dispatch one tool call. The arguments are model output: check them."""
-    handler = getattr(game, f"tool_{name}", None) if name in {t["name"] for t in TOOLS} else None
+    handler = getattr(game, f"tool_{name}", None) if name in {t["name"] for t in TOOLS + RESEARCH_TOOLS} else None
     if handler is None:
         return {"error": f"there is no tool named {name}"}
     if not isinstance(args, dict):

@@ -13,6 +13,7 @@ and the game folder and installs the addon.
 """
 import json
 import os
+import re
 import secrets
 import sys
 import tempfile
@@ -166,6 +167,7 @@ class App:
         self.session = self.sessions.new()
         self.history = History(local.APP_DIR / "snapshots" if persist else Path(tempfile.mkdtemp(prefix="wisp-snapshots-")))
         self.market = Market((local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-market-"))) / "market.sqlite")
+        self.notes = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-notes-"))) / "notes"   # research reports
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
 
     def ensure_addon(self):
@@ -213,6 +215,7 @@ class App:
         if game.snapshot:
             self.history.ingest(game.snapshot)
             game.history = self.history
+            game.notes_dir = self.notes
             try:
                 self.market.ingest(game.snapshot)
                 game.market = self.market
@@ -407,7 +410,28 @@ class App:
         picked = self.window.create_file_dialog(webview.FOLDER_DIALOG)
         return {"path": picked[0] if picked else ""}
 
-    def ask(self, question: str):
+    def open_outside(self, url) -> dict:
+        """Open a source's page in the player's browser, or the notes folder. Only web
+        addresses, and only from a real run of the app: never in tests or --fake."""
+        if url == "notes":
+            self.notes.mkdir(parents=True, exist_ok=True)
+            target = str(self.notes)
+        elif isinstance(url, str) and re.match(r"https?://[^\s\x00-\x1f]{4,2000}$", url):
+            target = url
+        else:
+            return {"error": "not a web address"}
+        if self.persist:
+            try:
+                if url == "notes" and hasattr(os, "startfile"):
+                    os.startfile(target)   # the folder, in Explorer
+                else:
+                    import webbrowser
+                    webbrowser.open(target)
+            except OSError as e:
+                return {"error": str(e)}
+        return {"opened": target}
+
+    def ask(self, question: str, research: bool = False):
         """Yields UI events for one question."""
         if self.chat is None:
             self.new_chat()
@@ -423,7 +447,7 @@ class App:
         session["title"] = session["title"] or question[:60]
         session["provider"], session["model"] = chat.provider, chat.model
         try:
-            for event in answer(chat, game, question, self.stop.is_set):
+            for event in answer(chat, game, question, self.stop.is_set, research=research):
                 record(turn, event)
                 yield event
         finally:   # also when the window went away mid-answer
@@ -522,6 +546,8 @@ def make_handler(app: App, port: int):
             if self.path == "/api/stop":
                 app.stop.set()
                 return self.send_json(200, {})
+            if self.path == "/api/open":
+                return self.send_json(200, app.open_outside(body.get("url")))
             if self.path == "/api/copy":
                 text = body.get("text")
                 # only Wisp's own messages go to the clipboard this way
@@ -571,7 +597,7 @@ def make_handler(app: App, port: int):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 try:
-                    for event in app.ask(question.strip()):
+                    for event in app.ask(question.strip(), research=body.get("research") is True):
                         self.wfile.write(json.dumps(event, ensure_ascii=False).encode() + b"\n")
                         self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
