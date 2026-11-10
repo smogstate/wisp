@@ -30,6 +30,9 @@ from .llm import MODEL, AnthropicChat, FakeChat, answer
 from .sessions import Sessions, record
 
 UI = Path(__file__).with_name("ui.html")
+SIZE = (430, 680)   # the open window
+ORB = 64            # the collapsed one: a small square holding the wisp
+THEMES = ("auto", "dark", "light")
 NO_FOLDER = ("That folder has no Interface\\AddOns inside. Choose the World of Warcraft folder "
              "or its _forever_ folder.")
 
@@ -110,6 +113,13 @@ class App:
         self.chat = None
         self.problem = None                      # why the model cannot be used, in words
         self.window = None                       # the pywebview window, when there is one
+        self.frameless = False                   # Wisp draws its own window: no title bar, see-through background
+        self.collapsed = False
+        self.hotkey = None                       # the global show/hide key, when Windows granted it
+        saved = local.load_config() if persist else {}
+        self.prefs = {"theme": saved.get("theme") if saved.get("theme") in THEMES else "auto",
+                      "opacity": saved.get("opacity") if isinstance(saved.get("opacity"), int) else 85,
+                      "plain_window": bool(saved.get("plain_window"))}
         # conversations are files on this PC; a throwaway folder when nothing real may be touched
         self.sessions = Sessions(local.APP_DIR / "sessions" if persist else Path(tempfile.mkdtemp(prefix="wisp-sessions-")))
         self.session = self.sessions.new()
@@ -162,6 +172,10 @@ class App:
             "level": character.get("level"),
             "questie": (game.snapshot.get("addons") or {}).get("questie"),
             "needs_setup": self.wow_dir is None or (self.chat is None and not self.fake),
+            "theme": self.prefs["theme"],
+            "opacity": self.prefs["opacity"],
+            "window": {"own": self.window is not None, "glass": self.frameless, "collapsed": self.collapsed,
+                       "hotkey": self.hotkey},
             "usage": dict(self.chat.usage) if self.chat is not None else None,
         }
 
@@ -174,6 +188,10 @@ class App:
             "addon": local.addon_state(self.wow_dir),
             "addon_note": self.addon_note,
             "can_browse": self.window is not None,
+            "theme": self.prefs["theme"],
+            "opacity": self.prefs["opacity"],
+            "plain_window": self.prefs["plain_window"],
+            "glass": self.frameless,
         }
 
     def save_settings(self, body: dict) -> dict:
@@ -186,6 +204,14 @@ class App:
             if self.persist:
                 local.save_config({**local.load_config(), "wow_dir": str(folder)})
             self.ensure_addon()
+        if body.get("theme") in THEMES:
+            self.prefs["theme"] = body["theme"]
+        if isinstance(body.get("opacity"), int) and not isinstance(body["opacity"], bool):
+            self.prefs["opacity"] = min(100, max(30, body["opacity"]))   # never so clear that it cannot be found
+        if isinstance(body.get("plain_window"), bool):
+            self.prefs["plain_window"] = body["plain_window"]
+        if self.persist:
+            local.save_config({**local.load_config(), **self.prefs})
         key = body.get("key")
         if isinstance(key, str) and key.strip() and self.persist:
             problem = local.set_key(key.strip())
@@ -193,6 +219,43 @@ class App:
                 return {"error": problem}
             self.new_chat()
         return self.settings()
+
+    def set_collapsed(self, collapsed: bool) -> dict:
+        """Shrink the window to the wisp, or bring it back, keeping its top-right corner where it is."""
+        self.collapsed = bool(collapsed)
+        if self.window is not None:
+            if self.frameless:
+                from webview.window import FixPoint
+                width, height = (ORB, ORB) if self.collapsed else SIZE
+                self.window.resize(width, height, fix_point=FixPoint.NORTH | FixPoint.EAST)
+            elif self.collapsed:
+                self.window.minimize()   # an ordinary window just goes to the taskbar
+            else:
+                self.window.restore()
+        return {"collapsed": self.collapsed}
+
+    def toggle_from_hotkey(self):
+        if self.window is None:
+            return
+        self.window.evaluate_js("window.toggleCollapsed && toggleCollapsed()")
+        if self.collapsed:   # it is about to open: take the keyboard
+            local.bring_to_front(self.window)
+
+    def remember_position(self):
+        """Where the window's top-right corner is, so it comes back to the same place."""
+        if self.window is None or not self.persist:
+            return
+        try:
+            corner = {"right": self.window.x + self.window.width, "top": self.window.y}
+            local.save_config({**local.load_config(), "corner": corner})
+        except Exception:
+            pass
+
+    def close_window(self) -> dict:
+        self.remember_position()
+        if self.window is not None:
+            self.window.destroy()
+        return {}
 
     def install_addon(self) -> dict:
         if self.wow_dir is None:
@@ -323,6 +386,12 @@ def make_handler(app: App, port: int):
                 # only Wisp's own messages go to the clipboard this way
                 ok = isinstance(text, str) and text.startswith("WISP1:") and len(text) < 100_000 and text.isascii()
                 return self.send_json(200, {"copied": bool(ok and local.copy_to_clipboard(text))})
+            if self.path == "/api/window":   # allowed mid-answer: the answer carries on while collapsed
+                if body.get("close") is True:
+                    return self.send_json(200, app.close_window())
+                if isinstance(body.get("collapsed"), bool):
+                    return self.send_json(200, app.set_collapsed(body["collapsed"]))
+                return self.send_json(400, {"error": "nothing to do"})
             if self.path == "/api/sessions/peek":   # look without switching
                 session = app.sessions.load(body.get("id"))
                 return self.send_json(200, app.view(session) if session else {"error": "That conversation could not be opened."})
@@ -379,7 +448,19 @@ def serve(app: App, port: int = 0):
     return server, f"http://127.0.0.1:{port}/?t={app.token}"
 
 
-def smoke(window, result: dict):
+def grab(prefix: str | None, name: str):
+    """A screenshot of the screen, when Pillow is there (the build uses it to show what Windows drew)."""
+    if not prefix:
+        return
+    try:
+        from PIL import ImageGrab
+        time.sleep(0.8)
+        ImageGrab.grab().save(f"{prefix}-{name}.png")
+    except Exception:
+        pass
+
+
+def smoke(window, result: dict, shots: str | None = None):
     """Drive the real window through one question with the scripted model."""
     try:
         js = window.evaluate_js
@@ -403,10 +484,25 @@ def smoke(window, result: dict):
         js("document.querySelector('.card button') && document.querySelector('.card button').click(); true")
         wait("document.querySelector('.card button') && !!document.querySelector('.card button').dataset.state", 10)
         result["copy_button"] = js("document.querySelector('.card button') ? document.querySelector('.card button').dataset.state : null")
+        # collapse to the wisp and back, in the real window
+        result["glass"] = js("document.body.classList.contains('glass')")
+        result["size_open"] = [window.width, window.height]
+        grab(shots, "open")
+        js("setCollapsed(true); true")
+        wait("document.body.classList.contains('collapsed')", 10)
+        time.sleep(1.5)
+        result["size_collapsed"] = [window.width, window.height]
+        result["orb"] = js("document.getElementById('orb').dataset.state")
+        grab(shots, "collapsed")
+        js("setCollapsed(false); true")
+        wait("!document.body.classList.contains('collapsed')", 10)
+        time.sleep(1.5)
+        result["size_reopened"] = [window.width, window.height]
         result["key_store"] = local.key_store_problem() or "works"
         # saving the key is part of the first run on Windows; elsewhere the environment variable does
         key_store_ok = result["key_store"] == "works" or os.name != "nt"
-        result["ok"] = bool(result["loaded"] and result["answered"] and result["card"] and key_store_ok)
+        result["ok"] = bool(result["loaded"] and result["answered"] and result["card"] and key_store_ok
+                            and result["size_collapsed"][0] < result["size_open"][0])
     except Exception as e:
         result["ok"], result["error"] = False, repr(e)
     finally:
@@ -452,12 +548,27 @@ def main():
     if smoke_file and webview is None:
         sys.exit("--smoke needs pywebview")
     if webview and not in_browser:
-        window = webview.create_window("Wisp", url, width=430, height=680, min_size=(320, 400), on_top=True)
-        app.window = window
+        plain = "--plain" in args or app.prefs["plain_window"]
+        options = {"width": SIZE[0], "height": SIZE[1], "on_top": True}
+        if plain:
+            options["min_size"] = (320, 400)
+        else:   # Wisp's own window: no title bar, see-through, collapsible to a small square
+            options.update(frameless=True, easy_drag=False, transparent=True, min_size=(ORB, ORB))
+        corner = local.load_config().get("corner") if app.persist else None
+        if isinstance(corner, dict) and isinstance(corner.get("right"), int) and isinstance(corner.get("top"), int):
+            x, y = corner["right"] - SIZE[0], corner["top"]
+            # only if that spot is still on a screen
+            if any(s.x <= x and x + SIZE[0] <= s.x + s.width and s.y <= y and y + 80 <= s.y + s.height for s in webview.screens):
+                options.update(x=x, y=y)
+        window = webview.create_window("Wisp", url, **options)
+        app.window, app.frameless = window, not plain
+        window.events.closing += app.remember_position
+        if not fake and local.start_hotkey(app.toggle_from_hotkey):
+            app.hotkey = local.HOTKEY_LABEL
         if smoke_file:
             result = {}
-            threading.Timer(90, lambda: (result.setdefault("error", "timed out"), window.destroy())).start()
-            webview.start(smoke, (window, result))
+            threading.Timer(120, lambda: (result.setdefault("error", "timed out"), window.destroy())).start()
+            webview.start(smoke, (window, result, str(Path(smoke_file).with_suffix(""))))
             Path(smoke_file).write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
             os._exit(0 if result.get("ok") else 1)   # the timer thread must not keep the process alive
         webview.start()

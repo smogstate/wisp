@@ -35,6 +35,10 @@ Type `/` to see the commands: `/new`, `/sessions`, `/fork`, `/cost`, `/copy`, `/
 
 Every conversation is kept on your PC (`%APPDATA%\Wisp\sessions`). The clock icon, or `/sessions`, lists them: search, look at one without opening it, or open it and carry on. `/fork` continues in a copy, and the small branch icon under any answer forks from that point, so you can try another direction without losing the original. The line above the input shows the tokens and dollars this conversation has used so far; `/cost` gives the breakdown. The price is Wisp's estimate from Anthropic's list prices, and your Anthropic bill is the final word.
 
+### The window
+
+Wisp's window has no title bar: drag it by its header. The background is see-through and fades further when you are not using it; text and cards stay solid. **Collapse** it to a small glowing wisp with the header button, Esc, or **Ctrl+Shift+Space** from anywhere, including inside the game; click the wisp to bring it back. The wisp breathes while Wisp is thinking and shows a mark when an answer or instructions are waiting. Theme (dark, light, or following Windows) and transparency are in Settings, and as `/theme` and `/opacity 70`. If the see-through window misbehaves on your PC, Settings has *Use an ordinary window*.
+
 ### Things to know
 
 - Wisp sees your character **as of your last logout**. Log out and back in to refresh it.

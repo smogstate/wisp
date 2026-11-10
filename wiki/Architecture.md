@@ -70,7 +70,7 @@ A card is a box in the conversation for something the model produced that is not
 
 ## Themes and transparency
 
-> Dark and light themes and transparency are decided (2026-11-10). The behaviour below is proposed.
+> Built 2026-11-10. Wisp's window has no title bar and a see-through background; the header is its handle. Theme and transparency are in Settings and in `/theme` and `/opacity`. An ordinary framed, opaque window remains available as a setting, in case a PC draws the see-through one badly.
 
 - **Themes: dark, light, and auto.** Auto follows the Windows setting and is the default. `/theme` switches.
 - **Transparency is of the panel's background, not of the text.** The game shows through the panel; text, cards and buttons stay fully solid so they remain readable over a busy scene. A see-through window with see-through text is the thing to avoid.
@@ -109,7 +109,7 @@ Open:
 
 ## Collapsing
 
-> Collapsible is decided; the behaviour below is proposed.
+> Built 2026-11-10: the window shrinks to a 64-pixel square holding the wisp, keeping its top-right corner in place. Collapse with the header button, Esc when nothing is going on, `/collapse`, or the global key Ctrl+Shift+Space (which Windows delivers to Wisp whichever program has the keyboard; Wisp only listens). Click the wisp to come back; drag it to move it. It breathes while thinking and shows a mark when an answer or game instructions are waiting. Not built: collapsing by itself when the game takes focus.
 
 Two states. **Open**: the chat panel. **Collapsed**: a small glowing wisp at the screen edge that stays on top and out of the way.
 

@@ -15,6 +15,9 @@ Typing `/` lists every command that exists, filtered as you type; arrows move, E
 | `/fork` | Continue in a copy of this conversation. A small branch icon under every answer forks from that point |
 | `/cost` | Tokens and cost of this conversation |
 | `/copy` | Copy the last game instructions again |
+| `/collapse` | Shrink to the wisp; click it to come back |
+| `/theme` | `dark`, `light` or `auto`; with no word, the next one |
+| `/opacity 70` | How solid the window is, 30 to 100 |
 | `/check` | Check that everything is set up |
 | `/settings` | Game folder, addon and API key |
 

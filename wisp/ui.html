@@ -6,17 +6,29 @@
 <title>Wisp</title>
 <link rel="icon" href="data:,">
 <style>
+  /* --bg-rgb and --panel-rgb are the two surfaces that can be see-through */
   :root {
+    --bg-rgb: 246 247 249; --panel-rgb: 255 255 255;
     --bg: #f6f7f9; --panel: #ffffff; --line: #dfe3ea; --text: #1b1f27; --muted: #6a7384;
     --accent: #0e8a7d; --accent-text: #ffffff; --user: #e7f4f2; --danger: #b3261e; --card: #fbfcfd;
     --shadow: 0 1px 2px rgba(20, 30, 50, .06);
+    --glass: 1;         /* how solid the background is at most, from Settings */
+    --glass-now: 1;     /* the background right now */
+    --chrome-now: 1;    /* the header and the input bar right now: always a little more solid */
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
+      --bg-rgb: 18 21 27; --panel-rgb: 25 29 37;
       --bg: #12151b; --panel: #191d25; --line: #2a303b; --text: #e7eaf0; --muted: #8b95a7;
       --accent: #45d0c0; --accent-text: #06201d; --user: #1d2b2c; --danger: #ff8a80; --card: #1e232c;
       --shadow: none;
     }
+  }
+  :root[data-theme="dark"] {
+    --bg-rgb: 18 21 27; --panel-rgb: 25 29 37;
+    --bg: #12151b; --panel: #191d25; --line: #2a303b; --text: #e7eaf0; --muted: #8b95a7;
+    --accent: #45d0c0; --accent-text: #06201d; --user: #1d2b2c; --danger: #ff8a80; --card: #1e232c;
+    --shadow: none;
   }
   /* keeps the conversation a readable width in a wide browser window */
   :root { --gutter: max(14px, calc((100vw - 760px) / 2)); }
@@ -26,15 +38,39 @@
   ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
   html, body { height: 100%; margin: 0; }
+  html { background: transparent; }
   body {
-    background: var(--bg); color: var(--text);
+    background: rgb(var(--bg-rgb) / var(--glass-now)); color: var(--text);
     font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    display: flex; flex-direction: column;
+    display: flex; flex-direction: column; transition: background-color .3s;
   }
+  /* Wisp's own see-through window: the background lets the game show, text and cards stay solid.
+     It is at its most solid while the mouse is over it or you are typing, and fades otherwise. */
+  body.glass { --glass-now: var(--glass); --chrome-now: min(1, calc(var(--glass) + .12));
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  body.glass:not(:hover):not(:focus-within) { --glass-now: calc(var(--glass) * .6); --chrome-now: calc(var(--glass) * .75); }
   header {
-    display: flex; align-items: center; gap: 10px; padding: 10px var(--gutter);
-    background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 6px; padding: 10px var(--gutter);
+    background: rgb(var(--panel-rgb) / var(--chrome-now)); border-bottom: 1px solid var(--line);
+    user-select: none; -webkit-user-select: none; transition: background-color .3s;
   }
+  header h1 { margin-left: 4px; }
+  /* collapsed: nothing but the wisp */
+  #orb { display: none; }
+  body.collapsed { background: var(--bg); border: 0; }
+  body.collapsed.glass { background: transparent; }
+  body.collapsed > :not(#orb) { display: none !important; }
+  body.collapsed #orb { display: grid; place-items: center; flex: 1; }
+  #orb button { position: relative; width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+    background: radial-gradient(circle at 35% 32%, #ffffff 0, var(--accent) 42%, rgb(var(--bg-rgb) / .9) 100%);
+    box-shadow: 0 0 12px 2px var(--accent); }
+  #orb[data-state="thinking"] button { animation: breathe 1.3s ease-in-out infinite; }
+  #orb[data-state="ready"] button::after, #orb[data-state="card"] button::after {
+    content: ""; position: absolute; top: -2px; right: -2px; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--text); border: 2px solid rgb(var(--bg-rgb)); }
+  #orb[data-state="card"] button::after { background: #f5b83d; border-radius: 3px; }
+  @keyframes breathe { 0%, 100% { transform: scale(.82); opacity: .75; } 50% { transform: scale(1); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { #orb[data-state="thinking"] button { animation: none; } }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); flex: none; }
   h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: .01em; }
   #status { color: var(--muted); font-size: 12px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -67,13 +103,13 @@
   .card footer span { flex: 1; color: var(--muted); font-size: 12px; }
   .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
   .primary:hover { border-color: var(--accent); filter: brightness(1.06); }
-  form { display: flex; gap: 8px; padding: 10px var(--gutter) 14px; background: var(--panel); border-top: 1px solid var(--line); align-items: flex-end; }
+  form { display: flex; gap: 8px; padding: 10px var(--gutter) 14px; background: rgb(var(--panel-rgb) / var(--chrome-now)); border-top: 1px solid var(--line); align-items: flex-end; transition: background-color .3s; }
   textarea {
     flex: 1; resize: none; font: inherit; color: inherit; background: var(--bg);
     border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; max-height: 140px; min-height: 38px;
   }
   #send { width: 38px; height: 38px; border-radius: 12px; }
-  #meter { padding: 4px var(--gutter) 0; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; text-align: right; }
+  #meter { padding: 4px var(--gutter) 0; background: rgb(var(--panel-rgb) / var(--chrome-now)); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; text-align: right; }
   #meter + form { border-top: 0; padding-top: 6px; }
   #palette { list-style: none; margin: 0; padding: 6px var(--gutter); background: var(--panel); border-top: 1px solid var(--line); }
   #palette li { display: flex; gap: 12px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
@@ -105,6 +141,10 @@
   dialog .problem:empty { display: none; }
   dialog .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
   dialog .actions .grow { flex: 1; }
+  dialog select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  dialog input[type="range"] { padding: 0; accent-color: var(--accent); }
+  dialog .check { display: flex; gap: 8px; align-items: center; font-weight: 400; margin-top: 10px; }
+  dialog .check input { flex: none; width: 16px; height: 16px; }
   #results { list-style: none; margin: 12px 0 0; padding: 0; font-size: 13px; }
   #results li { display: grid; grid-template-columns: 44px 1fr; padding: 3px 0; overflow-wrap: anywhere; }
   #results .ok { color: var(--accent); } #results .FAIL { color: var(--danger); font-weight: 600; } #results .note { color: var(--muted); }
@@ -113,13 +153,18 @@
 </style>
 </head>
 <body>
-<header>
+<div id="orb" class="pywebview-drag-region" data-state="idle">
+  <button type="button" aria-label="Open Wisp" title="Open Wisp"></button>
+</div>
+<header class="pywebview-drag-region">
   <span class="dot" aria-hidden="true"></span>
   <h1>Wisp</h1>
   <span id="status" role="status">starting…</span>
   <button id="history" class="icon" type="button" aria-label="Conversations" title="Conversations"></button>
   <button id="new" class="icon" type="button" aria-label="New conversation" title="New conversation"></button>
   <button id="gear" class="icon" type="button" aria-label="Settings" title="Settings"></button>
+  <button id="collapse" class="icon" type="button" aria-label="Collapse" title="Collapse"></button>
+  <button id="quit" class="icon" type="button" aria-label="Close Wisp" title="Close Wisp" hidden></button>
 </header>
 <main id="log" aria-live="polite"></main>
 <ul id="palette" role="listbox" aria-label="Commands" hidden></ul>
@@ -147,6 +192,16 @@
   <label for="key">Anthropic API key</label>
   <div class="row"><input id="key" type="password" autocomplete="off" spellcheck="false"></div>
   <div class="hint" id="key-hint"></div>
+  <label for="theme">Appearance</label>
+  <div class="row">
+    <select id="theme" aria-label="Theme">
+      <option value="auto">Follow Windows</option><option value="dark">Dark</option><option value="light">Light</option>
+    </select>
+    <input id="opacity" type="range" min="30" max="100" step="5" aria-label="How solid the window is">
+  </div>
+  <div class="hint" id="opacity-hint"></div>
+  <label class="check"><input id="plain" type="checkbox"> Use an ordinary window, with a title bar and no transparency</label>
+  <div class="hint">Takes effect the next time Wisp starts.</div>
   <div class="problem" id="settings-problem" role="alert"></div>
   <div class="actions">
     <button id="check" type="button">Check setup</button>
@@ -183,6 +238,7 @@ const ICONS = {
   check: '<path d="M20 6L9 17l-5-5"/>',
   x: '<path d="M18 6L6 18M6 6l12 12"/>',
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  collapse: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
   branch: '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
   back: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
   folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
@@ -197,7 +253,43 @@ function setIcon(button, name, label) {
 const token = new URLSearchParams(location.search).get("t") || "";
 const log = document.getElementById("log"), input = document.getElementById("input");
 const send = document.getElementById("send"), statusEl = document.getElementById("status");
-let running = false, usage = null, lastCard = null, turnCount = 0;
+let running = false, usage = null, lastCard = null, turnCount = 0, collapsed = false, glass = false;
+const orb = document.getElementById("orb");
+
+// ---- appearance: theme and how see-through the window is ----
+function applyLook(theme, opacity) {
+  if (theme === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  document.documentElement.style.setProperty("--glass", glass ? opacity / 100 : 1);
+}
+
+// ---- collapsing to the wisp and back ----
+async function setCollapsed(on) {
+  if (on === collapsed) return;
+  collapsed = on;
+  if (on) {   // hide first, then shrink, so nothing is seen squeezed
+    for (const d of document.querySelectorAll("dialog[open]")) d.close();
+    orb.dataset.state = running ? "thinking" : "idle";
+    document.body.classList.add("collapsed");
+    await post("/api/window", { collapsed: true });
+  } else {    // grow first, then show
+    await post("/api/window", { collapsed: false });
+    document.body.classList.remove("collapsed");
+    orb.dataset.state = "idle";
+    input.focus();
+  }
+}
+function toggleCollapsed() { setCollapsed(!collapsed); }
+window.toggleCollapsed = toggleCollapsed;   // the global key calls this
+window.setCollapsed = setCollapsed;
+
+// A click opens the wisp; a drag moves it. Both end with the mouse still over it, so tell them apart by distance.
+let pressedAt = null;
+orb.onmousedown = (e) => { pressedAt = [e.screenX, e.screenY]; };
+orb.onclick = (e) => {
+  const moved = pressedAt ? Math.abs(e.screenX - pressedAt[0]) + Math.abs(e.screenY - pressedAt[1]) : 0;
+  if (moved < 6) setCollapsed(false);
+};
 
 function showMeter() {
   const meter = document.getElementById("meter");
@@ -240,6 +332,11 @@ async function refresh() {
   statusEl.textContent = s.snapshot_problem ? "no character data"
     : `level ${s.level ?? "?"} · ${s.quests} quests · saved ${age(s.snapshot_age_minutes ?? 0)}`;
   statusEl.title = s.snapshot_problem || "Your character as of your last logout";
+  glass = s.window.glass;
+  document.body.classList.toggle("glass", glass);
+  applyLook(s.theme, s.opacity);
+  document.getElementById("quit").hidden = !s.window.own;
+  document.getElementById("collapse").title = "Collapse" + (s.window.hotkey ? " (" + s.window.hotkey + ")" : " (Esc)");
   if (!running) { usage = s.usage; showMeter(); }
   if (!log.querySelector(".msg, .card")) {
     log.textContent = "";
@@ -354,6 +451,7 @@ async function ask(text) {
   add("div", "msg user", text);
   let bubble = add("div", "msg wisp");
   setRunning(true);
+  if (collapsed) orb.dataset.state = "thinking";
   try {
     const res = await api("/api/ask", { text });
     if (!res.ok) throw new Error((await res.json()).error || "request failed");
@@ -367,6 +465,8 @@ async function ask(text) {
       while ((nl = buffer.indexOf("\n")) >= 0) {
         const event = JSON.parse(buffer.slice(0, nl));
         buffer = buffer.slice(nl + 1);
+        if (collapsed && event.type === "card") orb.dataset.state = "card";
+        if (collapsed && event.type === "done" && orb.dataset.state !== "card") orb.dataset.state = "ready";
         if (event.type === "text") { bubble.textContent += event.text; log.scrollTop = log.scrollHeight; }
         else if (event.type === "tool") { add("div", "trace", (event.ok ? "looked up: " : "lookup failed: ") + event.name); bubble = add("div", "msg wisp"); }
         else if (event.type === "card") { showCard(event.card); bubble = add("div", "msg wisp"); }
@@ -408,12 +508,33 @@ async function copyLast() {
   add("div", "trace", (await copy(lastCard.wisp)) ? "Copied the last instructions. In the game: Ctrl+V twice." : "Could not reach the clipboard.");
 }
 
+async function setTheme(word) {
+  const current = (await (await api("/api/state")).json()).theme;
+  const order = ["auto", "dark", "light"];
+  const theme = order.includes(word) ? word : order[(order.indexOf(current) + 1) % 3];   // no word: the next one
+  const s = await post("/api/settings", { theme });
+  applyLook(s.theme, s.opacity);
+  add("div", "trace", "Theme: " + { auto: "following Windows", dark: "dark", light: "light" }[s.theme] + ".");
+}
+
+async function setOpacity(word) {
+  const value = parseInt(word, 10);
+  if (!glass) { add("div", "trace", "This window cannot be see-through. Wisp's own window can: see Settings."); return; }
+  if (!(value >= 30 && value <= 100)) { add("div", "trace", "Say how solid, from 30 to 100: /opacity 70"); return; }
+  const s = await post("/api/settings", { opacity: value });
+  applyLook(s.theme, s.opacity);
+  add("div", "trace", "The window is now " + s.opacity + "% solid at most, and fades when you are not using it.");
+}
+
 const commands = [
   { name: "new", help: "Start a new conversation", run: newChat },
   { name: "sessions", help: "Earlier conversations: search, peek, reopen", run: () => openSessions() },
   { name: "fork", help: "Continue in a copy of this conversation", run: () => fork() },
   { name: "cost", help: "Tokens and cost of this conversation", run: showCost },
   { name: "copy", help: "Copy the last game instructions again", run: copyLast },
+  { name: "collapse", help: "Shrink to the wisp; click it to come back", run: () => setCollapsed(true) },
+  { name: "theme", help: "dark, light or auto", run: setTheme },
+  { name: "opacity", help: "How solid the window is, 30 to 100", run: setOpacity },
   { name: "check", help: "Check that everything is set up", run: async () => { await openSettings(); document.getElementById("check").click(); } },
   { name: "settings", help: "Game folder, addon and API key", run: () => openSettings() },
 ];
@@ -438,11 +559,12 @@ function showPalette() {
   });
 }
 
-function runCommand(command) {
+function runCommand(command, word) {
   input.value = "";
   input.style.height = "";
   showPalette();
-  command.run();
+  log.querySelector(".hello")?.remove();
+  command.run(word);
 }
 
 document.getElementById("form").onsubmit = (e) => {
@@ -451,8 +573,9 @@ document.getElementById("form").onsubmit = (e) => {
   const text = input.value.trim();
   if (!text) return;
   if (text.startsWith("/")) {
-    const command = matches[selected] || commands.find(c => "/" + c.name === text.toLowerCase());
-    if (command) { runCommand(command); return; }
+    const [name, word] = text.slice(1).toLowerCase().split(/\s+/);
+    const command = matches[selected] || commands.find(c => c.name === name);
+    if (command) { runCommand(command, word); return; }
     input.value = "";
     showPalette();
     add("div", "trace", "There is no command " + text.split(/\s/)[0] + ". Type / to see the commands.");
@@ -485,7 +608,11 @@ input.oninput = () => {
   selected = 0;
   showPalette();
 };
-document.onkeydown = (e) => { if (e.key === "Escape" && running) api("/api/stop", {}); };
+document.onkeydown = (e) => {
+  if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
+  if (running) api("/api/stop", {});
+  else if (!input.value && !collapsed) setCollapsed(true);   // nothing going on: Esc gets Wisp out of the way
+};
 document.getElementById("new").onclick = newChat;
 // ---- settings ----
 const dialog = document.getElementById("settings"), $ = (id) => document.getElementById(id);
@@ -508,6 +635,12 @@ function showSettings(s) {
   $("install").hidden = !s.wow_dir || s.addon === "installed";
   $("addon-hint").textContent = s.addon_note
     || (s.addon === "installed" ? "Wisp keeps this copy up to date by itself." : "Wisp installs its addon into the game's AddOns folder when you save the game folder.");
+  $("theme").value = s.theme;
+  $("opacity").value = s.opacity;
+  $("opacity").disabled = !s.glass;
+  $("opacity-hint").textContent = s.glass ? "How solid the window is. It fades further while you are not using it."
+    : "Transparency needs Wisp's own window.";
+  $("plain").checked = s.plain_window;
   $("key").value = "";
   $("key").placeholder = s.key ? "•••••••• (" + (s.key === "saved" ? "saved on this PC" : s.key) + ")" : "sk-ant-…";
   $("key-hint").textContent = s.key ? "Paste a new key to replace it." : "Kept in this PC's credential store. Sent only to Anthropic.";
@@ -526,9 +659,12 @@ async function post(path, body) {
 
 $("gear").onclick = openSettings;
 $("close").onclick = () => dialog.close();
+const lookNow = () => ({ theme: $("theme").value, opacity: parseInt($("opacity").value, 10), plain_window: $("plain").checked });
+$("theme").onchange = $("opacity").oninput = () => applyLook($("theme").value, parseInt($("opacity").value, 10));   // see it before saving
 $("save").onclick = async () => {
-  if (showSettings(await post("/api/settings", { wow_dir: $("folder").value, key: $("key").value }))) { dialog.close(); refresh(); }
+  if (showSettings(await post("/api/settings", { wow_dir: $("folder").value, key: $("key").value, ...lookNow() }))) { dialog.close(); refresh(); }
 };
+dialog.addEventListener("close", refresh);   // closing without saving puts the look back
 $("install").onclick = async () => {
   const saved = await post("/api/settings", { wow_dir: $("folder").value });
   if (showSettings(saved)) showSettings(await post("/api/install-addon", {}));
@@ -617,7 +753,12 @@ $("session-open").onclick = async () => {
   refresh();
 };
 
+$("collapse").onclick = () => setCollapsed(true);
+$("quit").onclick = () => post("/api/window", { close: true });
+
 setIcon(send, "send");
+setIcon($("collapse"), "collapse");
+setIcon($("quit"), "x");
 setIcon($("history"), "clock");
 setIcon($("back"), "back");
 setIcon($("sessions-close"), "x");

@@ -77,6 +77,54 @@ def key_store_problem() -> str | None:
         return f"{type(e).__name__}: {e}"
 
 
+# -- a global key that shows and hides the window (Windows) --------------------
+
+HOTKEY_LABEL = "Ctrl+Shift+Space"
+
+
+def start_hotkey(callback) -> bool:
+    """Ask Windows to tell Wisp when the key is pressed, whichever program has
+    the keyboard. This only listens; nothing is ever sent to another program.
+    False if the key is taken or this is not Windows."""
+    if os.name != "nt":
+        return False
+    import ctypes
+    import threading
+    from ctypes import wintypes
+
+    ready, result = threading.Event(), []
+
+    def loop():
+        user32 = ctypes.windll.user32
+        mod_control, mod_shift, mod_norepeat, vk_space, wm_hotkey = 0x0002, 0x0004, 0x4000, 0x20, 0x0312
+        result.append(bool(user32.RegisterHotKey(None, 1, mod_control | mod_shift | mod_norepeat, vk_space)))
+        ready.set()
+        if not result[0]:
+            return
+        message = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+            if message.message == wm_hotkey:
+                try:
+                    callback()
+                except Exception:
+                    pass   # a failed toggle must not kill the listener
+
+    threading.Thread(target=loop, daemon=True).start()
+    ready.wait(3)
+    return bool(result and result[0])
+
+
+def bring_to_front(window) -> None:
+    """After the global key: give the window the keyboard so you can type at once."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.user32.SetForegroundWindow(int(window.native.Handle.ToInt64()))
+    except Exception:
+        pass
+
+
 # -- the game folder ----------------------------------------------------------
 
 def game_folder(path) -> Path | None:
@@ -173,7 +221,9 @@ def copy_to_clipboard(text: str) -> bool:
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # no console flash from a windowed exe
     for command in commands:
         try:
-            subprocess.run(command, input=text.encode("ascii"), check=True, timeout=5, creationflags=flags)
+            # no inherited output: wl-copy stays alive to serve the clipboard and would hold our pipes open
+            subprocess.run(command, input=text.encode("ascii"), check=True, timeout=5, creationflags=flags,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except (OSError, subprocess.SubprocessError, UnicodeEncodeError):
             continue
