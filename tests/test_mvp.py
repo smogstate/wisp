@@ -160,6 +160,79 @@ def test_dungeons(wow: Path, tmp: Path):
     assert "DungeonJournal addon was not found" in run_tool(plain, "dungeon", {"name": "x"})["error"]
 
 
+def test_history(wow: Path, tmp: Path):
+    """Every snapshot is kept per character, and what changed between two is worked out in code."""
+    import copy
+    from wisp.history import History, character_key, diff, recap
+
+    base = Game.load(wow).snapshot
+    assert base["who"] == {"name": "Тестер", "realm": "Test Realm"}
+    assert base["professions"] == [{"name": "Tailoring", "skill": 150, "max": 225}, {"name": "Fishing", "skill": 31, "max": 75}]
+    assert base["character"]["money"] == 153422 and base["character"]["xp"] == 4200
+    told = json.dumps(run_tool(Game(base), "character", {}), ensure_ascii=False)
+    assert "Тестер" not in told and "Test Realm" not in told, "who the character is stays out of what the model is given"
+    assert "Tailoring" in told
+
+    store = History(tmp / "snapshots")
+    assert store.ingest(base) is True and store.ingest(base) is False
+    folder = tmp / "snapshots" / "Test Realm-Тестер"
+    filed = list(folder.glob("*.json"))
+    assert len(filed) == 1 and filed[0].stem == str(base["takenAt"])
+    assert "dungeons" not in json.loads(filed[0].read_text(encoding="utf-8")), "reference data is not kept per snapshot"
+    assert store.earlier(base) is None, "nothing before the first one"
+
+    same = copy.deepcopy(base)
+    same["takenAt"] += 600
+    assert store.ingest(same) is False, "logging in and straight out changes nothing and is not filed twice"
+
+    later = copy.deepcopy(base)
+    later["takenAt"] += 7200
+    later["character"].update(level=14, money=153422 + 32050, zone="Westfall")
+    later["completed"] = base["completed"] + [33, 9001]
+    later["quests"] = [q for q in base["quests"] if q["id"] != 33] + [{"id": 500, "title": "A New Errand"}]
+    later["professions"][0]["skill"] = 185
+    later["professions"].append({"name": "Cooking", "skill": 1, "max": 75})
+    assert store.ingest(later) is True and store.count(later) == 2
+    assert store.earlier(later)["takenAt"] == base["takenAt"]
+    assert store.earlier(later, at_least_seconds=86400) is None
+
+    changes = diff(base, later)
+    assert changes["hours_between"] == 2.0 and changes["level"] == {"from": 12, "to": 14}
+    assert changes["quests_finished"] == 2 and changes["quests_finished_names"] == ["Wolves Across the Border"], \
+        "the count is exact; a quest that was never in the log has no name"
+    assert changes["quests_picked_up"] == ["A New Errand"] and changes["quests_abandoned"] == []
+    assert changes["money_copper"]["change"] == 32050 and changes["zone"] == {"from": "Elwynn Forest", "to": "Westfall"}
+    assert changes["professions"] == [{"name": "Tailoring", "from": 150, "to": 185}, {"name": "Cooking", "learned": True, "to": 1}]
+    assert recap(changes) == ["Level 12 → 14", "2 quests finished: Wolves Across the Border and 1 more", "Picked up: A New Errand",
+                              "Tailoring 150 → 185", "Cooking: learned", "Money +3g 20s", "Now in Westfall"]
+    assert recap(diff(base, same)) == []
+
+    other = copy.deepcopy(later)
+    other["who"] = {"name": "Alt/One", "realm": "Test Realm"}
+    assert character_key(other) == "Test Realm-Alt_One" and store.ingest(other) is True
+    assert store.earlier(other) is None, "each character has its own history"
+
+    game = Game(later)
+    assert "no earlier snapshot" in run_tool(game, "changes", {})["error"], "without a history there is nothing to compare"
+    game.history = store
+    assert run_tool(game, "changes", {})["changes"]["level"] == {"from": 12, "to": 14}
+    assert "from that long ago" in run_tool(game, "changes", {"days": 3})["error"]
+    assert "error" in run_tool(game, "changes", {"days": -1}) and "error" in run_tool(game, "changes", {"days": True})
+
+    # the app files the snapshot it sees and offers the recap, with no model involved
+    app = App(wow, fake=True)
+    app.history = History(tmp / "app")
+    two_days_ago = copy.deepcopy(base)
+    two_days_ago["takenAt"] -= 2 * 86400
+    two_days_ago["character"]["level"] = 10
+    app.history.ingest(two_days_ago)
+    state = app.state()
+    assert state["snapshots"] == 2 and state["recap"] == {"since": "2 days", "lines": ["Level 10 → 12"]}
+    events = list(app.ask("what changed?"))
+    assert events[-1]["type"] == "done" and app.history.count(base) == 2, "asking again does not file it again"
+    assert App(wow, fake=True).state()["recap"] is None, "a first run has nothing to compare with"
+
+
 def test_inbox_is_strict():
     def paste(text, flags=""):
         return stub("paste", text, flags=flags)
@@ -431,6 +504,8 @@ if __name__ == "__main__":
         test_question_to_waypoint(wow)
         with tempfile.TemporaryDirectory() as f:
             test_dungeons(wow, Path(f))
+        with tempfile.TemporaryDirectory() as g:
+            test_history(wow, Path(g))
         test_inbox_is_strict()
         test_without_questie(Path(b))
         test_bad_files(Path(c))

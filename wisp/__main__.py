@@ -26,6 +26,7 @@ from pathlib import Path
 
 from . import local
 from .game import Game, find_saved_file
+from .history import History, ago_words, diff, recap
 from .llm import MODEL, AnthropicChat, FakeChat, answer
 from .sessions import Sessions, record
 
@@ -78,6 +79,8 @@ def check(wow_dir: Path | None, call_model: bool = True) -> list[tuple[str, str,
             add("Snapshot readable", True, f"{len(game.quests)} quests, saved {game.age_minutes()} minutes ago")
             add("Questie data in the snapshot", (game.snapshot.get("addons") or {}).get("questie"),
                 bad="Questie was not ready at logout; play a little, then log out again")
+            kept = History(local.APP_DIR / "snapshots").count(game.snapshot)
+            add("Snapshots kept for this character", True, f"{kept}: one per logout Wisp has seen")
             if (addons / "ForeverDungeonJournal").is_dir():
                 add("Dungeon data in the snapshot", bool(game.dungeons), f"{len(game.dungeons)} dungeons",
                     "not yet: log in and out once more with the new Wisp addon")
@@ -130,6 +133,7 @@ class App:
         # conversations are files on this PC; a throwaway folder when nothing real may be touched
         self.sessions = Sessions(local.APP_DIR / "sessions" if persist else Path(tempfile.mkdtemp(prefix="wisp-sessions-")))
         self.session = self.sessions.new()
+        self.history = History(local.APP_DIR / "snapshots" if persist else Path(tempfile.mkdtemp(prefix="wisp-snapshots-")))
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
 
     def ensure_addon(self):
@@ -167,10 +171,29 @@ class App:
         except Exception as e:
             self.problem = f"Cannot start the model: {e}"
 
-    def state(self) -> dict:
+    def load_game(self) -> Game:
+        """The current snapshot, filed into the history the first time it is seen."""
         game = Game.load(self.wow_dir)
+        if game.snapshot:
+            self.history.ingest(game.snapshot)
+            game.history = self.history
+        return game
+
+    def recap(self, game: Game) -> dict | None:
+        """What changed since the snapshot before this one, as short lines. No model involved."""
+        older = self.history.earlier(game.snapshot) if game.snapshot else None
+        if older is None:
+            return None
+        changes = diff(older, game.snapshot)
+        lines = recap(changes)
+        return {"since": ago_words(changes["hours_between"]), "lines": lines} if lines else None
+
+    def state(self) -> dict:
+        game = self.load_game()
         character = game.snapshot.get("character") or {}
         return {
+            "recap": self.recap(game),
+            "snapshots": self.history.count(game.snapshot) if game.snapshot else 0,
             "model": "scripted test model" if self.fake else "Claude",
             "model_problem": self.problem,
             "snapshot_problem": game.problem,
@@ -319,7 +342,7 @@ class App:
             yield {"type": "done", "reason": "error"}
             return
         self.stop.clear()
-        game = Game.load(self.wow_dir)   # re-read: you may have logged out since the last question
+        game = self.load_game()   # re-read: you may have logged out since the last question
         session, chat = self.session, self.chat
         turn = {"items": [{"type": "user", "text": question}], "end": 0}
         session["turns"].append(turn)

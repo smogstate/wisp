@@ -13,6 +13,7 @@ Typing `/` lists every command that exists, filtered as you type; arrows move, E
 | `/new` | Start a new conversation; the current one is kept |
 | `/sessions` | Earlier conversations: search by title or by anything said, peek at one read-only, reopen it and continue |
 | `/fork` | Continue in a copy of this conversation. A small branch icon under every answer forks from that point |
+| `/recap` | What changed since your last session |
 | `/cost` | Tokens and cost of this conversation |
 | `/copy` | Copy the last game instructions again |
 | `/collapse` | Shrink to the wisp; click it to come back |

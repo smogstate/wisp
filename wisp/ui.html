@@ -96,6 +96,10 @@
   .hello { margin: auto; text-align: center; color: var(--muted); max-width: 300px; }
   .hello strong { display: block; color: var(--text); font-size: 16px; margin-bottom: 6px; }
   .hello .warn { color: var(--danger); margin-top: 10px; }
+  .recap { margin-top: 16px; padding: 10px 12px; text-align: left; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+  .recap h2 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
+  .recap ul { margin: 0; padding-left: 18px; }
   .card { align-self: stretch; background: var(--card); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; box-shadow: var(--shadow); }
   .card h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
   .card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -257,6 +261,20 @@ const token = new URLSearchParams(location.search).get("t") || "";
 const log = document.getElementById("log"), input = document.getElementById("input");
 const send = document.getElementById("send"), statusEl = document.getElementById("status");
 let running = false, usage = null, lastCard = null, turnCount = 0, collapsed = false, glass = false, fade = false;
+let lastRecap = null, snapshotsKept = 0;
+
+// "Since last time": what changed between your last two logouts, worked out by Wisp itself.
+function recapBlock(recap) {
+  const box = document.createElement("div");
+  box.className = "recap";
+  const title = document.createElement("h2");
+  title.textContent = "Since last time · " + recap.since + " apart";
+  title.title = "What changed between your last two logouts";
+  const list = document.createElement("ul");
+  for (const line of recap.lines) { const li = document.createElement("li"); li.textContent = line; list.append(li); }
+  box.append(title, list);
+  return box;
+}
 const orb = document.getElementById("orb");
 
 // ---- appearance: theme and how see-through the window is ----
@@ -348,6 +366,7 @@ async function refresh() {
   statusEl.textContent = s.snapshot_problem ? "no character data"
     : `level ${s.level ?? "?"} · ${s.quests} quests · ${age(s.snapshot_age_minutes ?? 0)}`;
   statusEl.title = s.snapshot_problem || "Your character as of your last logout";
+  lastRecap = s.recap; snapshotsKept = s.snapshots;
   glass = s.window.glass; fade = s.window.fade;
   document.body.classList.toggle("glass", glass);
   document.body.classList.toggle("fade", fade);
@@ -361,6 +380,7 @@ async function refresh() {
     const title = document.createElement("strong");
     title.textContent = "Ask about your quests";
     hello.append(title, "Where do I hand this in? What comes next in the chain? Wisp knows your quest log as of your last logout.");
+    if (s.recap) hello.append(recapBlock(s.recap));
     for (const problem of [s.snapshot_problem, s.model_problem, s.questie === false ? "Questie was not found, so locations will be missing." : null]) {
       if (!problem) continue;
       const warn = document.createElement("div");
@@ -519,6 +539,12 @@ function showCost() {
     : "Part of this was answered by a model Wisp has no price for, so only tokens are shown.");
 }
 
+function showRecap() {
+  if (lastRecap) { log.append(recapBlock(lastRecap)); log.scrollTop = log.scrollHeight; return; }
+  add("div", "trace", snapshotsKept > 1 ? "Nothing changed between your last two logouts."
+    : "Nothing to compare yet. Wisp keeps a snapshot each time you log out; after the next one there will be a recap.");
+}
+
 async function copyLast() {
   log.querySelector(".hello")?.remove();
   if (!lastCard) { add("div", "trace", "There are no game instructions to copy yet."); return; }
@@ -547,6 +573,7 @@ const commands = [
   { name: "new", help: "Start a new conversation", run: newChat },
   { name: "sessions", help: "Earlier conversations: search, peek, reopen", run: () => openSessions() },
   { name: "fork", help: "Continue in a copy of this conversation", run: () => fork() },
+  { name: "recap", help: "What changed since your last session", run: showRecap },
   { name: "cost", help: "Tokens and cost of this conversation", run: showCost },
   { name: "copy", help: "Copy the last game instructions again", run: copyLast },
   { name: "collapse", help: "Shrink to the wisp; click it to come back", run: () => setCollapsed(true) },

@@ -85,7 +85,7 @@ To confirm when the window is built: that the chosen window toolkit supports a s
 
 ## Snapshot history
 
-> Keeping history is decided (2026-11-10). The mechanics below are proposed.
+> Built 2026-11-10 (`wisp/history.py`). Every snapshot the overlay sees is filed under `%APPDATA%\Wisp\snapshots\<realm>-<character>\`, one JSON file per logout, named by the time it was taken. The dungeon reference data is left out of each file; a snapshot whose content has not changed is not filed again. The addon now also saves who the character is (kept on this PC, never given to the model), experience, exact money and professions with skill. Differences are computed in code: level, money, quests finished, picked up and dropped, profession skill, zone. The window shows them as **Since last time** when a conversation is empty, `/recap` shows them on demand, and the `changes` tool gives them to the model, for the last session or looking back a number of days. Not built: goals tracked across sessions, nudges, a view of progress over time.
 
 The addon saves one snapshot of the character; the game writes it to disk at logout. **Python keeps every one of them**, so Wisp knows not only what the character is but how it got there.
 

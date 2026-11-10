@@ -6,6 +6,8 @@ import re
 import time
 from pathlib import Path
 
+from .history import diff
+
 SNAPSHOT_VERSION = 1
 
 
@@ -67,6 +69,7 @@ class Game:
         self.dungeons = [self._dungeon(i, d) for i, d in enumerate(_as_list(self.snapshot.get("dungeons")))
                          if isinstance(d, dict)]
         self.cards: list[dict] = []        # action cards made during the current answer
+        self.history = None                # the snapshot history, when the app has one
 
     @classmethod
     def load(cls, wow_dir: Path | None) -> "Game":
@@ -200,6 +203,7 @@ class Game:
         completed = _as_list(self.snapshot.get("completed"))
         return {
             "character": self.snapshot.get("character"),
+            "professions": self.snapshot.get("professions"),
             "client": self.snapshot.get("client"),
             "addons": self.snapshot.get("addons"),
             "quests_in_log": len(self.quests),
@@ -262,6 +266,20 @@ class Game:
                 "note": "From the DungeonJournal addon. Quest status is as of the player's last logout. "
                         "Every 'ref' can go to the waypoint tool."}
 
+    def tool_changes(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        days = args.get("days")
+        if days is not None and (isinstance(days, bool) or not isinstance(days, (int, float)) or not 0 < days <= 3650):
+            return {"error": "days must be a number above 0"}
+        older = self.history.earlier(self.snapshot, (days or 0) * 86400) if self.history else None
+        if older is None:
+            return {"error": "There is no earlier snapshot to compare with" + (" from that long ago" if days else "")
+                             + ". Wisp keeps one each time the player logs out, starting from when it was first run."}
+        return {"changes": diff(older, self.snapshot),
+                "note": "Worked out from two saved snapshots: 'from' and 'to' are when each was taken (Unix time). "
+                        "Only quests that were in the quest log at some point have names; the count is exact."}
+
     def tool_waypoint(self, args: dict) -> dict:
         refs = args.get("refs")
         if not isinstance(refs, list) or not refs or len(refs) > 20 or not all(isinstance(r, str) for r in refs):
@@ -308,6 +326,19 @@ TOOLS = [
             "type": "object",
             "properties": {"quest_ids": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 50}},
             "required": ["quest_ids"], "additionalProperties": False,
+        },
+    },
+    {
+        "name": "changes",
+        "description": "What changed for this character between two of its saved snapshots: level, money, quests "
+                       "finished, picked up and dropped, profession skill, zone. With no argument it compares the latest "
+                       "snapshot with the one before it (one play session). With days, it compares with the snapshot "
+                       "from at least that many days ago. Use it for 'what did I do last time' or 'how far have I come "
+                       "this week'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "number", "description": "Look back at least this many days"}},
+            "additionalProperties": False,
         },
     },
     {

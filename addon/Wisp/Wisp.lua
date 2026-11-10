@@ -167,6 +167,28 @@ local function dungeons()
   return out
 end
 
+-- Professions with their skill, whichever way this client offers them.
+local function professions()
+  local out = {}
+  if GetProfessions and GetProfessionInfo then
+    for i = 1, select("#", GetProfessions()) do
+      local index = select(i, GetProfessions())   -- some of the slots are empty
+      if index then
+        local name, _, skill, maxSkill = GetProfessionInfo(index)
+        if name then out[#out + 1] = { name = name, skill = skill, max = maxSkill } end
+      end
+    end
+  elseif C_TradeSkillUI and C_TradeSkillUI.GetAllProfessionTradeSkillLines then
+    for _, line in ipairs(C_TradeSkillUI.GetAllProfessionTradeSkillLines()) do
+      local info = C_TradeSkillUI.GetProfessionInfoBySkillLineID(line)
+      if info and info.professionName and (info.skillLevel or 0) > 0 then
+        out[#out + 1] = { name = info.professionName, skill = info.skillLevel, max = info.maxSkillLevel }
+      end
+    end
+  end
+  return out
+end
+
 local function buildSnapshot()
   local version, _, _, interface = GetBuildInfo()
   local map = C_Map.GetBestMapForUnit("player")
@@ -178,11 +200,18 @@ local function buildSnapshot()
   local _, classFile = UnitClass("player")
   local okD, journal = pcall(dungeons)   -- one addon's surprise must not cost the whole snapshot
   if not okD then journal = nil end
+  local okP, skills = pcall(professions)
+  if not okP then skills = {} end
   return {
     v = 1,
     takenAt = time(),
     client = { version = version, interface = interface, locale = GetLocale() },
+    -- who this is: only so that Wisp can keep each character's history apart on this PC.
+    -- It stays out of what the model is given.
+    who = { name = UnitName("player"), realm = GetRealmName() },
+    professions = skills,
     character = {
+      xp = UnitXP and UnitXP("player") or nil, xpMax = UnitXPMax and UnitXPMax("player") or nil, money = GetMoney(),
       class = classFile, race = (UnitRace("player")), level = UnitLevel("player"),
       faction = (UnitFactionGroup("player")), gold = math.floor(GetMoney() / 10000),
       map = map, zone = mapName(map), subzone = GetSubZoneText(),

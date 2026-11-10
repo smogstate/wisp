@@ -154,6 +154,12 @@ function GetLocale() return "ruRU" end
 function UnitClass() return "Маг", "MAGE" end
 function UnitRace() return "Человек", "Human" end
 function UnitLevel() return 12 end
+function UnitName() return "Тестер" end
+function GetRealmName() return "Test Realm" end
+function UnitXP() return 4200 end
+function UnitXPMax() return 10000 end
+function GetProfessions() return 4, nil, nil, 7 end   -- with empty slots, as the game returns them
+function GetProfessionInfo(i) if i == 4 then return "Tailoring", nil, 150, 225 end return "Fishing", nil, 31, 75 end
 function UnitFactionGroup() return "Alliance", "Альянс" end
 function GetMoney() return 153422 end
 function GetSubZoneText() return "Златоземье" end
