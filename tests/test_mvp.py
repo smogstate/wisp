@@ -556,6 +556,69 @@ def test_farming(wow: Path, tmp: Path):
     assert run_tool(quiet, "farming", {"view": "gathering"})["worth"][0]["node"] == "Peacebloom", "without loot, a herb is priced by its own name"
 
 
+def test_update(tmp: Path):
+    """Wisp.exe keeping itself current: what is published, the download, its checks, the swap."""
+    import hashlib
+    import threading
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+    from wisp import update
+    assert update.current() is None and update.exe() is None, "a copy run from source never updates"
+
+    site, here = tmp / "site", tmp / "install"
+    site.mkdir(), here.mkdir()
+    new_bytes = b"MZ new exe " * 200_000
+    (site / "Wisp.exe").write_bytes(new_bytes)
+    published = {"commit": "b" * 40, "built": "2026-11-10T14:00:00Z", "sha256": hashlib.sha256(new_bytes).hexdigest(), "size": len(new_bytes)}
+    (site / "version.json").write_text(json.dumps(published))
+    handler = type("Quiet", (SimpleHTTPRequestHandler,), {"log_message": lambda *a: None})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), lambda *a: handler(*a, directory=str(site)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    try:
+        assert update.latest(base) == published
+        exe = here / "Wisp.exe"
+        exe.write_bytes(b"MZ old exe")
+
+        # the app: nothing to do when it is the published commit; otherwise fetch, check, be ready
+        app = App(None, fake=True)
+        app.exe, real = exe, update.current
+        try:
+            update.current = lambda: {"commit": "b" * 40}
+            assert app.check_update(base) == "current" and not update.pending(exe).exists()
+            update.current = lambda: {"commit": "a" * 40}
+            app.prefs["auto_update"] = False
+            assert app.check_update(base) == "off", "switched off in Settings: it does not even look"
+            app.prefs["auto_update"] = True
+            assert app.check_update(base) == "ready" and app.update["new"] == "bbbbbbb"
+            assert update.pending(exe).read_bytes() == new_bytes and app.settings()["update"]["state"] == "ready"
+            assert app.check_update(base) == "ready", "already fetched: not fetched again"
+        finally:
+            update.current = real
+
+        # only exactly the published file is ever kept or used
+        for wrong in ({"sha256": "0" * 64}, {"size": len(new_bytes) - 1}, {"size": len(new_bytes) + 1}):
+            update.pending(exe).unlink(missing_ok=True)
+            assert update.download({**published, **wrong}, exe, base) is False and not update.pending(exe).exists(), wrong
+            assert not (here / "Wisp.part").exists(), "nothing half-fetched is left behind"
+        (site / "version.json").write_text(json.dumps({**published, "commit": "not a commit"}))
+        assert update.latest(base) is None and update.latest(base + "nowhere/") is None
+        assert update.download(published, exe, base) is True
+        assert update.ready(exe, "f" * 64) is None and update.ready(exe, None) is None, "a file that is not the one that was checked"
+
+        # the swap: the old one steps aside, the new one takes its name; then the leftovers go
+        update.swap(exe, update.ready(exe, published["sha256"]))
+        assert exe.read_bytes() == new_bytes and (here / "Wisp.old.exe").read_bytes() == b"MZ old exe" and not update.pending(exe).exists()
+        update.tidy(exe)
+        assert not (here / "Wisp.old.exe").exists() and exe.exists()
+        try:
+            update.swap(exe, here / "missing.exe")
+            raise AssertionError("a swap with nothing to swap in must fail")
+        except OSError:
+            assert exe.read_bytes() == new_bytes, "and the exe that was there is back in its place"
+    finally:
+        server.shutdown()
+
+
 def test_inbox_is_strict():
     def paste(text, flags=""):
         return stub("paste", text, flags=flags)
@@ -854,4 +917,6 @@ if __name__ == "__main__":
             test_sessions(wow, Path(e))
     with tempfile.TemporaryDirectory() as d:
         test_this_pc(Path(d))
+    with tempfile.TemporaryDirectory() as u:
+        test_update(Path(u))
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

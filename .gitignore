@@ -1,2 +1,5 @@
 node_modules/
 __pycache__/
+# written by the build: the commit a packaged Wisp was made from
+wisp/version.json
+/version.json

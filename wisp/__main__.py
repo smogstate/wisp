@@ -29,6 +29,7 @@ from . import local
 from .game import Game, find_saved_file
 from .history import History, ago_words, diff, recap
 from .market import Market
+from . import update
 from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
 from .sessions import Sessions, record
 
@@ -169,7 +170,14 @@ class App:
                        for name, info in PROVIDERS.items()}
         self.prefs = {"theme": saved.get("theme") if saved.get("theme") in THEMES else "auto",
                       "opacity": saved.get("opacity") if isinstance(saved.get("opacity"), int) else 85,
-                      "plain_window": bool(saved.get("plain_window"))}
+                      "plain_window": bool(saved.get("plain_window")),
+                      "auto_update": saved.get("auto_update") is not False}
+        # this copy's own version, and where the newer one stands: off (run from source, or switched off),
+        # current, downloading, ready (downloaded and checked: a restart away), failed
+        mine = update.current()
+        self.exe = update.exe()
+        self.update = {"version": mine["commit"][:7] if mine else None, "built": (mine or {}).get("built"),
+                       "state": "off" if not mine or self.exe is None else "current", "new": None}
         # conversations are files on this PC; a throwaway folder when nothing real may be touched
         self.sessions = Sessions(local.APP_DIR / "sessions" if persist else Path(tempfile.mkdtemp(prefix="wisp-sessions-")))
         self.session = self.sessions.new()
@@ -177,6 +185,53 @@ class App:
         self.market = Market((local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-market-"))) / "market.sqlite")
         self.notes = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-notes-"))) / "notes"   # research reports
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
+
+    def check_update(self, base: str = update.RELEASE) -> str:
+        """Look for a newer Wisp.exe and fetch it beside this one. Returns the state it left."""
+        mine, state = update.current(), self.update
+        if not mine or self.exe is None or not self.prefs["auto_update"]:
+            state["state"] = "off"
+            return "off"
+        info = update.latest(base)
+        if info is None or info["commit"] == mine["commit"]:
+            state["state"] = "current"
+            return "current"
+        state["new"] = info["commit"][:7]
+        if update.ready(self.exe, info["sha256"]) is None:
+            state["state"] = "downloading"
+            if not update.download(info, self.exe, base):
+                state["state"] = "failed"   # no connection, no room, or a folder Wisp may not write to
+                return "failed"
+        if self.persist:
+            local.save_config({**local.load_config(), "update_sha256": info["sha256"]})
+        self.update_sha256 = info["sha256"]
+        state["state"] = "ready"
+        return "ready"
+
+    def start_updates(self):
+        """Look now, and every six hours while Wisp stays open."""
+        def loop():
+            while True:
+                try:
+                    self.check_update()
+                except Exception:   # an update must never take Wisp down
+                    self.update["state"] = "failed"
+                time.sleep(6 * 3600)
+        if self.exe is not None and self.persist:
+            threading.Thread(target=loop, daemon=True).start()
+
+    def restart_updated(self) -> dict:
+        """Swap in the downloaded exe and start it. The window goes with this process."""
+        new = update.ready(self.exe, getattr(self, "update_sha256", None)) if self.exe is not None else None
+        if new is None:
+            return {"error": "There is no downloaded update to restart into."}
+        try:
+            update.swap(self.exe, new)
+            update.relaunch(self.exe, [])
+        except OSError as e:
+            return {"error": f"Could not update: {e.strerror or e}. Wisp will try again when it next starts."}
+        threading.Timer(0.3, self.close_window).start()   # after this answer has gone out
+        return {"restarting": True}
 
     def ensure_addon(self):
         """One package: Wisp carries its addon and keeps the game's copy current,
@@ -262,6 +317,7 @@ class App:
             "window": {"own": self.window is not None, "glass": self.frameless and os.name != "nt",
                        "fade": self.frameless and os.name == "nt", "collapsed": self.collapsed, "hotkey": self.hotkey},
             "usage": dict(self.chat.usage) if self.chat is not None else None,
+            "update": dict(self.update),
         }
 
     def settings(self) -> dict:
@@ -279,6 +335,8 @@ class App:
             "theme": self.prefs["theme"],
             "opacity": self.prefs["opacity"],
             "plain_window": self.prefs["plain_window"],
+            "auto_update": self.prefs["auto_update"],
+            "update": dict(self.update),
             "glass": self.frameless,   # either way of being see-through: the slider applies
         }
 
@@ -298,6 +356,8 @@ class App:
             self.prefs["opacity"] = min(100, max(30, body["opacity"]))   # never so clear that it cannot be found
         if isinstance(body.get("plain_window"), bool):
             self.prefs["plain_window"] = body["plain_window"]
+        if isinstance(body.get("auto_update"), bool):
+            self.prefs["auto_update"] = body["auto_update"]
         if self.persist:
             local.save_config({**local.load_config(), **self.prefs})
         self.apply_alpha()
@@ -554,6 +614,8 @@ def make_handler(app: App, port: int):
             if self.path == "/api/stop":
                 app.stop.set()
                 return self.send_json(200, {})
+            if self.path == "/api/update":
+                return self.send_json(200, app.restart_updated())
             if self.path == "/api/open":
                 return self.send_json(200, app.open_outside(body.get("url")))
             if self.path == "/api/copy":
@@ -682,6 +744,7 @@ def smoke(window, result: dict, shots: str | None = None):
         time.sleep(1.5)
         result["size_reopened"] = [window.width, window.height]
         result["key_store"] = local.key_store_problem() or "works"
+        result["version"] = (update.current() or {}).get("commit")   # the build checks it is the commit it built
         # saving the key is part of the first run on Windows; elsewhere the environment variable does
         key_store_ok = result["key_store"] == "works" or os.name != "nt"
         result["ok"] = bool(result["loaded"] and result["answered"] and result["card"] and key_store_ok
@@ -692,8 +755,34 @@ def smoke(window, result: dict, shots: str | None = None):
         window.destroy()
 
 
+def update_at_start(args: list[str]):
+    """Before anything else: if a newer exe was downloaded and checked last time, become it."""
+    app = update.exe()
+    if app is None:
+        return
+    if "--apply-update" in args:   # the build's own test of the swap, on a real Windows machine
+        at = args.index("--apply-update")
+        update.swap(app, Path(args[at + 1]).resolve())
+        if "--then" in args:
+            update.relaunch(app, args[args.index("--then") + 1:])
+        sys.exit(0)
+    if "--fake" in args or "--smoke" in args or "--check" in args:
+        return
+    update.tidy(app)
+    config = local.load_config()
+    new = update.ready(app, config.get("update_sha256")) if config.get("auto_update") is not False else None
+    if new is not None:
+        try:
+            update.swap(app, new)
+            update.relaunch(app, args)
+        except OSError:
+            return   # a folder Wisp may not write to, or the file is held: carry on as the old one
+        sys.exit(0)
+
+
 def main():
     args = sys.argv[1:]
+    update_at_start(args)
     fake, in_browser = "--fake" in args, "--browser" in args
     smoke_file = args[args.index("--smoke") + 1] if "--smoke" in args and len(args) > args.index("--smoke") + 1 else None
     paths = [a for a in args if not a.startswith("--") and a != smoke_file]
@@ -723,6 +812,7 @@ def main():
     app = App(wow_dir, fake, persist=not fake)
     if not fake:
         app.ensure_addon()   # a newer Wisp.exe brings a newer addon
+        app.start_updates()
     app.new_chat()
     server, url = serve(app)
     try:

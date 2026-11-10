@@ -171,3 +171,17 @@ Worth carrying over from kintale as well (proposed): **one registry** where a to
 - Character data can be a session old; the screenshot covers what is on screen.
 - The model never sees whether a command worked, so commands are fire-and-forget and cannot be chained on results.
 - Addons cannot cast, target or move for the player, and on Forever cannot read protected combat data. Wisp is an out-of-combat assistant.
+
+## Updates — built 2026-11-10
+
+Denis: "can we automatically update the client when a new version is available?" Yes; `wisp/update.py`.
+
+- **How Wisp knows.** The build stamps the commit into the exe and publishes a small `version.json` beside `Wisp.exe` in the release: commit, size, SHA-256. A running Wisp reads that file at start and every six hours. A different commit means a newer build.
+- **Fetching.** The new exe is downloaded next to the running one as `Wisp.new.exe`. It is kept only if its size and hash are exactly the published ones; anything else is deleted.
+- **Swapping.** A running exe cannot be overwritten on Windows, but it can be renamed. So: `Wisp.exe` becomes `Wisp.old.exe`, `Wisp.new.exe` becomes `Wisp.exe`, the new one is started, the old one leaves. This happens at the next start by itself, or at once when the player presses **Restart** on the bar that appears. Never in the middle of an answer. The leftover old exe is removed at the start after.
+- **The addon follows**, as before: each exe carries its addon and installs it into the game folder when it starts.
+- **Off switch**: Settings, "Keep Wisp up to date by itself". Off means it does not even look.
+- **Where from**: only this project's own release address on GitHub, over HTTPS. Nothing is sent but the request. A copy run from source has no version and never updates.
+- **What protects the player.** Every build is tested on Windows before it is published, including this very swap: the build copies the exe, has it replace itself and restart, and checks the restarted one comes up and knows its commit. If a swap fails (a folder Wisp may not write to), Wisp carries on as the old version. If a new version ever fails to start, `Wisp.old.exe` beside it is the previous one: rename it back.
+- **What it does not protect against.** The exe is not signed. The hash proves the download is the published file, not who published it: someone with control of the GitHub repository could publish anything. That is the same trust as downloading the exe by hand, now exercised automatically; the switch above is for those who prefer to do it by hand.
+
