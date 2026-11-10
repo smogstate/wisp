@@ -20,9 +20,9 @@ You need the game on Windows, an Anthropic API key, and the Questie addon. TomTo
 1. **Download [Wisp.exe](https://github.com/smogstate/wisp/releases/download/mvp/Wisp.exe)** and run it. It is not signed, so Windows SmartScreen will warn: choose *More info*, then *Run anyway*. An antivirus may also ask, as it can with any small unsigned program.
 2. **Settings** opens by itself the first time.
    - *Game folder*: Wisp looks in the usual places; otherwise browse to your `World of Warcraft` folder.
-   - *Install addon*: one button. The addon is inside the exe; this copies it into the game's `Interface\AddOns\Wisp`. To install it by hand instead, unzip [Wisp-addon.zip](https://github.com/smogstate/wisp/releases/download/mvp/Wisp-addon.zip) into `Interface\AddOns`.
+   - The **addon installs itself** once Wisp knows the game folder, and updates itself with each new `Wisp.exe`. It is one package; there is nothing else to download.
    - *Anthropic API key*: paste it. It is kept in the Windows credential store on this PC.
-3. **Start the game** (or restart it, so it sees the new addon), log in, then **log out once**. The addon writes your character and quests to disk at logout.
+3. **Start the game** (or restart it, so it sees the new addon). On the character screen, check that Wisp is ticked under AddOns. Log in, then **log out once**. The addon writes your character and quests to disk at logout.
 4. In Settings press **Check setup**. Every line should say `ok`; a line that says `FAIL` tells you what to do.
 5. **Ask**, for example: *where do I hand in my wolf quest, and what comes next?*
 6. **Copy** on the card, then in the game press **Ctrl+V twice**: the first opens Wisp's inbox, the second pastes. `/wisp` opens the inbox too.

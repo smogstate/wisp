@@ -107,6 +107,23 @@ class App:
         self.chat = None
         self.problem = None                      # why the model cannot be used, in words
         self.window = None                       # the pywebview window, when there is one
+        self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
+
+    def ensure_addon(self):
+        """One package: Wisp carries its addon and keeps the game's copy current,
+        without being asked. Only ever writes its own Interface\\AddOns\\Wisp folder."""
+        if self.wow_dir is None:
+            return
+        before = local.addon_state(self.wow_dir)
+        if before == "installed":
+            return
+        problem = local.install_addon(self.wow_dir)
+        if problem:
+            self.addon_note = problem
+        elif before == "missing":
+            self.addon_note = "Wisp installed its addon into the game. Restart the game so it loads."
+        else:
+            self.addon_note = "Wisp updated its addon in the game. Restart the game so the new version loads."
 
     def new_chat(self):
         self.chat, self.problem = None, None
@@ -145,6 +162,7 @@ class App:
             "guesses": [str(p) for p in local.guess_game_folders()],
             "key": "scripted model, no key needed" if self.fake else source,   # where the key is from; never the key
             "addon": local.addon_state(self.wow_dir),
+            "addon_note": self.addon_note,
             "can_browse": self.window is not None,
         }
 
@@ -157,6 +175,7 @@ class App:
             self.wow_dir = folder
             if self.persist:
                 local.save_config({**local.load_config(), "wow_dir": str(folder)})
+            self.ensure_addon()
         key = body.get("key")
         if isinstance(key, str) and key.strip() and self.persist:
             problem = local.set_key(key.strip())
@@ -169,7 +188,10 @@ class App:
         if self.wow_dir is None:
             return {"error": "Choose the game folder first."}
         problem = local.install_addon(self.wow_dir)
-        return {"error": problem} if problem else self.settings()
+        if problem:
+            return {"error": problem}
+        self.addon_note = "The addon is installed. Restart the game so it loads."
+        return self.settings()
 
     def browse(self) -> dict:
         if self.window is None:
@@ -364,6 +386,8 @@ def main():
         sys.exit(f"\n{failed} thing(s) to fix." if failed else 0)
 
     app = App(wow_dir, fake, persist=not fake)
+    if not fake:
+        app.ensure_addon()   # a newer Wisp.exe brings a newer addon
     app.new_chat()
     server, url = serve(app)
     try:

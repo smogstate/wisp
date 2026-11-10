@@ -112,7 +112,7 @@
     <span id="addon" style="flex:1"></span>
     <button id="install" type="button">Install addon</button>
   </div>
-  <div class="hint">Copied into the game's AddOns folder. Restart the game afterwards, then log in and out once.</div>
+  <div class="hint" id="addon-hint"></div>
   <label for="key">Anthropic API key</label>
   <div class="row"><input id="key" type="password" autocomplete="off" spellcheck="false"></div>
   <div class="hint" id="key-hint"></div>
@@ -294,6 +294,8 @@ function showSettings(s) {
     : { installed: "Installed", outdated: "An older version is installed", missing: "Not installed" }[s.addon];
   $("install").textContent = s.addon === "outdated" ? "Update addon" : "Install addon";
   $("install").hidden = !s.wow_dir || s.addon === "installed";
+  $("addon-hint").textContent = s.addon_note
+    || (s.addon === "installed" ? "Wisp keeps this copy up to date by itself." : "Wisp installs its addon into the game's AddOns folder when you save the game folder.");
   $("key").value = "";
   $("key").placeholder = s.key ? "•••••••• (" + (s.key === "saved" ? "saved on this PC" : s.key) + ")" : "sk-ant-…";
   $("key-hint").textContent = s.key ? "Paste a new key to replace it." : "Kept in this PC's credential store. Sent only to Anthropic.";
