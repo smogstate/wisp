@@ -277,6 +277,13 @@
   <label>API keys</label>
   <div id="keys"></div>
   <div class="hint">Kept in this PC's credential store. Each key is sent only to its own provider.</div>
+  <label for="bnet-id">Blizzard auction data (optional)</label>
+  <div class="row">
+    <input id="bnet-id" autocomplete="off" spellcheck="false" placeholder="Client ID" aria-label="Blizzard client ID" style="flex:1;min-width:0">
+    <input id="bnet-secret" type="password" autocomplete="off" spellcheck="false" placeholder="Client secret" aria-label="Blizzard client secret" style="flex:1;min-width:0">
+    <select id="bnet-region" aria-label="Region"><option value="eu">EU</option><option value="us">US</option><option value="kr">KR</option><option value="tw">TW</option></select>
+  </div>
+  <div class="hint">A free client from develop.battle.net. For now Check setup tries it: every auction of your auction house, without scanning. Kept in this PC's credential store and sent only to Blizzard.</div>
   <label for="cap">Spending limit per day, in dollars</label>
   <div class="row"><input id="cap" type="number" min="0" max="1000" step="0.5" inputmode="decimal" style="max-width:110px"></div>
   <div class="hint" id="cap-hint"></div>
@@ -665,6 +672,9 @@ const RU = {
   " · fork": " · ответвление", "Nothing matches that.": "Ничего не найдено.",
   "No conversations yet. They are kept here once you ask something.": "Разговоров пока нет. Они появятся здесь, когда вы что-нибудь спросите.",
   "Restarting…": "Перезапуск…",
+  "Blizzard auction data (optional)": "Данные аукциона от Blizzard (необязательно)", "Client ID": "ID клиента", "Client secret": "Секрет клиента",
+  "Blizzard client ID": "ID клиента Blizzard", "Blizzard client secret": "Секрет клиента Blizzard", "Region": "Регион",
+  "A free client from develop.battle.net. For now Check setup tries it: every auction of your auction house, without scanning. Kept in this PC's credential store and sent only to Blizzard.": "Бесплатный клиент с develop.battle.net. Пока его проверяет «Проверить настройку»: все лоты вашего аукциона без сканирования. Хранится в хранилище учётных данных этого компьютера и отправляется только Blizzard.",
 };
 // counted texts: Russian has three forms (1 задание, 2 задания, 5 заданий); the key is the English plural
 const RU_COUNTED = {
@@ -1248,6 +1258,9 @@ function showSettings(s) {
   $("plain").checked = s.plain_window;
   $("auto-update").checked = s.auto_update;
   $("language").value = s.language || "auto";
+  $("bnet-region").value = s.bnet_region || "eu";
+  $("bnet-id").value = $("bnet-secret").value = "";
+  $("bnet-secret").placeholder = s.battlenet ? "•••••••• (" + T(s.battlenet === "saved" ? "saved on this PC" : s.battlenet) + ")" : T("Client secret");
   $("cap").value = s.spend.cap;
   $("cap-hint").textContent = T("Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.", { spent: dollars(s.spend.today) });
   const up = s.update || {};
@@ -1300,7 +1313,8 @@ $("model").addEventListener("focus", e => { e.target.value = ""; });
 $("model").addEventListener("blur", e => { if (!e.target.value.trim()) e.target.value = e.target.placeholder; });
 
 const keysNow = () => Object.fromEntries([...document.querySelectorAll("#keys input")].filter(f => f.value.trim()).map(f => [f.dataset.provider, f.value]));
-const modelNow = () => ({ keys: keysNow(), provider: $("provider").value, model: $("model").value });
+const modelNow = () => ({ keys: keysNow(), provider: $("provider").value, model: $("model").value, bnet_region: $("bnet-region").value,
+                          ...($("bnet-id").value.trim() && $("bnet-secret").value.trim() ? { battlenet: { id: $("bnet-id").value, secret: $("bnet-secret").value } } : {}) });
 
 async function openSettings() {
   $("results").textContent = "";

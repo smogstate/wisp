@@ -39,12 +39,13 @@ UI = Path(__file__).with_name("ui.html")
 SIZE = (430, 680)   # the open window
 ORB = 64            # the collapsed one: a small square holding the wisp
 THEMES = ("auto", "dark", "light")
+BATTLENET = "battlenet"   # the credential store's entry for the player's Blizzard developer client: "id:secret"
 DAILY_CAP = 5.0   # dollars a day unless the player sets another limit: a cap from the first day
 NO_FOLDER = "That folder has no Interface\\AddOns inside. Choose the World of Warcraft folder or its _forever_ folder."
 
 
 def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthropic",
-          model: str | None = None) -> list[tuple[str, str, str]]:
+          model: str | None = None, battlenet=None) -> list[tuple[str, str, str]]:
     """Everything a first run depends on, as (what, "ok" | "FAIL" | "note", detail).
     A "note" is something optional that is missing. Makes one small real model call."""
     out = []
@@ -132,6 +133,12 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                     t("not yet: Wisp's addon reads them in the background about a minute after login; log out after that"), optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add(t("Quest locations found"), places > 0, t("{n} for quest givers and turn-ins", n=places), t("none: is your quest log empty?"))
+            if battlenet == "missing":
+                add(t("Blizzard API"), False, bad=t("not set up: optional, in Settings"), optional=True)
+            elif battlenet is not None:   # the player's own developer client: try Blizzard's data for real
+                from .blizzard import probe
+                for what, worked, detail in probe(battlenet, game.snapshot):
+                    add(what, worked, detail, detail)
     return _key_checks(out, add, call_model, provider, model)
 
 
@@ -196,6 +203,7 @@ class App:
                       "auto_update": saved.get("auto_update") is not False,
                       # auto: the language of the game client, as the addon reported it; else Windows' own
                       "language": saved.get("language") if saved.get("language") in i18n.LANGUAGES else "auto",
+                      "bnet_region": saved.get("bnet_region") if saved.get("bnet_region") in ("eu", "us", "kr", "tw") else "eu",
                       # dollars a day across every conversation; 0 is "no limit", which the player must choose
                       "daily_cap": saved["daily_cap"] if isinstance(saved.get("daily_cap"), (int, float))
                                    and not isinstance(saved.get("daily_cap"), bool) and 0 <= saved["daily_cap"] <= 1000 else DAILY_CAP}
@@ -438,6 +446,7 @@ class App:
             "plain_window": self.prefs["plain_window"],
             "auto_update": self.prefs["auto_update"],
             "language": self.prefs["language"],
+            "battlenet": local.get_key(BATTLENET, "WISP_BATTLENET")[1] if self.persist else None, "bnet_region": self.prefs["bnet_region"],
             "update": dict(self.update),
             "spend": self.spend(),
             "glass": self.frameless,   # either way of being see-through: the slider applies
@@ -463,6 +472,13 @@ class App:
             self.prefs["auto_update"] = body["auto_update"]
         if body.get("language") in ("auto", *i18n.LANGUAGES):
             self.prefs["language"] = body["language"]
+        if body.get("bnet_region") in ("eu", "us", "kr", "tw"):
+            self.prefs["bnet_region"] = body["bnet_region"]
+        client = body.get("battlenet") if isinstance(body.get("battlenet"), dict) else {}
+        if all(isinstance(client.get(k), str) and 0 < len(client[k].strip()) <= 200 and ":" not in client[k] for k in ("id", "secret")) and self.persist:
+            problem = local.set_key(f"{client['id'].strip()}:{client['secret'].strip()}", BATTLENET)
+            if problem:
+                return {"error": problem}
         cap = body.get("daily_cap")
         if isinstance(cap, (int, float)) and not isinstance(cap, bool) and 0 <= cap <= 1000:
             self.prefs["daily_cap"] = round(float(cap), 2)
@@ -495,6 +511,13 @@ class App:
                 self.new_chat()
             result["new_conversation"] = moved
         return result
+
+    def battlenet(self):
+        """The player's Blizzard developer client for Check setup: a client, "missing", or None in tests and --fake."""
+        if self.fake or not self.persist:
+            return None
+        from .blizzard import Blizzard
+        return Blizzard.from_saved(local.get_key(BATTLENET, "WISP_BATTLENET")[0], self.prefs["bnet_region"]) or "missing"
 
     def model_choices(self, provider) -> dict:
         """The provider's own list of models, for the picker. Its default is always offered."""
@@ -776,7 +799,8 @@ def make_handler(app: App, port: int):
                     return self.send_json(200, app.install_addon())
                 if self.path == "/api/browse":
                     return self.send_json(200, app.browse())
-                results = check(app.wow_dir, call_model=not app.fake, provider=app.provider, model=app.models[app.provider])
+                results = check(app.wow_dir, call_model=not app.fake, provider=app.provider, model=app.models[app.provider],
+                                battlenet=app.battlenet())
                 return self.send_json(200, {"results": [{"what": w, "status": s, "detail": d} for w, s, d in results]})
             if self.path != "/api/ask":
                 return self.send_json(404, {"error": "not found"})

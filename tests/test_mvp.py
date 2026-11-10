@@ -1015,7 +1015,7 @@ def test_localization(tmp: Path):
     said += [text.strip() for text in re.findall(r">([^<>]+)<", markup) if text.strip()]
     said += re.findall(r'(?:title|aria-label|placeholder)="([^"]+)"', markup)
     said += [tool["name"] for tool in TOOLS + RESEARCH_TOOLS] + ["the web", "a web page", "ok", "FAIL", "note"]
-    own = ("Wisp", "Language / Язык", "Same as the game / Как в игре", "Русский", "English", "…\\World of Warcraft\\_forever_")
+    own = ("Wisp", "Language / Язык", "Same as the game / Как в игре", "Русский", "English", "EU", "US", "KR", "TW", "…\\World of Warcraft\\_forever_")
     for key in dict.fromkeys(said):
         if f'"{key}":' not in window and key not in own:
             missing.append(f"ui.html: {key}")
@@ -1579,6 +1579,95 @@ def test_shared_market(tmp: Path):
     assert len(Assets(file).trades("all")) == 1, "investments are shared too"
 
 
+def test_blizzard(wow: Path):
+    """Check setup tries Blizzard's WoW Forever data with the player's own client, against a stand-in of the API."""
+    import gzip
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlparse
+    from wisp.blizzard import Blizzard, probe
+    stack = {"on": False}   # whether the stand-in prices a listing for the whole stack
+
+    def house(number):
+        if number == 110:
+            return {"auctions": [{"id": 1, "item": {"id": 999}, "buyout": 10, "quantity": 1, "time_left": "LONG"}]}
+        each = (lambda a: a["buyout"] * a["quantity"]) if stack["on"] else (lambda a: a["buyout"])
+        mine = [{"item": 4306, "quantity": 40, "buyout": 500}, {"item": 4305, "quantity": 5, "buyout": 2000}]
+        return {"auctions": [{"id": 10 + i, "item": {"id": a["item"]}, "buyout": each(a), "quantity": a["quantity"], "time_left": "LONG"}
+                             for i, a in enumerate(mine)] + [{"id": 30, "item": {"id": 4306}, "buyout": 450, "quantity": 20, "time_left": "SHORT"}]}
+
+    class StandIn(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def reply(self, code, body, packed=False):
+            data = json.dumps(body).encode()
+            if packed:
+                data = gzip.compress(data)
+            self.send_response(code)
+            if packed:
+                self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_POST(self):
+            good = "Basic " + base64.b64encode(b"good-id:good-secret").decode()
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            if self.path != "/token" or self.headers.get("Authorization") != good:
+                return self.reply(401, {"error": "invalid_client"})
+            self.reply(200, {"access_token": "tok", "expires_in": 86399})
+
+        def do_GET(self):
+            url = urlparse(self.path)
+            ns = parse_qs(url.query).get("namespace", [""])[0]
+            if self.headers.get("Authorization") != "Bearer tok":
+                return self.reply(401, {})
+            if url.path == "/data/wow/item/4306" and ns == "static-forever-eu":
+                return self.reply(200, {"id": 4306, "name": "Silk Cloth"})
+            if ns != "dynamic-forever-eu":
+                return self.reply(404, {})
+            if url.path == "/data/wow/ruleset/index":
+                return self.reply(200, {"rulesets": [{"id": 1, "name": "Normal"}, {"id": 15, "name": "Hardcore"}]})
+            if url.path == "/data/wow/ruleset/1/auctions/":
+                return self.reply(200, {"auctions": [{"id": 110, "name": "Alliance Auction House 1"}, {"id": 113, "name": "Horde Auction House 1"},
+                                                     {"id": 111, "name": "Alliance Auction House 2"}]})
+            if url.path == "/data/wow/ruleset/1/auctions/111/commodities":   # trade goods: priced for one
+                return self.reply(200, {"auctions": [{"id": 50, "item": {"id": 2321}, "quantity": 10, "unit_price": 50, "time_left": "SHORT"}]})
+            parts = url.path.split("/")
+            if url.path.startswith("/data/wow/ruleset/1/auctions/") and len(parts) == 7 and parts[6].isdigit():
+                return self.reply(200, house(int(parts[6])), packed=True)
+            self.reply(404, {})
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), StandIn)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        snapshot = Game.load(wow).snapshot
+
+        def run(client_id="good-id", secret="good-secret", snap=snapshot):
+            return {what: (ok, detail) for what, ok, detail in probe(Blizzard(client_id, secret, "eu", oauth=base + "/token", api=base), snap)}
+        refused = run(secret="wrong")
+        assert refused == {"Blizzard API: the client": (False, "Blizzard did not accept the client: HTTP 401")}
+        lines = run()
+        assert lines["Blizzard API: the client"] == (True, "accepted (EU)")
+        assert lines["Blizzard API: WoW Forever"] == (True, "2 rulesets: Normal, Hardcore")
+        assert lines["Blizzard API: items"] == (True, "item 4306 is Silk Cloth")
+        assert lines["Blizzard API: listings"] == (True, "house 110: 1 auctions, 0 trade goods; fields: buyout, id, item, quantity, time_left")
+        assert lines["Blizzard API: your auction house"] == (True, "house 111 Alliance Auction House 2: 3 of your 3 auctions are in it"), \
+            "found by the player's own auctions, a trade good among them; the Horde house is not even fetched"
+        assert lines["Blizzard API: price per item or per stack"] == (True, "the API's buyout is the game's price for one (2 auctions agree)")
+        stack["on"] = True
+        assert run()["Blizzard API: price per item or per stack"] == (True, "the API's buyout is for the whole stack (2 auctions agree)")
+        bare = dict(snapshot, ownAuctions=None)
+        assert run(snap=bare)["Blizzard API: your auction house"][0] is False, "with no auction of the player's up, it says how to find out"
+        assert Blizzard.from_saved("id:secret").client_id == "id" and Blizzard.from_saved("nonsense") is None and Blizzard.from_saved(None) is None
+        checked = {what: status for what, status, _ in check(wow, call_model=False, battlenet="missing")}
+        assert checked["Blizzard API"] == "note", "not set up: an optional line, not a failure"
+    finally:
+        server.shutdown()
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -1592,6 +1681,7 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        test_blizzard(wow)
         with tempfile.TemporaryDirectory() as sm:
             test_shared_market(Path(sm))
         with tempfile.TemporaryDirectory() as qs:

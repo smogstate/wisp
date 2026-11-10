@@ -14,6 +14,7 @@ local LOG, FRAMES, TIMERS, WAYS, LISTS = {}, {}, {}, {}, {}
 local out = print
 print = function(s) LOG[#LOG + 1] = (s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
 local clock = os.time()   -- the game's clock, which the looting below moves forward
+if math.floor(clock / 86400) ~= math.floor((clock + 1800) / 86400) then clock = clock - 1800 end   -- the looting never straddles midnight (UTC)
 time = function() return clock end
 function strsplit(sep, text)
   local parts = {}
