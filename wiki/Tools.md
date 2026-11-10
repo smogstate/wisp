@@ -12,6 +12,8 @@ The model calls them, Python runs them, the model reads the result and can call 
 |---|---|---|
 | `wowhead_search`, `wowhead_get`, … | Items, spells, quests, NPCs with coordinates, as validated structures | [Wowhead](Wowhead.md) |
 | `dungeons`, `dungeon` | **Built.** Every dungeon, and one in full: quests with this character's status and next step, bosses, loot, entrance | [Integrations](Integrations.md) |
+| `recipes` | **Built.** The recipes of the character's professions as the game listed them: colour, grey point, what each makes, materials with the count in bags and the auction price | [Integrations](Integrations.md) |
+| `craft_plan` | **Built.** The arithmetic of a plan, in code: recipes × times → materials needed, made along the way, covered by the bags, left to buy, and the cost | [Integrations](Integrations.md) |
 | `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state. With a date, the snapshot from then | [Architecture](Architecture.md) |
 | `changes` | **Built.** What changed between two snapshots, computed in code: level, money, quests finished, picked up and dropped, profession skill, zone. For the last session, or looking back a number of days | [Architecture](Architecture.md) |
 | `screenshot` | What is on screen right now (proposed) | [Architecture](Architecture.md) |
@@ -107,7 +109,7 @@ What it depends on:
 
 ## Worked example: "level my tailoring, and give me the shopping list"
 
-Asked by Denis on 2026-11-10. The Wowhead data was checked that day; nothing is built.
+Asked by Denis on 2026-11-10. **Built the same day without Wowhead** ([Integrations](Integrations.md)): recipes come from the game's own profession window, so the plan covers the recipes the character has; the steps below that lean on `wowhead_profession` and a guide remain the design for the full path.
 
 1. `character` → profession and current skill, and what is already in bags and bank.
 2. `wowhead_profession(197)` → every recipe with its materials and the skill range in which it still gives skill. The profession's leveling guide, where one exists, gives a tested path to follow and cite.

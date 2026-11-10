@@ -26,6 +26,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 3. **Start the game** (or restart it, so it sees the new addon). On the character screen, check that Wisp is ticked under AddOns. Log in, then **log out once**. The addon writes your character and quests to disk at logout.
 4. In Settings press **Check setup**. Every line should say `ok`; a line that says `FAIL` tells you what to do.
 5. **Ask**, for example: *where do I hand in my wolf quest, and what comes next?*
+
+**Professions.** Open your profession window once in the game (Wisp says in chat that it read the recipes), then log out. Now ask *what should I craft to level tailoring, and what do I need to buy?* Wisp counts the materials, takes off what is in your bags, prices the rest from your own **Auctionator** scans, and gives you a card that creates the shopping list in Auctionator. It knows the recipes your character has; the bank is not counted.
 6. **Copy** on the card, then in the game press **Ctrl+V twice**: the first opens Wisp's inbox, the second pastes. `/wisp` opens the inbox too.
 
 To see the interface with a sample character, no key and no game: `Wisp.exe --fake`.

@@ -53,7 +53,7 @@ Kimi and OpenRouter, `/model`, `/cost` — built. The daily cap is not.
 
 ## 6. Professions
 
-`wowhead_profession`, the `craft_plan` calculator, Auctionator shopping lists. The tailoring scenario works end to end.
+**Built 2026-11-10, from the game instead of Wowhead:** recipes read from the profession window, the `craft_plan` calculator, Auctionator prices and shopping lists ([Integrations](Integrations.md)). Open: recipes not yet learned and the skill they are learned at (a full leveling path), vendor materials, the bank.
 
 ## Later, order open
 

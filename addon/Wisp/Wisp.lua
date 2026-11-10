@@ -6,6 +6,9 @@
 --        you paste it. Only the commands listed below can run; pasted text
 --        is data and is never executed as Lua.
 --
+--   kept: a profession's recipes can only be read while its window is open,
+--        so they are copied into WispData then and go into the next snapshot.
+--
 --   /wisp        open the inbox (same as Ctrl+V), then press Ctrl+V to paste
 --   /wisp save   build the snapshot now (still written to disk at logout)
 
@@ -189,6 +192,133 @@ local function professions()
   return out
 end
 
+--------------------------------------------------- bags and crafting ----
+
+local function itemName(id)
+  local name = C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)
+  if not name and GetItemInfo then name = GetItemInfo(id) end
+  return name
+end
+
+local function myKey() return tostring(GetRealmName()) .. "-" .. tostring(UnitName("player")) end
+
+local told = {}   -- professions already announced in chat this session
+local COLOUR = { [0] = "orange", [1] = "yellow", [2] = "green", [3] = "grey" }   -- the game's skill-up difficulty
+
+-- Called whenever the profession window has a list to show.
+local function captureRecipes()
+  local T = C_TradeSkillUI
+  if not (T and T.IsTradeSkillReady and T.IsTradeSkillReady() and T.GetRecipeInfo and T.GetRecipeSchematic) then return end
+  -- a profession linked in chat, or shown by a guild member or an NPC, is not this character's
+  if (T.IsTradeSkillLinked and T.IsTradeSkillLinked()) or (T.IsTradeSkillGuild and T.IsTradeSkillGuild())
+     or (T.IsNPCCrafting and T.IsNPCCrafting()) then return end
+  local info = T.GetBaseProfessionInfo and T.GetBaseProfessionInfo()
+  if not (info and type(info.professionName) == "string" and info.professionName ~= "") then return end
+  -- every recipe of the profession where the client offers that, else the ones the window lists
+  local ids = (T.GetAllRecipeIDs and T.GetAllRecipeIDs()) or (T.GetFilteredRecipeIDs and T.GetFilteredRecipeIDs()) or {}
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.recipes = WispData.recipes or {}
+  local mine = WispData.recipes[myKey()] or {}
+  WispData.recipes[myKey()] = mine
+  local book = mine[info.professionName] or { recipes = {} }
+  mine[info.professionName] = book
+  book.seenAt, book.skill, book.max = time(), info.skillLevel, info.maxSkillLevel
+  local basic = Enum and Enum.CraftingReagentType and Enum.CraftingReagentType.Basic
+  local read = 0
+  for _, id in ipairs(ids) do
+    local r = T.GetRecipeInfo(id)
+    if r and r.name and not (r.isDummyRecipe or r.isGatheringRecipe or r.isRecraft or r.isSalvageRecipe) then
+      read = read + 1
+      local plan = T.GetRecipeSchematic(id, false) or {}
+      local reagents = {}
+      for _, slot in ipairs(plan.reagentSlotSchematics or {}) do
+        local first = slot.reagents and slot.reagents[1]
+        if first and first.itemID and (slot.quantityRequired or 0) > 0 and slot.required ~= false
+           and (basic == nil or slot.reagentType == nil or slot.reagentType == basic) then
+          reagents[#reagents + 1] = { id = first.itemID, count = slot.quantityRequired }
+        end
+      end
+      -- keyed by text: a table with scattered number keys does not survive as JSON.
+      -- "skill" is the skill this recipe's colour was read at, so its age can be told.
+      book.recipes["r" .. id] = {
+        id = id, name = r.name, learned = r.learned and true or false, colour = COLOUR[r.relativeDifficulty],
+        greyAt = r.maxTrivialLevel, skillUps = r.numSkillUps, skill = info.skillLevel,
+        makes = plan.outputItemID, makesMin = plan.quantityMin, makesMax = plan.quantityMax, reagents = reagents,
+      }
+    end
+  end
+  if read > 0 and not told[info.professionName] then
+    told[info.professionName] = true
+    say(("read %d %s recipes. They reach Wisp when you log out."):format(read, info.professionName))
+  end
+end
+
+-- What is in the bags, one line per item. The bank is not read: it is closed at logout.
+local function bags()
+  local C, seen, out = C_Container, {}, {}
+  if not (C and C.GetContainerNumSlots and C.GetContainerItemInfo) then return out end
+  for bag = 0, 5 do
+    for slot = 1, C.GetContainerNumSlots(bag) or 0 do
+      local item = C.GetContainerItemInfo(bag, slot)
+      if item and item.itemID then
+        local line = seen[item.itemID]
+        if not line then
+          line = { id = item.itemID, name = item.itemName or itemName(item.itemID), count = 0 }
+          seen[item.itemID] = line
+          out[#out + 1] = line
+        end
+        line.count = line.count + (item.stackCount or 1)
+      end
+    end
+  end
+  return out
+end
+
+-- The kept recipes of this character, with item names, and the ids of every item they mention.
+local function crafting(wanted)
+  local mine = type(WispData) == "table" and type(WispData.recipes) == "table" and WispData.recipes[myKey()]
+  local books = {}
+  for profession, book in pairs(mine or {}) do
+    local list = {}
+    for _, r in pairs(book.recipes or {}) do
+      local reagents = {}
+      for _, m in ipairs(r.reagents or {}) do
+        reagents[#reagents + 1] = { id = m.id, name = itemName(m.id), count = m.count }
+        wanted[m.id] = true
+      end
+      if r.makes then wanted[r.makes] = true end
+      list[#list + 1] = { id = r.id, name = r.name, learned = r.learned, colour = r.colour, greyAt = r.greyAt,
+                          skillUps = r.skillUps, skill = r.skill, makes = r.makes, makesName = r.makes and itemName(r.makes),
+                          makesMin = r.makesMin, makesMax = r.makesMax, reagents = reagents }
+    end
+    table.sort(list, function(a, b) return a.id < b.id end)
+    books[#books + 1] = { profession = profession, seenAt = book.seenAt, skill = book.skill, max = book.max, recipes = list }
+  end
+  table.sort(books, function(a, b) return a.profession < b.profession end)
+  return books
+end
+
+local function auctionator()
+  local api = type(Auctionator) == "table" and type(Auctionator.API) == "table" and Auctionator.API.v1
+  return type(api) == "table" and api or nil
+end
+
+-- Auctionator's price for each wanted item, from the player's own last scans. Nil without Auctionator.
+local function prices(wanted)
+  local api = auctionator()
+  if not (api and api.GetAuctionPriceByItemID) then return nil end
+  local out = {}
+  for id in pairs(wanted) do
+    local ok, price = pcall(api.GetAuctionPriceByItemID, "Wisp", id)
+    if ok and type(price) == "number" then
+      local okA, age = pcall(api.GetAuctionAgeByItemID, "Wisp", id)
+      out[#out + 1] = { id = id, price = price, days = okA and type(age) == "number" and age or nil }
+    end
+  end
+  table.sort(out, function(a, b) return a.id < b.id end)
+  return out
+end
+
 local function buildSnapshot()
   local version, _, _, interface = GetBuildInfo()
   local map = C_Map.GetBestMapForUnit("player")
@@ -202,6 +332,14 @@ local function buildSnapshot()
   if not okD then journal = nil end
   local okP, skills = pcall(professions)
   if not okP then skills = {} end
+  local wanted = {}   -- items worth a price: what is carried and what the recipes use and make
+  local okB, carried = pcall(bags)
+  if not okB then carried = {} end
+  for _, line in ipairs(carried) do wanted[line.id] = true end
+  local okC, books = pcall(crafting, wanted)
+  if not okC then books = {} end
+  local okA, market = pcall(prices, wanted)
+  if not okA then market = nil end
   return {
     v = 1,
     takenAt = time(),
@@ -218,8 +356,11 @@ local function buildSnapshot()
       x = x and round1(x * 100), y = y and round1(y * 100),
     },
     addons = { questie = DB ~= nil, tomtom = type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function",
-               dungeonjournal = journal ~= nil },
+               dungeonjournal = journal ~= nil, auctionator = auctionator() ~= nil },
     dungeons = journal,
+    bags = carried,
+    recipes = books,
+    prices = market,
     quests = questLog(DB, ZoneDB),
     completed = C_QuestLog.GetAllCompletedQuestIDs(),
   }
@@ -260,6 +401,33 @@ commands["tomtom.waypoint"] = function(a)   -- { map = uiMapID, x = 0-100, y = 0
     return false, "cannot set a waypoint on that map"
   end
   return true, "waypoint: " .. title
+end
+
+-- { name = list name, items = { { id = item id, name = text, quantity = n }, ... } }
+-- Creates (or replaces) one of Auctionator's shopping lists through its public API.
+commands["auctionator.shopping_list"] = function(a)
+  local api = auctionator()
+  if not (api and api.CreateShoppingList and api.ConvertToSearchString) then return false, "Auctionator is not installed" end
+  if type(a.items) ~= "table" or #a.items == 0 or #a.items > 60 then return false, "bad shopping list" end
+  local clean = function(text, limit) return (text:gsub("[|;%c]", "")):sub(1, limit) end
+  local listName = "Wisp"
+  if type(a.name) == "string" and clean(a.name, 40) ~= "" then listName = clean(a.name, 40) end
+  local searches = {}
+  for _, item in ipairs(a.items) do
+    local quantity = type(item) == "table" and tonumber(item.quantity)
+    if not (quantity and quantity >= 1 and quantity <= 100000) then return false, "bad shopping list" end
+    -- the game's own name for the item where it has one: it is in the player's language
+    local name = tonumber(item.id) and itemName(tonumber(item.id))
+    if not name and type(item.name) == "string" then name = clean(item.name, 80) end
+    if not name or name == "" then return false, "bad shopping list" end
+    local ok, search = pcall(api.ConvertToSearchString, "Wisp",
+                             { searchString = name, isExact = true, quantity = math.floor(quantity) })
+    if not ok then return false, "Auctionator refused " .. name end
+    searches[#searches + 1] = search
+  end
+  local ok, why = pcall(api.CreateShoppingList, "Wisp", listName, searches)
+  if not ok then return false, "Auctionator: " .. tostring(why) end
+  return true, ("shopping list \"%s\" with %d items is in Auctionator's Shopping tab"):format(listName, #searches)
 end
 
 local function receive(text)
@@ -334,9 +502,13 @@ opener:SetScript("OnClick", openBox)
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_LOGOUT")
+frame:RegisterEvent("TRADE_SKILL_SHOW")
+frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
 frame:SetScript("OnEvent", function(_, event)
   if event == "PLAYER_LOGOUT" then
     save()
+  elseif event ~= "PLAYER_LOGIN" then
+    pcall(captureRecipes)
   else
     pcall(SetOverrideBindingClick, opener, false, PASTE_KEY, "WispInboxOpener")
   end

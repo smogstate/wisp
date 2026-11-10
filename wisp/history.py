@@ -13,7 +13,7 @@ import json
 import re
 from pathlib import Path
 
-REFERENCE = ("dungeons",)   # the same every time and large: not kept per snapshot
+REFERENCE = ("dungeons", "recipes", "prices")   # large and much the same every time: not kept per snapshot
 
 
 def character_key(snapshot: dict) -> str:

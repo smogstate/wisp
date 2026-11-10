@@ -6,6 +6,7 @@ import re
 import time
 from pathlib import Path
 
+from .crafting import Crafting, coins
 from .history import diff
 
 SNAPSHOT_VERSION = 1
@@ -68,6 +69,7 @@ class Game:
         self.quests = [self._quest(q) for q in _as_list(self.snapshot.get("quests")) if isinstance(q, dict)]
         self.dungeons = [self._dungeon(i, d) for i, d in enumerate(_as_list(self.snapshot.get("dungeons")))
                          if isinstance(d, dict)]
+        self.crafting = Crafting(self.snapshot)
         self.cards: list[dict] = []        # action cards made during the current answer
         self.history = None                # the snapshot history, when the app has one
 
@@ -299,6 +301,99 @@ class Game:
         return {"shown": len(lines), "note": "A card with a Copy button is now shown to the player. Nothing has happened "
                 "in the game yet: the player must copy it and paste it into the game, and you cannot see whether they did."}
 
+    def tool_recipes(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        books = self.crafting.books
+        if not books:
+            return {"error": "No recipes have been read yet. The game only shows a profession's recipes while its window "
+                             "is open: the player opens the profession window once, logs out, and asks again.",
+                    "professions": self.snapshot.get("professions")}
+        wanted, show = args.get("profession"), args.get("show", "skill_up")
+        if show not in ("skill_up", "all"):
+            return {"error": "show must be skill_up or all"}
+        if isinstance(wanted, str) and wanted.strip():
+            books = [b for b in books if b["profession"].lower() == wanted.strip().lower()]
+            if not books:
+                return {"error": f"no recipes read for {wanted.strip()}. Read so far: "
+                                 + ", ".join(b["profession"] for b in self.crafting.books)}
+        out = []
+        for book in books:
+            listed = [r for r in book["recipes"] if show == "all" or (r["learned"] and r["colour"] != "grey")]
+            listed.sort(key=lambda r: ("orange", "yellow", "green", None, "grey").index(r["colour"]))
+            entry = {"profession": book["profession"], "skill": book["skill"], "max_skill": book["max"],
+                     "recipes_known_to_wisp": len(book["recipes"]), "recipes": [self.crafting.describe(r) for r in listed[:80]]}
+            if isinstance(book["seen_at"], (int, float)):
+                entry["list_read_hours_ago"] = round(max(0, time.time() - book["seen_at"]) / 3600, 1)
+            if len(listed) > 80:
+                entry["left_out"] = len(listed) - 80
+            out.append(entry)
+        return {"professions": out,
+                "note": "Read from the game while the profession window was open. A recipe gives skill on every craft "
+                        "while orange, less often while yellow or green, never once grey. Where colour_read_at_skill is "
+                        "given the colour is older than the current skill and may have dropped. Prices are from the "
+                        "player's own Auctionator scans; in_bags does not count the bank. For any totals, call craft_plan."}
+
+    def tool_craft_plan(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        plan = self.crafting.plan(args.get("crafts"))
+        plan.pop("_buy", None)
+        return plan
+
+    def tool_shopping_list(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        crafts, items = args.get("crafts"), args.get("items")
+        if (crafts is None) == (items is None):
+            return {"error": "give either crafts (to buy what a plan lacks) or items, not both"}
+        craft, unchecked = self.crafting, []
+        if crafts is not None:
+            plan = craft.plan(crafts)
+            if "error" in plan:
+                return plan
+            buy = [(item, craft.name(item), count) for item, count in plan["_buy"]]
+            if not buy:
+                return {"error": "nothing to buy: the bags and the plan's own crafts cover every material"}
+        else:
+            if not isinstance(items, list) or not 1 <= len(items) <= 60:
+                return {"error": "items must be a list of 1 to 60 {name, quantity}"}
+            known = {name.lower(): item for item, name in craft.names.items()}
+            buy = []
+            for entry in items:
+                name = _clean(entry.get("name"), 80).replace(";", "") if isinstance(entry, dict) else ""
+                count = entry.get("quantity") if isinstance(entry, dict) else None
+                if not name or not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 100000:
+                    return {"error": "every item needs a name and a whole quantity from 1 to 100000"}
+                item = known.get(name.lower())
+                if item is None:
+                    unchecked.append(name)
+                buy.append((item, craft.name(item) if item else name, count))
+        title = _clean(args.get("name"), 40).replace(";", "") or "Wisp"
+        total = sum(craft.prices[item][0] * count for item, _, count in buy if item in craft.prices)
+        priced = sum(1 for item, _, _ in buy if item in craft.prices)
+        about = (f"about {coins(total)}" + ("" if priced == len(buy) else f" · {len(buy) - priced} without a price")) if priced else "prices unknown"
+        card = {
+            "id": f"card{len(self.cards) + 1}",
+            "lines": [{"addon": "Auctionator", "text": f"Shopping list: {title}",
+                       "detail": f"{len(buy)} item{'s' if len(buy) != 1 else ''} · {about}"}]
+                     + [{"text": f"{count} × {name}",
+                         "detail": f"{coins(craft.prices[item][0])} each" if item in craft.prices else ""}
+                        for item, name, count in buy],
+            "wisp": encode_wisp1([{"do": "auctionator.shopping_list", "name": title,
+                                   "items": [{"name": name, "quantity": count, **({"id": item} if item else {})}
+                                             for item, name, count in buy]}]),
+        }
+        self.cards.append(card)
+        out = {"shown": len(buy), "list": [f"{count} × {name}" for _, name, count in buy],
+               "note": "A card with a Copy button is now shown to the player. Nothing has happened in the game yet: the "
+                       "player copies it, pastes it into the game, and the list appears in Auctionator's Shopping tab."}
+        if unchecked:
+            out["names_wisp_could_not_check"] = unchecked
+        if not craft.has_auctionator:
+            out["warning"] = "The Auctionator addon was not installed at the last logout. The list needs it."
+        return out
+
 
 QUALITY = {0: "poor", 1: "common", 2: "uncommon", 3: "rare", 4: "epic", 5: "legendary"}
 
@@ -360,6 +455,57 @@ TOOLS = [
         },
     },
     {
+        "name": "recipes",
+        "description": "The recipes of the player's professions, read from the game: for each, its skill-up colour "
+                       "(orange, yellow, green, grey), the skill at which it turns grey, what it makes, and its "
+                       "materials with how many are in the bags and the auction price of each. By default only the "
+                       "recipes that can still give skill; show=all lists every recipe. This is the only source of "
+                       "recipes and materials: never state them from memory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"profession": {"type": "string", "description": "Leave out for every profession read so far."},
+                           "show": {"type": "string", "enum": ["skill_up", "all"]}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "craft_plan",
+        "description": "The arithmetic of a crafting plan, done in code: for each recipe and how many times to craft "
+                       "it, the total materials, what the plan's own crafts supply (a bolt made in one step and used "
+                       "in the next), what the bags cover, what is left to buy and what that costs. Always use this "
+                       "for quantities and costs; never add them up yourself.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"crafts": {"type": "array", "minItems": 1, "maxItems": 30, "items": {
+                "type": "object",
+                "properties": {"recipe_id": {"type": "integer"}, "times": {"type": "integer", "minimum": 1, "maximum": 5000}},
+                "required": ["recipe_id", "times"], "additionalProperties": False}}},
+            "required": ["crafts"], "additionalProperties": False,
+        },
+    },
+    {
+        "name": "shopping_list",
+        "description": "Show the player a card that creates a shopping list in the Auctionator addon, with a quantity "
+                       "for each item. Give crafts (the same as for craft_plan) to list exactly what that plan still "
+                       "needs bought, or items to list things by name. The list is created only when the player "
+                       "pastes the card into the game.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "A short name for the list, such as 'Tailoring 150-185'."},
+                "crafts": {"type": "array", "minItems": 1, "maxItems": 30, "items": {
+                    "type": "object",
+                    "properties": {"recipe_id": {"type": "integer"}, "times": {"type": "integer", "minimum": 1, "maximum": 5000}},
+                    "required": ["recipe_id", "times"], "additionalProperties": False}},
+                "items": {"type": "array", "minItems": 1, "maxItems": 60, "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}, "quantity": {"type": "integer", "minimum": 1, "maximum": 100000}},
+                    "required": ["name", "quantity"], "additionalProperties": False}},
+            },
+            "required": ["name"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "waypoint",
         "description": "Offer the player waypoints for the game. Pass location refs from the quests or dungeon tools. This shows "
                        "a card the player can copy and paste into the game, where TomTom sets the waypoints. It does "
@@ -383,8 +529,13 @@ them was not installed, the tool says so, and you tell the player which addon wo
 Never state a quest id, an NPC, a location or coordinates from memory. WoW Forever differs from every earlier version \
 of the game, so what you remember is unreliable. If the tools do not have something, say that plainly.
 
-You cannot act in the game. The waypoint tool only shows a card that the player copies and pastes into the game. After \
-calling it, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.
+For professions, recipes and their materials come only from the recipes tool, and every quantity and cost from \
+craft_plan: choose what to craft and how many times, and let it do the sums. Prices are the player's own last auction \
+scans and skill is as of the last logout, so say how old they are when it matters. Wisp only knows the recipes the \
+character's profession window listed; for a path beyond those, say what is missing rather than fill it in from memory.
+
+You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
+into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.
 
 Answer in the player's language. Be brief: this is read in a narrow window between fights. Plain text, no markdown, no \
 tables."""

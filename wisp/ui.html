@@ -106,7 +106,9 @@
   .card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .card li { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; }
   .card .addon { grid-row: span 2; align-self: start; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-top: 2px; }
+  .card li.sub { display: flex; justify-content: space-between; gap: 10px; padding-left: 12px; margin-top: -3px; }
   .card .detail { color: var(--muted); font-size: 12px; }
+  .card .detail:empty { display: none; }
   .card footer { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
   .card footer span { flex: 1; color: var(--muted); font-size: 12px; }
   .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
@@ -428,7 +430,8 @@ function showCard(card, into = log) {
     const addon = document.createElement("span"); addon.className = "addon"; addon.textContent = line.addon;
     const text = document.createElement("span"); text.textContent = line.text;
     const detail = document.createElement("span"); detail.className = "detail"; detail.textContent = line.detail;
-    li.append(addon, text, detail);
+    if (line.addon) li.append(addon); else li.className = "sub";   // a line without an addon belongs to the one above
+    li.append(text, detail);
     list.append(li);
   }
   const foot = document.createElement("footer");

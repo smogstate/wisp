@@ -17,5 +17,6 @@ and architecture decision lives there. Update the wiki when decisions change.
 - Players get `Wisp.exe`, not Python: `.github/workflows/build.yml` builds, tests and publishes it as the `mvp` release on every push that touches code. `--smoke FILE` is the self-test it runs on the built exe. Nothing may require a command line or an environment variable.
 - Three providers: Anthropic (its own SDK), Kimi and OpenRouter (the `openai` SDK on the shared OpenAI-shaped wire, `OpenAIChat`; OpenRouter reads limits, prices and abilities per model from its public catalogue). A chat object owns its history in its provider's format; a conversation never changes provider. Tests: `tests/test_anthropic.py`, `tests/test_openai.py`, each against a local stand-in API.
 - The model never handles coordinates: locations carry refs, and `waypoint` accepts only refs. Keep that when adding tools.
+- The model never adds up quantities or prices either: `wisp/crafting.py` does the sums (`craft_plan`), and `shopping_list` takes the same plan. Recipes are read by the addon while the profession window is open and kept in `WispData`.
 - `checks/` is throwaway code for milestone 0 (wiki/Checks.md), not part of the product.
 - Does not use Loom.

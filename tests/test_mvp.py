@@ -46,7 +46,7 @@ def make_wow_dir(tmp: Path, flags="") -> Path:
     saved = tmp / "WTF/Account/TEST/SavedVariables"
     saved.mkdir(parents=True)
     # the game writes saved variables as Lua assignments
-    (saved / "Wisp.lua").write_text(f'\nWispSnapshot = "{snapshot}"\n', encoding="utf-8")
+    (saved / "Wisp.lua").write_text(f'\nWispData = {{\n["recipes"] = {{\n}},\n}}\nWispSnapshot = "{snapshot}"\n', encoding="utf-8")
     return tmp
 
 
@@ -56,7 +56,7 @@ def test_snapshot_and_tools(wow: Path):
     snap = game.snapshot
     assert snap["character"]["class"] == "MAGE" and snap["character"]["level"] == 12
     assert snap["character"]["gold"] == 15 and snap["character"]["x"] == 42.1
-    assert snap["addons"] == {"questie": True, "tomtom": True, "dungeonjournal": True}
+    assert snap["addons"] == {"questie": True, "tomtom": True, "dungeonjournal": True, "auctionator": True}
     assert [q["id"] for q in game.quests] == [33, 76], "header and hidden entries are skipped"
 
     wolves, mine = game.quests
@@ -231,6 +231,79 @@ def test_history(wow: Path, tmp: Path):
     events = list(app.ask("what changed?"))
     assert events[-1]["type"] == "done" and app.history.count(base) == 2, "asking again does not file it again"
     assert App(wow, fake=True).state()["recap"] is None, "a first run has nothing to compare with"
+
+
+def test_crafting(wow: Path, tmp: Path):
+    """Recipes read from the profession window, sums done in code, a list for Auctionator."""
+    game = Game.load(wow)
+    assert game.snapshot["addons"]["auctionator"] is True
+    assert any("read 4 Tailoring recipes" in l for l in stub("snapshot")), "said once, and headers are not recipes"
+    book = run_tool(game, "recipes", {})["professions"][0]
+    assert (book["profession"], book["skill"], book["max_skill"], book["recipes_known_to_wisp"]) == ("Tailoring", 150, 225, 4)
+    hood, bolt = book["recipes"]
+    assert [r["name"] for r in book["recipes"]] == ["Azure Silk Hood", "Bolt of Silk Cloth"], "what still gives skill, orange first"
+    assert (hood["colour"], hood["turns_grey_at"], hood["makes"]) == ("orange", 185, "1 × Azure Silk Hood")
+    assert hood["materials"] == [
+        {"item": "Bolt of Silk Cloth", "per_craft": 2, "in_bags": 0, "price_each": "21s"},
+        {"item": "Blue Dye", "per_craft": 2, "in_bags": 0, "price_each": None},
+        {"item": "Fine Thread", "per_craft": 1, "in_bags": 3, "price_each": None}], "an optional finishing reagent is not a material"
+    assert hood["materials_cost_per_craft"] is None and hood["no_auction_price_for"] == ["Blue Dye", "Fine Thread"]
+    assert bolt["materials_cost_per_craft"] == "18s" and bolt["can_make_from_bags"] == 8, "32 cloth in two stacks, 4 a bolt"
+    everything = run_tool(game, "recipes", {"profession": "tailoring", "show": "all"})["professions"][0]["recipes"]
+    assert [(r["name"], r["colour"]) for r in everything][2:] == [("Not Learned Yet", None), ("Small Silk Pack", "grey")]
+    assert everything[2]["learned"] is False and everything[3]["materials"][1]["item"] == "item 4234", "a name the game had not loaded"
+    assert "no recipes read for Alchemy" in run_tool(game, "recipes", {"profession": "Alchemy"})["error"]
+
+    crafts = [{"recipe_id": 3839, "times": 20}, {"recipe_id": 8760, "times": 10}]
+    plan = run_tool(game, "craft_plan", {"crafts": crafts})
+    assert plan["steps"] == [{"recipe": "Bolt of Silk Cloth", "times": 20, "colour": "yellow", "makes": "20 × Bolt of Silk Cloth"},
+                             {"recipe": "Azure Silk Hood", "times": 10, "colour": "orange", "makes": "10 × Azure Silk Hood"}]
+    assert plan["materials"] == [
+        {"item": "Silk Cloth", "needed": 80, "made_in_this_plan": 0, "from_bags": 32, "to_buy": 48, "price_each": "4s 50c", "cost": "2g 16s"},
+        {"item": "Bolt of Silk Cloth", "needed": 20, "made_in_this_plan": 20, "from_bags": 0, "to_buy": 0},
+        {"item": "Blue Dye", "needed": 20, "made_in_this_plan": 0, "from_bags": 0, "to_buy": 20},
+        {"item": "Fine Thread", "needed": 10, "made_in_this_plan": 0, "from_bags": 3, "to_buy": 7}], plan["materials"]
+    assert plan["to_buy_cost"].startswith("2g 16s plus") and plan["no_auction_price_for"] == ["Blue Dye", "Fine Thread"]
+    assert "seen today" in plan["prices"] and "_buy" not in plan
+    late = run_tool(game, "craft_plan", {"crafts": [{"recipe_id": 3839, "times": 25}, {"recipe_id": 3813, "times": 1}]})
+    assert "at most the first 20 crafts" in late["steps"][0]["warning"] and "grey" in late["steps"][1]["warning"]
+    for bad in ([], [{"recipe_id": 1, "times": 1}], [{"recipe_id": 3839, "times": 0}], [{"recipe_id": 3839, "times": 1.5}], "x"):
+        assert "error" in run_tool(game, "craft_plan", {"crafts": bad}), bad
+
+    made = run_tool(game, "shopping_list", {"name": "Tailoring 150-170", "crafts": crafts})
+    assert made["list"] == ["48 × Silk Cloth", "20 × Blue Dye", "7 × Fine Thread"] and "warning" not in made
+    card = game.cards[-1]
+    assert card["lines"][0] == {"addon": "Auctionator", "text": "Shopping list: Tailoring 150-170",
+                                "detail": "3 items · about 2g 16s · 2 without a price"}
+    assert card["lines"][1] == {"text": "48 × Silk Cloth", "detail": "4s 50c each"} and card["lines"][2]["detail"] == ""
+    pasted = stub("paste", card["wisp"])
+    assert 'LIST Tailoring 150-170 = "Silk Cloth";48 + "Blue Dye";20 + "Fine Thread";7' in pasted, pasted
+    assert any("shopping list \"Tailoring 150-170\" with 3 items" in l for l in pasted)
+
+    named = run_tool(game, "shopping_list", {"name": "x", "items": [{"name": "silk cloth", "quantity": 5}, {"name": "Mystery; Dust|", "quantity": 2}]})
+    assert named["list"] == ["5 × Silk Cloth", "2 × Mystery Dust"] and named["names_wisp_could_not_check"] == ["Mystery Dust"]
+    assert "error" in run_tool(game, "shopping_list", {"name": "x"})
+    assert "error" in run_tool(game, "shopping_list", {"name": "x", "crafts": crafts, "items": [{"name": "a", "quantity": 1}]})
+    assert "error" in run_tool(game, "shopping_list", {"name": "x", "items": [{"name": "a", "quantity": True}]})
+    assert "nothing to buy" in run_tool(game, "shopping_list", {"name": "x", "crafts": [{"recipe_id": 3839, "times": 8}]})["error"]
+
+    # the addon checks a pasted list as strictly as a waypoint
+    def paste(cmd, flags=""):
+        return stub("paste", encode_wisp1([cmd]), flags=flags)
+    for bad in ({"items": []}, {"items": [{"name": "a", "quantity": 0}]}, {"items": [{"quantity": 3}]}, {"items": "x"}):
+        assert any("failed bad shopping list" in l for l in paste({"do": "auctionator.shopping_list", "name": "n", **bad})), bad
+    odd = paste({"do": "auctionator.shopping_list", "name": "a|b;c", "items": [{"id": 4306, "name": "ignored", "quantity": 2.9},
+                                                                              {"id": 424242, "name": "By; name|", "quantity": 1}]})
+    assert 'LIST abc = "Silk Cloth";2 + "By name";1' in odd, "the game's own name where it knows the item; ; and | never pass"
+    gone = paste({"do": "auctionator.shopping_list", "name": "n", "items": [{"name": "a", "quantity": 1}]}, flags="noauctionator")
+    assert any("failed Auctionator is not installed" in l for l in gone)
+
+    without = Game.load(make_wow_dir(tmp / "a", flags="noauctionator"))
+    assert without.snapshot["addons"]["auctionator"] is False and not without.snapshot.get("prices")
+    assert "not installed" in run_tool(without, "shopping_list", {"name": "x", "crafts": crafts})["warning"]
+    assert "not installed" in run_tool(without, "craft_plan", {"crafts": crafts})["prices"]
+    closed = Game.load(make_wow_dir(tmp / "b", flags="noprofession"))
+    assert "window" in run_tool(closed, "recipes", {})["error"] and closed.snapshot["bags"], "bags are read without the window"
 
 
 def test_inbox_is_strict():
@@ -515,6 +588,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as g:
             test_history(wow, Path(g))
         test_inbox_is_strict()
+        with tempfile.TemporaryDirectory() as h:
+            test_crafting(wow, Path(h))
         test_without_questie(Path(b))
         test_bad_files(Path(c))
         test_server(wow)

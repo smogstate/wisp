@@ -85,6 +85,12 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
             if (addons / "ForeverDungeonJournal").is_dir():
                 add("Dungeon data in the snapshot", bool(game.dungeons), f"{len(game.dungeons)} dungeons",
                     "not yet: log in and out once more with the new Wisp addon")
+            books = game.crafting.books
+            add("Recipes read from the game", bool(books), ", ".join(f"{b['profession']} {len(b['recipes'])}" for b in books),
+                "none yet: open your profession window in the game once, then log out", optional=True)
+            if (addons / "Auctionator").is_dir():
+                add("Auction prices in the snapshot", bool(game.crafting.prices), f"for {len(game.crafting.prices)} items",
+                    "none yet: scan the auction house with Auctionator, then log out", optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
     return _key_checks(out, add, call_model, provider, model)

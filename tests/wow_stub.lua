@@ -3,13 +3,14 @@
 -- fengari VM alike. Used by tests/test_mvp.py.
 --   lua tests/wow_stub.lua snapshot          -> prints the saved WispSnapshot
 --   lua tests/wow_stub.lua paste <message>   -> prints what TomTom and chat received
---   WISP_STUB=noquestie,notomtom removes those addons
+--   WISP_STUB=noquestie,notomtom,nojournal,noauctionator removes those addons;
+--   noprofession leaves the profession window closed
 
 local mode, ARG = arg[1], arg[2] or ""
 local flags = os.getenv("WISP_STUB") or ""
 local here = (arg[0] or "tests/wow_stub.lua"):match("^(.*)[/\\][^/\\]*$") or "."
 
-local LOG, FRAMES, TIMERS, WAYS = {}, {}, {}, {}
+local LOG, FRAMES, TIMERS, WAYS, LISTS = {}, {}, {}, {}, {}
 local out = print
 print = function(s) LOG[#LOG + 1] = (s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
 time = os.time
@@ -259,6 +260,53 @@ if not flags:find("nojournal") then
     QUEST_START_MAPS = { [214] = { mapID = 1436, x = 0.566, y = 0.473, label = "Scout Riell — Westfall", targetName = "Scout Riell" } },
   }
 end
+-- The profession window: Tailoring at 150. Made-up recipes in the shape the client gives them.
+local itemNames = { [4306] = "Silk Cloth", [4305] = "Bolt of Silk Cloth", [6260] = "Blue Dye", [2321] = "Fine Thread",
+                    [7048] = "Azure Silk Hood", [6948] = "Hearthstone", [4245] = "Small Silk Pack" }   -- 4234 is not cached
+C_Item = { GetItemNameByID = function(id) return itemNames[id] end }
+Enum = { CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2 } }
+local function slot(id, n, kind) return { reagents = { { itemID = id } }, quantityRequired = n, reagentType = kind or 1, required = true } end
+local recipes = {
+  [3839] = { info = { name = "Bolt of Silk Cloth", learned = true, relativeDifficulty = 1, maxTrivialLevel = 170, numSkillUps = 1 },
+             plan = { outputItemID = 4305, quantityMin = 1, quantityMax = 1, reagentSlotSchematics = { slot(4306, 4) } } },
+  [8760] = { info = { name = "Azure Silk Hood", learned = true, relativeDifficulty = 0, maxTrivialLevel = 185, numSkillUps = 1 },
+             plan = { outputItemID = 7048, quantityMin = 1, quantityMax = 1,
+                      reagentSlotSchematics = { slot(4305, 2), slot(6260, 2), slot(2321, 1), slot(99999, 1, 2) } } },
+  [3813] = { info = { name = "Small Silk Pack", learned = true, relativeDifficulty = 3, maxTrivialLevel = 140, numSkillUps = 1 },
+             plan = { outputItemID = 4245, quantityMin = 1, quantityMax = 1, reagentSlotSchematics = { slot(4305, 3), slot(4234, 2) } } },
+  [8791] = { info = { name = "Not Learned Yet", learned = false, maxTrivialLevel = 200, numSkillUps = 1 },
+             plan = { outputItemID = 7049, quantityMin = 1, quantityMax = 1, reagentSlotSchematics = { slot(4305, 5) } } },
+  [1] = { info = { name = "A header, not a recipe", isDummyRecipe = true }, plan = {} },
+}
+C_TradeSkillUI = {
+  IsTradeSkillReady = function() return true end,
+  IsTradeSkillLinked = function() return false end,
+  GetBaseProfessionInfo = function() return { professionName = "Tailoring", skillLevel = 150, maxSkillLevel = 225 } end,
+  GetFilteredRecipeIDs = function() return { 1, 3839, 8760, 3813, 8791 } end,
+  GetRecipeInfo = function(id) return recipes[id].info end,
+  GetRecipeSchematic = function(id) return recipes[id].plan end,
+}
+local bagSlots = { [0] = { { itemID = 4306, stackCount = 20, itemName = "Silk Cloth" }, { itemID = 4306, stackCount = 12, itemName = "Silk Cloth" },
+                           false, { itemID = 6948, stackCount = 1, itemName = "Hearthstone" } },
+                   [1] = { { itemID = 2321, stackCount = 3 } } }
+C_Container = {
+  GetContainerNumSlots = function(bag) return bagSlots[bag] and #bagSlots[bag] or 0 end,
+  GetContainerItemInfo = function(bag, i) return bagSlots[bag][i] or nil end,
+}
+-- Auctionator's public API, as its source has it: every call checks who is calling
+if not flags:find("noauctionator") then
+  local function caller(id) if type(id) ~= "string" or id == "" then error("Invalid callerID. Use the name of your add-on.") end end
+  local seen = { [4306] = { 450, 0 }, [4305] = { 2100, 3 }, [7048] = { 9000, 1 } }   -- copper, days since seen
+  Auctionator = { API = { v1 = {
+    GetAuctionPriceByItemID = function(id, item) caller(id); return seen[item] and seen[item][1] end,
+    GetAuctionAgeByItemID = function(id, item) caller(id); return seen[item] and seen[item][2] end,
+    ConvertToSearchString = function(id, term)
+      caller(id)
+      return (term.isExact and '"' .. term.searchString .. '"' or term.searchString) .. ";" .. tostring(term.quantity)
+    end,
+    CreateShoppingList = function(id, name, searches) caller(id); LISTS[#LISTS + 1] = name .. " = " .. table.concat(searches, " + ") end,
+  } } }
+end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end
@@ -269,6 +317,10 @@ if mode == "snapshot" then
   local boot
   for _, f in ipairs(FRAMES) do if f.scripts.OnEvent then boot = f end end
   boot.scripts.OnEvent(boot, "PLAYER_LOGIN")
+  if not flags:find("noprofession") then
+    boot.scripts.OnEvent(boot, "TRADE_SKILL_SHOW")
+    boot.scripts.OnEvent(boot, "TRADE_SKILL_LIST_UPDATE")   -- it comes again and again: said in chat once
+  end
   SlashCmdList.WISP("save")
   boot.scripts.OnEvent(boot, "PLAYER_LOGOUT")
   out("SNAPSHOT " .. tostring(WispSnapshot))
@@ -278,6 +330,7 @@ elseif mode == "paste" then
   WispInbox.scripts.OnTextChanged(WispInbox, true)
   runTimers()
   for _, w in ipairs(WAYS) do out("WAY " .. w) end
+  for _, l in ipairs(LISTS) do out("LIST " .. l) end
   out("BOX [" .. WispInbox.text .. "]")
 else
   error("usage: wow_stub.lua snapshot | paste <message>")

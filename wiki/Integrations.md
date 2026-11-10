@@ -12,7 +12,8 @@ Each integration is one Lua file registered through [Protocol](Protocol.md). Com
 | TomTom | waypoint | — | TomTom | **works in the game** (Denis, 2026-11-10) |
 | Questie | — | quests, chains, NPC positions | Questie | **works in the game** |
 | DungeonJournal | — | dungeons, their quests and prerequisites, bosses, loot, entrances | DungeonJournal | export tested against its real data files; not yet run in the game |
-| Auctionator | create a shopping list **with quantities** | prices, price age, vendor price | Auctionator | API read in source (v343), not run in a client |
+| Auctionator | create a shopping list **with quantities** | auction price and its age, per item | Auctionator | **built 2026-11-10**; API read in source (v343), tested against a stand-in of it; not yet run in the game |
+| The game's profession window | — | every recipe it lists: colour, the skill it turns grey at, what it makes, materials | nothing | built; the client's API read in Blizzard's source, not yet run in the game |
 | WeakAuras | open the import dialog with a string | — | WeakAuras | no |
 | Talents | show or mark a build in game (how is open) | current talents | nothing | no |
 | Macros | create or update a macro, **checked before it is offered** | existing macros, known spells | nothing | no |
@@ -33,6 +34,29 @@ Measured by running Wisp's export against the journal's data files outside the g
 
 Not used yet: its dungeon routes, in-dungeon quest pins, and its run log. Its licence was not found stated; Wisp only reads what the installed addon exposes in the game.
 
+## Professions and Auctionator — built 2026-11-10
+
+Denis: "where do I level, how many materials do I need, and a list for the auction addon, step by step".
+
+**What Wisp reads, and when**
+
+- **Recipes: while the profession window is open.** The game only gives a profession's recipes then, so the addon copies them at that moment into a second saved variable (`WispData`, per character and profession) and they ride along in every later snapshot. For each recipe: its skill-up colour, the skill at which it turns grey, what it makes and how many, and its materials. The addon says once in chat that it read them. Recipes of a linked, guild or NPC profession are ignored.
+- **Bags: at logout.** One line per item with the total carried. **The bank is not read** (it is closed at logout); a plan says so.
+- **Prices: at logout, from Auctionator's public API**, only for the items that matter: what is carried and what the recipes use and make. Each price comes with the number of days since Auctionator last saw the item. They are the player's own scans, so they are as fresh as the last visit to the auction house.
+
+**What the model gets** ([Tools](Tools.md)): `recipes`, `craft_plan`, `shopping_list`. The rule that keeps it honest is the same as with coordinates: **the model never adds anything up.** It picks recipes and how many times; `craft_plan` does the sums in code — total materials, what an earlier step of the same plan supplies (bolts made, then used), what the bags cover, what is left to buy and what that costs. `shopping_list` takes the same plan and lists exactly the remainder, so the numbers on the card are the numbers of the plan.
+
+**The card** creates the list through `Auctionator.API.v1.CreateShoppingList`, each line an exact-name search with a quantity. The command carries item ids, and the addon uses **the game's own name for each id** — so the list is right in a Russian or German client too. A name typed from outside is used only when there is no id, and `|`, `;` and control characters never pass.
+
+**What it cannot do yet**
+
+- **A full 1-to-300 path.** Wisp knows the recipes the window lists. In Forever that is the learned ones (the client hides unlearned recipes by default; the addon asks for all of them and takes what it gets). Recipes still to be bought from a trainer, and the skill at which each is learned, are not in the game's answer. The prompt tells the model to say what is missing rather than fill it in from memory.
+- **How many crafts a yellow or green recipe needs.** The game gives the colour and the grey point, not the chances. Only orange is certain; plans say the rest is an estimate.
+- **Vendor materials.** Thread and dye have no auction price. The plan lists them as "no auction price (a vendor may sell them)"; Wisp does not know vendor prices or where the vendor stands.
+- **Colours go stale.** They are as of the last time the window was open. Past the grey point Wisp corrects them itself; otherwise the tool says at which skill the colour was read.
+
+Not yet run in the game: the recipe calls (`GetRecipeInfo`, `GetRecipeSchematic`, and whether `GetAllRecipeIDs` exists there), the bag scan, and Auctionator's API from another addon.
+
 ## Auctionator — what its API offers
 
 Read from the source of Auctionator 343 on 2026-11-10 (a copy bundled in a Forever addon collection; the functions were not run in a client).
@@ -47,7 +71,7 @@ The command, as it would look in [Protocol](Protocol.md):
 
 ```json
 {"do": "auctionator.shopping_list", "name": "Tailoring 150-200",
- "items": [{"name": "Silk Cloth", "quantity": 80}, {"name": "Fine Thread", "quantity": 20}]}
+ "items": [{"id": 4306, "name": "Silk Cloth", "quantity": 80}, {"id": 2321, "name": "Fine Thread", "quantity": 20}]}
 ```
 
 ## Macros — help with verification
