@@ -102,6 +102,12 @@
   .recap h2 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
   .recap ul { margin: 0; padding-left: 18px; }
   .card { align-self: stretch; background: var(--card); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; box-shadow: var(--shadow); }
+  .card .card-head { display: flex; align-items: center; gap: 4px; margin: -6px 0 8px -6px; }
+  .card .card-head h2 { margin: 0; }
+  .card button.share { width: 28px; height: 28px; border-color: transparent; color: var(--muted); background: transparent; }
+  .card button.share:hover { color: var(--text); border-color: var(--line); }
+  .card button.share svg { width: 15px; height: 15px; }
+  .card button.share[data-state="copied"] { color: var(--accent); }
   .card h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
   .card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .card li { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; }
@@ -561,7 +567,8 @@ const RU = {
   ": lowest listed price per scan day. ": ": минимальная цена по дням сканирования. ",
   "Next steps": "Что делать дальше",
   "Copy, then in the game: Ctrl+V twice": "«Копировать», затем в игре: дважды Ctrl+V",
-  "Copy for the game": "Копировать для игры", "Copied": "Скопировано", "Copy failed": "Не удалось скопировать",
+  "Copy for the game": "Копировать для игры", "Copy as text, to share": "Копировать текстом, чтобы поделиться",
+  "Copied as text": "Скопировано текстом", "Copied": "Скопировано", "Copy failed": "Не удалось скопировать",
   "Copied. Now in the game: Ctrl+V twice": "Скопировано. Теперь в игре: дважды Ctrl+V",
   "Could not reach the clipboard": "Не удалось обратиться к буферу обмена",
   // the window's fixed texts
@@ -854,12 +861,86 @@ function reportBlock(r) {
   return block;
 }
 
+// A card as plain text, to paste into a chat with other people. The same content as on screen, in reading order.
+function cardText(card, heading) {
+  const out = [heading.toUpperCase()];
+  const block = (title, sub) => { out.push(""); if (title) out.push(title); if (sub) out.push(sub); };
+  const notes = list => { for (const note of list || []) out.push(note); };
+  if (card.plan) {
+    const p = card.plan;
+    block(p.title, p.sub);
+    out.push("", T("Craft, in this order"));
+    p.steps.forEach((step, i) => out.push(`${i + 1}. ${step.text}` + (step.each ? ` (${T("each: ")}${step.each})` : "") + (step.warning ? ` — ${step.warning}` : "")));
+    if (p.materials.length) {
+      out.push("", T("Materials"));
+      for (const row of p.materials) {
+        out.push(`- ${row.item}: ${T("Need").toLowerCase()} ${row.need}` + (row.bags ? `, ${T("In bags").toLowerCase()} ${row.bags}` : "")
+          + (row.bank ? `, ${T("Bank").toLowerCase()} ${row.bank}` : "") + (row.buy ? `, ${T("Buy").toLowerCase()} ${row.buy}` : "")
+          + (row.cost ? `, ${row.cost}` : row.unpriced ? `, ${T("no price")}` : ""));
+      }
+    }
+    out.push("", p.total);
+    notes(p.notes);
+  }
+  if (card.table) {
+    const t = card.table;
+    block(t.title, t.sub);
+    for (const row of t.rows) out.push("- " + row[0] + ": " + row.slice(1).map((cell, i) => `${t.columns[i + 1]} ${cell}`).join(", "));
+    notes(t.notes);
+  }
+  if (card.chart) {
+    const c = card.chart;
+    block(c.title, c.sub);
+    for (const [label, value] of c.stats) out.push(`${label}: ${value}`);
+    out.push("", T("Every scan day"));
+    for (const p of c.points.slice(-14).reverse()) out.push(`${dayDate(p[0])}: ${coins(p[1])}` + (p[2] > p[1] ? T(" · up to ") + coins(p[2]) : ""));
+    notes(c.notes);
+  }
+  if (card.route) {
+    const r = card.route;
+    block(r.title, r.sub);
+    r.steps.forEach((step, i) => out.push(`${i + 1}. ${step.text}` + (step.detail ? ` — ${step.detail}` : "")));
+    notes(r.notes);
+  }
+  if (card.report) {
+    const r = card.report;
+    block(r.title, r.basis);
+    out.push("", r.summary);
+    for (const section of r.sections) {
+      out.push("", section.heading);
+      for (const point of section.points) out.push("- " + point.text + (point.refs.length ? ` [${point.refs.join(", ")}]` : ""));
+    }
+    if (r.next_steps.length) { out.push("", T("Next steps")); r.next_steps.forEach((step, i) => out.push(`${i + 1}. ${step}`)); }
+  }
+  const sources = card.report ? card.report.sources : card.sources;
+  if (sources && sources.length) {
+    out.push("", T("Sources"));
+    for (const source of sources) out.push(`${source.n}. ${source.title} — ${source.url}`);
+  }
+  if (card.lines.length) {
+    out.push("");
+    for (const line of card.lines) out.push((line.addon ? `${line.addon}: ` : "  ") + line.text + (line.detail ? ` — ${line.detail}` : ""));
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function showCard(card, into = log) {
   if (into === log && card.wisp) lastCard = card;
   const el = add("section", "card", undefined, into);
   const h = document.createElement("h2");
   h.textContent = card.heading ? card.heading : T(card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market"
     : card.report ? "Research" : card.sources ? "Sources" : card.route ? "Route" : "For the game");
+  const head = document.createElement("div"), share = document.createElement("button");
+  head.className = "card-head";
+  share.type = "button"; share.className = "icon share";
+  setIcon(share, "copy", T("Copy as text, to share"));
+  share.onclick = async () => {
+    const ok = await copy(cardText(card, h.textContent));
+    share.dataset.state = ok ? "copied" : "failed";
+    setIcon(share, ok ? "check" : "x", T(ok ? "Copied as text" : "Copy failed"));
+    setTimeout(() => { delete share.dataset.state; setIcon(share, "copy", T("Copy as text, to share")); }, 1600);
+  };
+  head.append(share, h);
   const list = document.createElement("ul");
   for (const line of card.lines) {
     const li = document.createElement("li");
@@ -883,7 +964,7 @@ function showCard(card, into = log) {
     hint.textContent = T(ok ? "Copied. Now in the game: Ctrl+V twice" : "Could not reach the clipboard");
   };
   foot.append(hint, button);
-  el.append(h, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
+  el.append(head, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
             ...(card.table ? [tableBlock(card.table)] : []), ...(card.report ? [reportBlock(card.report)] : []),
             ...(card.sources ? [sourcesList(card.sources)] : []), ...(card.route ? [routeBlock(card.route)] : []),
             list, ...(card.wisp ? [foot] : []));
