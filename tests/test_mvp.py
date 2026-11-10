@@ -378,6 +378,16 @@ def test_crafting(wow: Path, tmp: Path):
     assert [i["item"] for i in busy] == ["Weekly Herb", "Steady Ore"], "junk worth under a silver is never listed"
     assert run_tool(far, "market_scan", {"find": "most_listed", "name_contains": "gem"})["items"][0]["item"] == "Rising Gem"
     assert run_tool(far, "market_scan", {"find": "most_listed", "among": "my_bags"})["items"] == []
+    # shown to the player as cards on request: a chart for one item, a table for a ranking
+    before = len(far.cards)
+    assert "shown" in run_tool(far, "price_history", {"item": "Steady Ore", "show": True})
+    chart = far.cards[-1]["chart"]
+    assert (chart["title"], chart["sub"], chart["usual"], len(chart["points"])) == ("Steady Ore", "last 30 days · 30 scan days", 1000, 30)
+    assert chart["points"][-1] == [20000, 700, 700, 50] and chart["estimate"]["low"] <= chart["estimate"]["expected"] <= chart["estimate"]["high"]
+    assert [s[0] for s in chart["stats"]] == ["Now", "Usual", "Against usual", "Next week"] and "confidence fair" in chart["notes"][0]
+    assert "shown" in run_tool(far, "market_scan", {"find": "below_usual", "show": True})
+    assert far.cards[-1]["table"]["rows"] == [["Steady Ore", "7s", "10s", "-30%", 50]] and far.cards[-1]["table"]["title"] == "Cheaper than usual"
+    assert len(far.cards) == before + 2 and "wisp" not in far.cards[-1], "nothing to paste: these cards only show"
     for bad in ({"find": "x"}, {"find": "rising", "days": 1}, {"find": "rising", "limit": 0}, {"find": "rising", "among": "x"}):
         assert "error" in run_tool(far, "market_scan", bad), bad
     assert market.size(game.snapshot)["rows"] == 7, "each realm and faction is its own market"

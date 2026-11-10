@@ -10,7 +10,7 @@
   :root {
     --bg-rgb: 246 247 249; --panel-rgb: 255 255 255;
     --bg: #f6f7f9; --panel: #ffffff; --line: #dfe3ea; --text: #1b1f27; --muted: #6a7384;
-    --accent: #0e8a7d; --accent-text: #ffffff; --user: #e7f4f2; --danger: #b3261e; --card: #fbfcfd;
+    --accent: #0e8a7d; --accent-text: #ffffff; --user: #e7f4f2; --danger: #b3261e; --card: #fbfcfd; --chart: #0b8d80;
     --shadow: 0 1px 2px rgba(20, 30, 50, .06);
     --glass: 1;         /* how solid the background is at most, from Settings */
     --glass-now: 1;     /* the background right now */
@@ -20,14 +20,14 @@
     :root:not([data-theme="light"]) {
       --bg-rgb: 18 21 27; --panel-rgb: 25 29 37;
       --bg: #12151b; --panel: #191d25; --line: #2a303b; --text: #e7eaf0; --muted: #8b95a7;
-      --accent: #45d0c0; --accent-text: #06201d; --user: #1d2b2c; --danger: #ff8a80; --card: #1e232c;
+      --accent: #45d0c0; --accent-text: #06201d; --user: #1d2b2c; --danger: #ff8a80; --card: #1e232c; --chart: #199e70;
       --shadow: none;
     }
   }
   :root[data-theme="dark"] {
     --bg-rgb: 18 21 27; --panel-rgb: 25 29 37;
     --bg: #12151b; --panel: #191d25; --line: #2a303b; --text: #e7eaf0; --muted: #8b95a7;
-    --accent: #45d0c0; --accent-text: #06201d; --user: #1d2b2c; --danger: #ff8a80; --card: #1e232c;
+    --accent: #45d0c0; --accent-text: #06201d; --user: #1d2b2c; --danger: #ff8a80; --card: #1e232c; --chart: #199e70;
     --shadow: none;
   }
   /* keeps the conversation a readable width in a wide browser window */
@@ -129,6 +129,26 @@
   .card .total { margin-top: 8px; font-weight: 650; }
   .card .notes { margin-top: 6px; }
   .card { scroll-margin-top: 8px; }
+  .card .stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 8px; }
+  .card .stats div { display: flex; flex-direction: column; }
+  .card .stats span { font-size: 11px; color: var(--muted); }
+  .card .stats b { font-weight: 650; }
+  .card .chart { position: relative; }
+  .card .chart svg { display: block; width: 100%; height: 150px; outline-offset: 2px; }
+  .card .chart .grid { stroke: var(--line); stroke-width: 1; }
+  .card .chart .usual { stroke: var(--muted); stroke-width: 1; }
+  .card .chart .price { fill: none; stroke: var(--chart); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .card .chart .dot { fill: var(--chart); stroke: var(--card); stroke-width: 2; }
+  .card .chart .range { fill: var(--chart); opacity: .12; }
+  .card .chart .cross { stroke: var(--muted); stroke-width: 1; }
+  .card .chart text { font-size: 10px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .card .tip { position: absolute; top: 0; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 5px 8px; font-size: 12px; box-shadow: var(--shadow); white-space: nowrap; }
+  .card .tip b { display: block; font-size: 13px; }
+  .card .tip span { color: var(--muted); }
+  .card details { margin-top: 8px; font-size: 12px; }
+  .card summary { color: var(--muted); cursor: pointer; }
+  .card details table { margin-top: 6px; }
   .card ul:empty { display: none; }
   .card footer { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
   .card footer span { flex: 1; color: var(--muted); font-size: 12px; }
@@ -477,11 +497,113 @@ function planBlock(plan) {
   return block;
 }
 
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const svgEl = (tag, attrs, text) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; return e; };
+const coins = c => { c = Math.round(c); const g = Math.floor(c / 10000), s = Math.floor(c % 10000 / 100), r = c % 100;
+  return [g ? g + "g" : "", s ? s + "s" : "", r && !g ? r + "c" : ""].filter(Boolean).join(" ") || "0c"; };
+const dayDate = day => new Date(day * 86400000).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+
+// A ranking as a table: the first column is the name, the rest are figures.
+function tableBlock(t) {
+  const block = el("div", "plan");
+  block.append(el("div", "plan-title", t.title), el("div", "plan-sub", t.sub));
+  const table = el("table"), head = el("tr");
+  table.style.marginTop = "8px";
+  for (const name of t.columns) head.append(el("th", "", name));
+  table.append(head);
+  for (const row of t.rows) { const tr = el("tr"); for (const cell of row) tr.append(el("td", "", cell)); table.append(tr); }
+  block.append(table);
+  for (const note of t.notes || []) block.append(el("div", "notes", note));
+  return block;
+}
+
+// One item's price over time: a line of the day's lowest listing, its usual level, and the
+// range estimated for next week. Hover or the arrow keys read any day; the table has them all.
+function chartBlock(c) {
+  const block = el("div", "plan");
+  block.append(el("div", "plan-title", c.title), el("div", "plan-sub", c.sub));
+  const stats = el("div", "stats");
+  for (const [label, value] of c.stats) { const tile = el("div"); tile.append(el("span", "", label), el("b", "", value)); stats.append(tile); }
+  const wrap = el("div", "chart"), tip = el("div", "tip");
+  const svg = svgEl("svg", { role: "img", tabindex: "0", "aria-label": `${c.title}: lowest listed price per scan day. ${c.stats.map(s => s.join(" ")).join(", ")}.` });
+  tip.hidden = true;
+  wrap.append(svg, tip);
+  const pts = c.points, est = c.estimate, last = pts[pts.length - 1];
+  const day0 = pts[0][0], day1 = last[0] + (est ? 7 : 0);
+  const values = pts.map(p => p[1]).concat([c.usual], est ? [est.low, est.high] : []);
+  let lo = Math.min(...values), hi = Math.max(...values);
+  const pad = Math.max((hi - lo) * 0.12, hi * 0.02, 1);
+  lo = Math.max(0, lo - pad); hi += pad;
+  const unit = hi >= 20000 ? 10000 : hi >= 200 ? 100 : 1, letter = unit === 10000 ? "g" : unit === 100 ? "s" : "c";
+  const rough = (hi - lo) / unit / 3, power = Math.pow(10, Math.floor(Math.log10(rough))), step = [1, 2, 5, 10].find(m => m * power >= rough) * power * unit;
+  let active = -1;
+  const draw = () => {
+    const W = wrap.clientWidth || 340, H = 150, L = 38, R = 10, T = 16, B = 20;
+    const x = d => L + (day1 === day0 ? 0.5 : (d - day0) / (day1 - day0)) * (W - L - R), yy = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.textContent = "";
+    for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+      svg.append(svgEl("line", { class: "grid", x1: L, x2: W - R, y1: yy(v), y2: yy(v) }),
+                 svgEl("text", { x: L - 6, y: yy(v) + 3, "text-anchor": "end" }, +(v / unit).toFixed(2) + letter));
+    }
+    if (est) {
+      svg.append(svgEl("rect", { class: "range", x: x(last[0]), width: x(day1) - x(last[0]), y: yy(est.high), height: Math.max(2, yy(est.low) - yy(est.high)), rx: 2 }),
+                 svgEl("text", { x: x(day1), y: Math.max(10, yy(est.high) - 5), "text-anchor": "end" }, "next week"));
+    }
+    svg.append(svgEl("line", { class: "usual", x1: L, x2: x(last[0]), y1: yy(c.usual), y2: yy(c.usual) }),
+               // the label goes on the side of the line the first prices are not on
+               svgEl("text", { x: L + 4, y: yy(c.usual) + (pts.slice(0, 5).reduce((sum, p) => sum + p[1], 0) / Math.min(5, pts.length) > c.usual ? 12 : -5) }, "usual"),
+               svgEl("path", { class: "price", d: pts.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + " " + yy(p[1]).toFixed(1)).join("") }),
+               svgEl("text", { x: L, y: H - 6 }, dayDate(day0)));
+    if (pts.length > 1) svg.append(svgEl("text", { x: x(last[0]), y: H - 6, "text-anchor": "end" }, dayDate(last[0])));
+    const p = active >= 0 ? pts[active] : last;
+    if (active >= 0) svg.append(svgEl("line", { class: "cross", x1: x(p[0]), x2: x(p[0]), y1: T, y2: H - B }));
+    svg.append(svgEl("circle", { class: "dot", cx: x(p[0]), cy: yy(p[1]), r: 4 }));
+    tip.hidden = active < 0;
+    if (active >= 0) {
+      tip.textContent = "";
+      tip.append(el("b", "", coins(p[1])), el("span", "", dayDate(p[0]) + (p[2] > p[1] ? " · up to " + coins(p[2]) : "") + (p[3] != null ? " · " + p[3] + " listed" : "")));
+      tip.style.left = Math.max(0, Math.min(W - tip.offsetWidth, x(p[0]) - tip.offsetWidth / 2)) + "px";
+    }
+    svg._x = x;
+  };
+  const aim = clientX => {   // the pointer finds a day, never a 2px line
+    const at = clientX - svg.getBoundingClientRect().left;
+    let best = 0;
+    pts.forEach((p, i) => { if (Math.abs(svg._x(p[0]) - at) < Math.abs(svg._x(pts[best][0]) - at)) best = i; });
+    active = best; draw();
+  };
+  svg.addEventListener("pointermove", e => aim(e.clientX));
+  svg.addEventListener("pointerdown", e => aim(e.clientX));
+  svg.addEventListener("pointerleave", () => { active = -1; draw(); });
+  svg.addEventListener("blur", () => { active = -1; draw(); });
+  svg.addEventListener("keydown", e => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    active = Math.max(0, Math.min(pts.length - 1, (active < 0 ? pts.length - 1 : active) + (e.key === "ArrowLeft" ? -1 : 1)));
+    draw();
+  });
+  new ResizeObserver(draw).observe(wrap);
+  const details = el("details"), table = el("table"), head = el("tr");
+  details.append(el("summary", "", "Every scan day"));
+  for (const name of ["Day", "Lowest", "Highest", "Listed"]) head.append(el("th", "", name));
+  table.append(head);
+  for (const p of pts.slice().reverse()) {
+    const tr = el("tr");
+    tr.append(el("td", "", dayDate(p[0])), el("td", "", coins(p[1])), el("td", "", coins(p[2])), el("td", p[3] == null ? "none" : "", p[3] == null ? "–" : p[3]));
+    table.append(tr);
+  }
+  details.append(table);
+  block.append(stats, wrap, details);
+  for (const note of c.notes || []) block.append(el("div", "notes", note));
+  return block;
+}
+
 function showCard(card, into = log) {
   if (into === log && card.wisp) lastCard = card;
   const el = add("section", "card", undefined, into);
   const h = document.createElement("h2");
-  h.textContent = card.plan ? "Crafting plan" : "For the game";
+  h.textContent = card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market" : "For the game";
   const list = document.createElement("ul");
   for (const line of card.lines) {
     const li = document.createElement("li");
@@ -505,7 +627,8 @@ function showCard(card, into = log) {
     hint.textContent = ok ? "Copied. Now in the game: Ctrl+V twice" : "Could not reach the clipboard";
   };
   foot.append(hint, button);
-  el.append(h, ...(card.plan ? [planBlock(card.plan)] : []), list, ...(card.wisp ? [foot] : []));
+  el.append(h, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
+            ...(card.table ? [tableBlock(card.table)] : []), list, ...(card.wisp ? [foot] : []));
   into.scrollTop = into.scrollHeight;
   return el;
 }
@@ -581,7 +704,7 @@ async function ask(text) {
         if (collapsed && event.type === "done" && orb.dataset.state !== "card") orb.dataset.state = "ready";
         if (event.type === "text") { bubble.textContent += event.text; log.scrollTop = log.scrollHeight; }
         else if (event.type === "tool") { add("div", "trace", (event.ok ? "looked up: " : "lookup failed: ") + event.name); bubble = add("div", "msg wisp"); }
-        else if (event.type === "card") { const el = showCard(event.card); if (event.card.plan) planEl = el; bubble = add("div", "msg wisp"); }
+        else if (event.type === "card") { const el = showCard(event.card); if (event.card.plan || event.card.chart || event.card.table) planEl = el; bubble = add("div", "msg wisp"); }
         else if (event.type === "usage") { usage = event.usage; showMeter(); }
         else if (event.type === "error") add("div", "msg error", event.message);
         else if (event.type === "done" && event.reason === "stopped") add("div", "note", "stopped");

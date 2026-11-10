@@ -400,6 +400,10 @@ class Game:
             return {"several_items_match": [n for _, n in found], "note": "Ask again with one of these names exactly."}
         item, item_name = found[0]
         out = self.market.history(self.snapshot, item, item_name, days)
+        chart = out.pop("_chart", None)
+        if args.get("show") is True and chart:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "chart": chart})
+            out["shown"] = "a chart card with these figures is now shown to the player: do not repeat them in your text"
         if self.crafting.bags.get(item):
             out["in_bags"] = self.crafting.bags[item]
         out["kept_by_wisp"] = self.market.size(self.snapshot)
@@ -435,7 +439,15 @@ class Game:
             item = next((i for i, n in craft.names.items() if n == entry["item"]), None)
             if item and craft.bags.get(item):
                 entry["in_bags"] = craft.bags[item]
-        return {"find": kind, "what_it_means": SCANS[kind], "items": found, "kept_by_wisp": self.market.size(self.snapshot),
+        shown = {}
+        if args.get("show") is True and found:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "table": {
+                "title": SCAN_TITLES[kind], "sub": f"last {days} days" + (f" · {among.replace('_', ' ')}" if only is not None else ""),
+                "columns": ["Item", "Now", "Usual", "Against usual", "Listed"],
+                "rows": [[e["item"], e["now"], e["usual"], e["now_against_usual"], e.get("usually_listed", "–")] for e in found],
+                "notes": ["Lowest listings from your own Auctionator scans. A listing is not a sale."]}})
+            shown = {"shown": "a table card with these rows is now shown to the player: do not repeat them in your text"}
+        return {"find": kind, "what_it_means": SCANS[kind], "items": found, "kept_by_wisp": self.market.size(self.snapshot), **shown,
                 "note": "Ranked in code over every item with at least 4 scan days in the period, seen in the last 3 days and "
                         "usually worth 1s or more. Lowest listed prices from the player's own scans: a listing is not a "
                         "sale, and thinly traded items can show big moves that mean nothing. For one item in depth, call "
@@ -518,6 +530,9 @@ SCANS = {
     "swings": "prices that move a lot between a low and a high: candidates to buy low and sell high",
     "most_listed": "the items with the most listings: the busiest markets",
 }
+
+SCAN_TITLES = {"below_usual": "Cheaper than usual", "above_usual": "Dearer than usual", "rising": "Rising", "falling": "Falling",
+               "swings": "Biggest swings", "most_listed": "Most listed"}
 
 QUALITY = {0: "poor", 1: "common", 2: "uncommon", 3: "rare", 4: "epic", 5: "legendary"}
 
@@ -614,7 +629,8 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {"item": {"type": "string"},
-                           "days": {"type": "integer", "minimum": 2, "maximum": 3650, "description": "How far back. Default 30."}},
+                           "days": {"type": "integer", "minimum": 2, "maximum": 3650, "description": "How far back. Default 30."},
+                           "show": {"type": "boolean", "description": "true to also show the player a chart card of it."}},
             "required": ["item"], "additionalProperties": False,
         },
     },
@@ -633,6 +649,7 @@ TOOLS = [
                 "name_contains": {"type": "string"},
                 "days": {"type": "integer", "minimum": 5, "maximum": 3650, "description": "The period judged. Default 30."},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 40},
+                "show": {"type": "boolean", "description": "true to also show the player this ranking as a table card."},
             },
             "required": ["find"], "additionalProperties": False,
         },
@@ -712,7 +729,9 @@ The price of anything at the auction house comes only from auction_prices, price
 memory. Prices are the lowest the player's Auctionator addon saw listed on the days it scanned: a listing, not a sale, \
 and before the auction house's cut. Wisp keeps every scan day, so for questions about earning gold, good prices or \
 where a price is heading, look there first; say how many scan days an answer rests on, and give any estimate of a \
-future price as a range with its confidence, never as a certainty.
+future price as a range with its confidence, never as a certainty. When your answer rests on a price_history or \
+market_scan result, call it with show set to true for the one result you are answering with: the player then sees a \
+chart or a table, and your text adds only what it means for them, in a sentence or two.
 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
 into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.

@@ -222,6 +222,15 @@ class Market:
                           **({"listed": listed} if listed is not None else {})} for day, low, high, listed in shown]
         if len(rows) > 45:
             out["series_note"] = f"the last 45 of {len(rows)} days are listed; the figures above use all of them"
+        # the same thing for the player's eyes: a chart card, drawn by the window from these numbers
+        out["_chart"] = {
+            "title": name, "sub": f"last {days} days · {len(rows)} scan day{'s' if len(rows) != 1 else ''}",
+            "points": [list(row) for row in rows[-180:]], "usual": round(s["usual"]),
+            "estimate": {k: round(guess[k]) for k in ("low", "high", "expected")} if guess else None,
+            "stats": [["Now", out["now"]], ["Usual", out["usual_price"]], ["Against usual", out["now_against_usual"]]]
+                     + ([["Next week", f"{coins(guess['low'])} – {coins(guess['high'])}"]] if guess else []),
+            "notes": ["Lowest listing on each day you scanned, from your own Auctionator scans. A listing is not a sale."
+                      + (f" The estimate rests on {guess['based_on']}: confidence {guess['confidence']}." if guess else "")]}
         return out
 
     def scan(self, snapshot: dict, kind: str, days: int, limit: int, name: str = "", only: set | None = None,
