@@ -503,6 +503,29 @@ bagSlots[6] = { { itemID = 4306, stackCount = 20, itemName = "Silk Cloth" }, { i
 bagSlots[15] = { { itemID = 4306, stackCount = 10, itemName = "Silk Cloth" }, { itemID = 2770, stackCount = 30, itemName = "Copper Ore" } }
 Enum.BankType = { Character = 0, Guild = 1, Account = 2 }
 C_Bank = { FetchPurchasedBankTabData = function(kind) return kind == 0 and { { ID = 6 } } or kind == 2 and { { ID = 15 } } or {} end }
+-- A full scan, as it sits in the client afterwards: every single auction, counted from 0.
+-- item, how many in the auction, its buyout for the lot.
+local replicated = {
+  { 4306, 20, 9000 }, { 4306, 20, 9000 }, { 4306, 10, 4550 }, { 4306, 20, 9400 }, { 4306, 5, 2500 }, { 4306, 40, 28000 }, { 4306, 1, 2000 },
+  { 2589, 20, 2400 }, { 2589, 20, 2600 },
+  { 4305, 1, 0 },   -- bid only, no buyout: nothing to compare
+}
+C_AuctionHouse.GetNumReplicateItems = function() return #replicated end
+C_AuctionHouse.GetReplicateItemInfo = function(i)
+  local a = replicated[i + 1]
+  return "x", 1, a[2], 1, true, 1, "", 0, 0, a[3], 0, nil, nil, "Owner", nil, 0, a[1], true
+end
+-- A search for one item: its whole ladder, with the player's own auctions marked.
+local searched = { { unitPrice = 2000, quantity = 5 }, { unitPrice = 2050, quantity = 3, containsOwnerItem = true, numOwnerItems = 2 },
+                   { unitPrice = 2600, quantity = 12 } }
+C_AuctionHouse.GetNumCommoditySearchResults = function() return #searched end
+C_AuctionHouse.GetCommoditySearchResultInfo = function(_, i) return searched[i] end
+C_AuctionHouse.HasFullCommoditySearchResults = function() return true end
+local function visitAuctionHouse(boot)
+  boot.scripts.OnEvent(boot, "REPLICATE_ITEM_LIST_UPDATE")              -- a full scan comes in, read a batch at a time
+  runTimers()
+  boot.scripts.OnEvent(boot, "COMMODITY_SEARCH_RESULTS_UPDATED", 4305)   -- then the player looks one item up
+end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end
@@ -522,6 +545,7 @@ if mode == "snapshot" then
   if not flags:find("noloot") then goLooting(boot) end
   if not flags:find("nomail") then openMailbox(boot) end
   if not flags:find("noauctions") then boot.scripts.OnEvent(boot, "OWNED_AUCTIONS_UPDATED") end
+  if flags:find("listings") then visitAuctionHouse(boot) end
   if flags:find("bank") then   -- a visit to the bank, and the window shut again long before logout
     boot.scripts.OnEvent(boot, "BANKFRAME_OPENED")
     boot.scripts.OnEvent(boot, "BANKFRAME_CLOSED")

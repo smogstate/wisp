@@ -28,6 +28,7 @@ The model calls them, Python runs them, the model reads the result and can call 
 | `auction_ledger` | **Built.** What was really bought and sold, from the auction house's mail: summary with the house's cut and the balance, sales, purchases | [Integrations](Integrations.md) |
 | `leveling` | **Built.** Experience per hour from the character's own play, time to the next level at that pace, rested bonus, share from quests, day by day | [Integrations](Integrations.md) |
 | `my_auctions` | **Built.** The character's own auctions: price for one, time left, sold or bid on, and still the lowest or undercut | [Integrations](Integrations.md) |
+| `market_depth` | **Built.** One item's whole price ladder after a scan or a search: how many are listed up to each price, what buying N would cost, how many are listed under a price, where the player's own stand | [Integrations](Integrations.md) |
 | `craft_plan` | **Built.** The arithmetic of a plan, in code: recipes × times → materials needed, made along the way, covered by the bags, left to buy, and the cost | [Integrations](Integrations.md) |
 | `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state. With a date, the snapshot from then | [Architecture](Architecture.md) |
 | `changes` | **Built.** What changed between two snapshots, computed in code: level, money, quests finished, picked up and dropped, profession skill, zone. For the last session, or looking back a number of days | [Architecture](Architecture.md) |

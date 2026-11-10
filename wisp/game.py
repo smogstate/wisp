@@ -537,6 +537,71 @@ class Game:
     def _signed(copper) -> str:
         return ("-" if copper < -0.5 else "+" if copper > 0.5 else "") + coins(abs(copper))
 
+    @staticmethod
+    def _listed_below(steps: list, price: int) -> int:
+        """How many are listed for less than a price, from a ladder. A step holds everything up to
+        its price, so this counts the steps that end below the price: never too many."""
+        return max((listed for up_to, listed in steps if up_to < price), default=0)
+
+    def tool_market_depth(self, args: dict) -> dict:
+        """How deep an item's market is: how many are listed at each price above the lowest."""
+        problem = self._no_market()
+        if problem and not (self.market and isinstance(args.get("item"), str)):
+            return problem
+        name = _clean(args.get("item"), 80) if isinstance(args.get("item"), str) else ""
+        found = self.graph.find(name) if name else []
+        if len(found) != 1:
+            return {"error": f"no single item is named like '{name}'" if name else "name the item",
+                    **({"several_items_match": [self.graph.names[i] for i in found]} if found else {})}
+        item, ladder = found[0], self.market.depth(self.snapshot, found[0]) if self.market else None
+        if ladder is None:
+            return {"error": f"Wisp has no price ladder for {self.graph.names[item]}. It reads one after a full scan with Auctionator, "
+                             "or when the item is searched for at the auction house; then the player logs out."}
+        steps, lowest = ladder["steps"], ladder["steps"][0][0]
+        total = steps[-1][1]
+        age = max(0, int(self.snapshot.get("takenAt", 0)) - ladder["at"])
+        out = {"item": self.graph.names[item], "lowest": coins(lowest), "listed_in_all": total, "auctions": ladder["auctions"],
+               "seen": "in the last session" if age < 6 * 3600 else f"{round(age / 86400, 1)} days before the last logout",
+               "ladder": [{"up_to": coins(price), "listed": listed, "above_the_lowest": f"{(price - lowest) / lowest:+.0%}"} for price, listed in steps]}
+        if ladder["partial"]:
+            out["partial"] = "only the first page of listings was loaded: there are more, at higher prices"
+        block = max(((b[1] - a[1], -b[0]) for a, b in zip([[0, 0]] + steps, steps)), default=None)   # of equal blocks, the cheaper
+        block = block and (block[0], -block[1])
+        if block and len(steps) > 1:
+            out["biggest_block"] = f"{block[0]} listed at or just under {coins(block[1])}"
+        if ladder["mine"]:
+            out["yours"] = {"listed": ladder["mine"], "from": coins(ladder["mine_at"]),
+                            "listed_below_yours": self._listed_below(steps, ladder["mine_at"])}
+        quantity = args.get("quantity")
+        if quantity is not None:
+            if not isinstance(quantity, int) or isinstance(quantity, bool) or not 1 <= quantity <= 10**7:
+                return {"error": "quantity must be a whole number from 1"}
+            cost, got = 0, 0
+            for price, listed in steps:   # each step is priced at its top: what it would cost at most
+                take = min(quantity, listed) - got
+                if take > 0:
+                    cost, got = cost + take * price, got + take
+            out["to_buy"] = {"quantity": quantity, **({"at_most": coins(cost), "each_on_average": coins(cost / got), "last_ones_at": coins(next(p for p, l in steps if l >= got))}
+                                                      if got == quantity else {"not_enough_listed": f"only {got} are listed"})}
+        if isinstance(args.get("price"), str):
+            mine = parse_money(args["price"])
+            if mine is None:
+                return {"error": "the price must be money with its units: '3s 50c'"}
+            out["at_your_price"] = {"price": coins(mine), "listed_for_less": self._listed_below(steps, mine),
+                                    "against_the_lowest": f"{(mine - lowest) / lowest:+.0%}"}
+        out["note"] = ("Every auction of this item as it stood when a full scan or a search last showed it. Each line is how many "
+                       "are listed up to that price, counted from the lowest; to_buy is priced at the top of each step, so it is "
+                       "the most it would cost. Listings change by the minute: this is that moment, not now.")
+        if args.get("show") is True:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Market depth", "table": {
+                "title": out["item"], "sub": f"{total} listed in {ladder['auctions']} auctions · from {out['lowest']} · seen {out['seen']}",
+                "columns": ["Up to", "Listed", "Above the lowest"],
+                "rows": [[r["up_to"], r["listed"], r["above_the_lowest"]] for r in out["ladder"]],
+                "notes": ["How many are listed up to each price, counted from the cheapest."
+                          + (f" Yours: {ladder['mine']} from {coins(ladder['mine_at'])}, with {out['yours']['listed_below_yours']} listed for less." if ladder["mine"] else "")]}})
+            out["shown"] = "a table card of the ladder is now shown to the player: do not repeat its rows"
+        return out
+
     def tool_my_auctions(self, args: dict) -> dict:
         """What the character has up for sale, set against the lowest listing Auctionator saw."""
         if not self.snapshot:
@@ -572,6 +637,9 @@ class Game:
                 else:
                     entry.update(lowest_seen=coins(lowest), against_the_market=f"undercut: {(each - lowest) / each:.0%} dearer than the lowest")
                     undercut += 1
+                ladder = self.market.depth(self.snapshot, a["item"]) if self.market else None
+                if ladder:   # not only whether somebody is cheaper, but how many stand in front
+                    entry["listed_for_less"] = self._listed_below(ladder["steps"], each)
             rows.append(entry)
         rows.sort(key=lambda r: (-r["_total"], r["item"]))
         out = {"auctions": [{k: v for k, v in r.items() if k[0] != "_"} for r in rows[:60]], "listed_for": coins(listed),
@@ -1528,6 +1596,23 @@ TOOLS = [
                 "show": {"type": "boolean", "description": "true to also show the player a card: the table, or with an item its chart."},
             },
             "additionalProperties": False,
+        },
+    },
+    {
+        "name": "market_depth",
+        "description": "How deep an item's market is: how many are listed at each price above the lowest, the "
+                       "biggest block of listings, and where the player's own auctions stand. With quantity: what "
+                       "buying that many would cost at most. With price: how many are listed for less than it. "
+                       "Use it for 'how many are cheaper than mine', 'can I buy 200 without moving the price', "
+                       "'where should I list', 'is it worth buying out the cheap ones'. Known after a full "
+                       "Auctionator scan or a search for the item.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"item": {"type": "string"},
+                           "quantity": {"type": "integer", "minimum": 1, "description": "How many the player wants to buy."},
+                           "price": {"type": "string", "description": "A price for one, with units, to count the listings under it: '4s 20c'."},
+                           "show": {"type": "boolean", "description": "true to also show the player the ladder as a table card."}},
+            "required": ["item"], "additionalProperties": False,
         },
     },
     {

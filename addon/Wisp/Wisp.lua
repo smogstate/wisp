@@ -748,6 +748,120 @@ local function bankRecord(wanted)
   return mine
 end
 
+---------------------------------------------------------- auction listings ----
+-- How deep the market is: not only the lowest price of an item but how many are listed at each
+-- price above it. Wisp sends the auction house no query of its own. It reads what is already in
+-- the client after somebody else asked:
+--   a full scan (Auctionator's): every auction, read a thousand at a time so the game never stutters;
+--   a search for one item (the player's, or a shopping list's): that item's whole ladder, and
+--   where the player's own auctions stand in it.
+-- Held for the session only and handed over in the snapshot; the overlay keeps it by day.
+--   listings[item] = { prices = { [price for one] = how many }, auctions, mine, mineAt, partial, at }
+
+local listings, replicateRun = {}, nil
+
+local function readFullScan()
+  local A = C_AuctionHouse
+  if not (A and A.GetNumReplicateItems and A.GetReplicateItemInfo) then return end
+  local total = A.GetNumReplicateItems() or 0
+  if total <= 0 then return end
+  local run, fresh, i, now = {}, {}, 0, time()
+  replicateRun = run
+  local function batch()
+    if replicateRun ~= run or (A.GetNumReplicateItems() or 0) ~= total then return end   -- another scan began, or the list is gone
+    local stop = math.min(total, i + 1000)
+    while i < stop do
+      local _, _, count, _, _, _, _, _, _, buyout, _, _, _, _, _, _, id = A.GetReplicateItemInfo(i)   -- the list counts from 0
+      if type(id) == "number" and type(count) == "number" and count > 0 and type(buyout) == "number" and buyout > 0 then
+        local price = math.floor(buyout / count + 0.5)
+        local entry = fresh[id]
+        if not entry then
+          entry = { prices = {}, auctions = 0, at = now }
+          fresh[id] = entry
+        end
+        entry.prices[price] = (entry.prices[price] or 0) + count
+        entry.auctions = entry.auctions + 1
+      end
+      i = i + 1
+    end
+    if i < total then
+      C_Timer.After(0.05, batch)
+    else
+      for id, entry in pairs(listings) do   -- what a search said about the player's own auctions outlives a scan, which cannot see them
+        if fresh[id] and entry.mine then fresh[id].mine, fresh[id].mineAt = entry.mine, entry.mineAt end
+      end
+      listings = fresh
+    end
+  end
+  batch()
+end
+
+local function searchSeen(id, count, result, partial)
+  if type(id) ~= "number" then return end
+  local entry = { prices = {}, auctions = 0, at = time(), partial = partial or nil }
+  for i = 1, count do
+    local price, quantity, own = result(i)
+    if type(price) == "number" and price > 0 and type(quantity) == "number" and quantity > 0 then
+      entry.prices[price] = (entry.prices[price] or 0) + quantity
+      entry.auctions = entry.auctions + 1
+      if own and own > 0 then
+        entry.mine = (entry.mine or 0) + own
+        if not entry.mineAt or price < entry.mineAt then entry.mineAt = price end
+      end
+    end
+  end
+  if entry.auctions > 0 then listings[id] = entry end
+end
+
+local function commoditySearched(id)
+  local A = C_AuctionHouse
+  if not (A and A.GetNumCommoditySearchResults and A.GetCommoditySearchResultInfo) or type(id) ~= "number" then return end
+  searchSeen(id, A.GetNumCommoditySearchResults(id) or 0, function(i)
+    local r = A.GetCommoditySearchResultInfo(id, i)
+    if not r then return nil end
+    return r.unitPrice, r.quantity, r.containsOwnerItem and (r.numOwnerItems or r.quantity) or 0
+  end, A.HasFullCommoditySearchResults and not A.HasFullCommoditySearchResults(id))
+end
+
+local function itemSearched(key)
+  local A = C_AuctionHouse
+  if not (A and A.GetNumItemSearchResults and A.GetItemSearchResultInfo) or type(key) ~= "table" then return end
+  searchSeen(key.itemID, A.GetNumItemSearchResults(key) or 0, function(i)
+    local r = A.GetItemSearchResultInfo(key, i)
+    if not r or type(r.buyoutAmount) ~= "number" then return nil end
+    local quantity = r.quantity or 1
+    return math.floor(r.buyoutAmount / quantity + 0.5), quantity, r.containsOwnerItem and quantity or 0
+  end, A.HasFullItemSearchResults and not A.HasFullItemSearchResults(key))
+end
+
+-- The ladder of one item, small: the lowest price, then how many are listed up to 1%, 2%, 3%, 5%,
+-- 7.5%, 10%, 15%, 25%, 50% and 100% above it, and in all. Rows of
+--   { item, when seen, auctions, own quantity, own lowest price, partial 0/1, price, listed up to it, price, listed, ... }
+local BANDS = { 1, 1.01, 1.02, 1.03, 1.05, 1.075, 1.1, 1.15, 1.25, 1.5, 2, math.huge }
+local function listingsRecord(wanted)
+  local out = {}
+  for id, entry in pairs(listings) do
+    if #out >= 12000 then break end
+    local prices = {}
+    for price in pairs(entry.prices) do prices[#prices + 1] = price end
+    table.sort(prices)
+    local row = { id, entry.at, entry.auctions, entry.mine or 0, entry.mineAt or 0, entry.partial and 1 or 0 }
+    local lowest, band, sum, last = prices[1], 1, 0, nil
+    for _, price in ipairs(prices) do
+      while price > lowest * BANDS[band] do   -- a dearer band begins: close the one before it, if anything was in it
+        if last then row[#row + 1], row[#row + 2], last = last, sum, nil end
+        band = band + 1
+      end
+      sum, last = sum + entry.prices[price], price
+    end
+    if last then row[#row + 1], row[#row + 2] = last, sum end
+    out[#out + 1] = row
+    wanted[id] = true
+  end
+  table.sort(out, function(a, b) return a[1] < b[1] end)
+  return #out > 0 and out or nil
+end
+
 -------------------------------------------------------------- own auctions ----
 -- What the character has up for sale, as the auction house lists it whenever its Auctions tab
 -- is looked at. Wisp asks the auction house nothing itself: it only reads what is already shown.
@@ -956,6 +1070,8 @@ local function buildSnapshot()
       for _, need in ipairs(quest.items or {}) do wanted[need.id] = true end
     end
   end
+  local okD, ladders = pcall(listingsRecord, wanted)
+  if not okD then ladders = nil end
   local okK, banked = pcall(bankRecord, wanted)
   if not okK then banked = nil end
   local okO, listed = pcall(ownAuctions, wanted)
@@ -1006,6 +1122,7 @@ local function buildSnapshot()
     loot = looted,
     auctionMail = deals,
     ownAuctions = listed,
+    listings = ladders,
     xp = progress,
     vendor = vendor,
     quests = log,
@@ -1156,6 +1273,9 @@ frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:RegisterEvent("PLAYER_XP_UPDATE")
 frame:RegisterEvent("QUEST_TURNED_IN")
+frame:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
+frame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
+frame:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
 frame:RegisterEvent("BANKFRAME_OPENED")
 frame:RegisterEvent("BANKFRAME_CLOSED")
 frame:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
@@ -1180,6 +1300,12 @@ frame:SetScript("OnEvent", function(_, event, ...)
     pcall(xpChanged)
   elseif event == "QUEST_TURNED_IN" then
     pcall(questHandedIn, ...)
+  elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
+    pcall(readFullScan)
+  elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
+    pcall(commoditySearched, ...)
+  elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
+    pcall(itemSearched, ...)
   elseif event == "BANKFRAME_OPENED" then
     bankOpen = true
     pcall(bankSeen)

@@ -113,6 +113,9 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
             gains = [d for d in ((game.snapshot.get("xp") or {}).get("days") or []) if isinstance(d, dict)]
             add("Experience measured by Wisp", bool(gains), f"{len(gains)} days of play", "none yet: it starts with your next gain",
                 optional=True)
+            ladders = game.snapshot.get("listings")
+            add("Auction listings in the snapshot", bool(ladders), f"the price ladders of {len(ladders or [])} items, from the last session",
+                "none from the last session: they come from a full Auctionator scan or a search for an item", optional=True)
             add("Bank contents in the snapshot", game.crafting.bank_seen is not None, f"{len(game.crafting.bank)} kinds of item",
                 "not yet: open your bank once, then log out", optional=True)
             mine = (game.snapshot.get("ownAuctions") or {}).get("list")

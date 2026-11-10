@@ -121,6 +121,19 @@ For Denis's interest in leveling. Two things the route and the zone comparison l
 
 Limits: time is "time between gains", so a rate is a little generous and says nothing about travel. Quest experience is Questie's figure, not the game's; where Questie has none, the quest simply shows none. Not yet run in the game.
 
+## Market depth: every listing, not only the lowest — built 2026-11-10
+
+Auctionator keeps one number per item, the lowest price. Whether that is one item or five hundred, and what stands above it, is lost. The client has the rest, briefly.
+
+- **Wisp sends the auction house nothing.** It reads what is already in the client after somebody else asked:
+  - **After a full scan** (Auctionator's, which on the modern auction house loads every single auction: `ReplicateItems`), the addon walks the same list (`GetReplicateItemInfo`), a thousand auctions at a time so the game never stutters, and adds up, per item, how many are listed at each price for one.
+  - **After a search for one item** (the player's, or a shopping list's: `COMMODITY_SEARCH_RESULTS_UPDATED`, `ITEM_SEARCH_RESULTS_UPDATED`), it reads that item's whole ladder, and which of the listings are the player's own.
+- **Made small before it is saved**: per item the lowest price, then how many are listed up to 1%, 2%, 3%, 5%, 7.5%, 10%, 15%, 25%, 50% and 100% above it, and in all. A few numbers an item. Held for the session, handed over in the snapshot, kept by day in the price file.
+- **`market_depth`** ([Tools](Tools.md)): the ladder of one item; the biggest block of listings; with a quantity, **what buying that many would cost at most** (each step priced at its top); with a price, **how many are listed for less**; and where the player's own auctions stand.
+- **`my_auctions` now says how many stand in front**: not only "undercut", but "70 are listed for less than yours".
+
+Limits: it is one moment, as old as the scan or the search, and listings change by the minute. A full scan cannot tell whose an auction is, so the player's own position comes only from a search. Auctions with no buyout are left out. The search events and the replicate list are read from the Forever source, not yet run in the game.
+
 ## The bank — built 2026-11-10
 
 - **Read while its window is open, and kept**, since the bank is shut at logout. Forever's bank is the modern one: tabs, each a container, for the character and for the whole account (`C_Bank.FetchPurchasedBankTabData`, then the ordinary container calls; read from the game's own bank window code). The addon reads them when the bank opens and whenever a slot changes while it is open; with the window shut it reads nothing, so an empty answer can never overwrite what was seen.

@@ -39,6 +39,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **Investments.** Tell Wisp what you bought to sell later: *I bought 200 Silk Cloth at 3s each as an investment*. It keeps the position and shows what you paid, what it is listed for now, how the price has moved since, and what you have made, both on what you sold (*I sold 150 at 5s*) and on what you still hold. *How are my investments doing?* shows them all; asking about one shows its chart against what you paid.
 
+**How deep a market is.** After a full Auctionator scan, or after you search for an item, Wisp knows every listing, not just the cheapest: *how many Silk Cloth are cheaper than mine?*, *what would 200 cost me?*, *where is the wall?*
+
 **Your auctions.** Look at the Auctions tab once while at the auction house; then *what do I have listed?* and *have I been undercut?* show each auction against the lowest listing, with the time left and what has sold.
 
 **What really sold.** Open your mailbox as usual; Wisp's addon notes every auction mail. Then *what did I sell this week?*, *how much did I make at the auction house?*, *what did I pay for that?* are answered from real sales and purchases, with the house's cut. Purchases that look like investments are offered for tracking, and a sale of something you track is recorded at what actually came in.

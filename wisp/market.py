@@ -10,6 +10,7 @@ about a price (its usual level, its direction, a forecast) is computed here
 from those rows, in code; the model only words it.
 """
 import datetime
+import json
 import re
 import sqlite3
 import statistics
@@ -22,6 +23,8 @@ CREATE TABLE IF NOT EXISTS price(market TEXT, item INTEGER, day INTEGER, low INT
                                  PRIMARY KEY (market, item, day)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS item(id INTEGER PRIMARY KEY, name TEXT);
 CREATE TABLE IF NOT EXISTS handed(market TEXT, taken INTEGER, PRIMARY KEY (market, taken)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS depth(market TEXT, item INTEGER, day INTEGER, at INTEGER, auctions INTEGER, mine INTEGER, mine_at INTEGER,
+                                 partial INTEGER, steps TEXT, PRIMARY KEY (market, item, day)) WITHOUT ROWID;
 """
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -141,6 +144,15 @@ class Market:
                 # the day-by-day record is the fuller one and replaces; the current price only fills a day with no record
                 written += db.executemany("INSERT OR REPLACE INTO price VALUES (?, ?, ?, ?, ?, ?)", days).rowcount
                 written += db.executemany("INSERT OR IGNORE INTO price VALUES (?, ?, ?, ?, ?, ?)", current).rowcount
+                # how deep each market was: the ladder of prices, where a scan or a search showed it
+                ladders = []
+                for row in snapshot.get("listings") if isinstance(snapshot.get("listings"), list) else []:
+                    if not (isinstance(row, list) and len(row) >= 8 and len(row) % 2 == 0 and all(_whole(v, 0, 10**12) for v in row)):
+                        continue
+                    steps = [[row[i], row[i + 1]] for i in range(6, len(row), 2)]
+                    if row[0] and all(a[0] < b[0] and a[1] < b[1] for a, b in zip(steps, steps[1:])) and steps[0][0] > 0:
+                        ladders.append((market, row[0], row[1] // 86400, row[1], row[2], row[3], row[4], row[5], json.dumps(steps)))
+                db.executemany("INSERT OR REPLACE INTO depth VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", ladders)
         finally:
             db.close()
         return written
@@ -177,6 +189,18 @@ class Market:
                               "ORDER BY day", (market_key(snapshot), item, today - days, today)).fetchall()
         finally:
             db.close()
+
+    def depth(self, snapshot: dict, item: int) -> dict | None:
+        """The latest ladder of an item: {"at", "auctions", "mine", "mine_at", "partial", "steps": [[price, listed up to it], ...]}."""
+        db = self._open()
+        try:
+            row = db.execute("SELECT at, auctions, mine, mine_at, partial, steps FROM depth WHERE market = ? AND item = ? "
+                             "ORDER BY at DESC LIMIT 1", (market_key(snapshot), item)).fetchone()
+        finally:
+            db.close()
+        if row is None:
+            return None
+        return {"at": row[0], "auctions": row[1], "mine": row[2], "mine_at": row[3], "partial": bool(row[4]), "steps": json.loads(row[5])}
 
     def size(self, snapshot: dict) -> dict:
         db = self._open()

@@ -804,6 +804,50 @@ def test_bank(tmp: Path):
     assert plain.crafting.bank == {} and plain.crafting.bank_seen is None and plain.snapshot.get("bank") is None
 
 
+def test_market_depth(tmp: Path):
+    """Not only the lowest price: how many are listed at each price above it."""
+    game = Game.load(make_wow_dir(tmp, flags="listings"))
+    rows = {r[0]: r for r in game.snapshot["listings"]}
+    assert rows[4306][2:] == [7, 0, 0, 0, 450, 40, 455, 50, 470, 70, 500, 75, 700, 115, 2000, 116], \
+        "seven auctions from the full scan: how many are listed up to each price, counted from the lowest"
+    assert rows[2589][2:] == [2, 0, 0, 0, 120, 20, 130, 40] and rows[4305][2:] == [3, 2, 2050, 0, 2000, 5, 2050, 8, 2600, 20], \
+        "a search for one item gives its ladder and where the player's own auctions stand; an auction with no buyout is not a price"
+    assert "error" in run_tool(game, "market_depth", {"item": "Silk Cloth"}), "no history file yet"
+    game.market = Market(tmp / "m.sqlite")
+    game.market.ingest(game.snapshot)
+
+    def depth(**args):
+        out = run_tool(game, "market_depth", args)
+        out.pop("note", None)
+        return out
+    silk = depth(item="silk cloth", quantity=60, price="4s 80c", show=True)
+    assert (silk["lowest"], silk["listed_in_all"], silk["auctions"], silk["seen"]) == ("4s 50c", 116, 7, "in the last session")
+    assert silk["ladder"][:3] == [{"up_to": "4s 50c", "listed": 40, "above_the_lowest": "+0%"}, {"up_to": "4s 55c", "listed": 50, "above_the_lowest": "+1%"},
+                                  {"up_to": "4s 70c", "listed": 70, "above_the_lowest": "+4%"}]
+    assert silk["biggest_block"] == "40 listed at or just under 4s 50c"
+    assert silk["to_buy"] == {"quantity": 60, "at_most": "2g 72s", "each_on_average": "4s 54c", "last_ones_at": "4s 70c"}, \
+        "forty at the lowest, then ten and ten dearer"
+    assert silk["at_your_price"] == {"price": "4s 80c", "listed_for_less": 70, "against_the_lowest": "+7%"}
+    assert game.cards[-1]["table"]["sub"] == "116 listed in 7 auctions · from 4s 50c · seen in the last session"
+    assert depth(item="Silk Cloth", quantity=500)["to_buy"] == {"quantity": 500, "not_enough_listed": "only 116 are listed"}
+    bolt = depth(item="Bolt of Silk Cloth")
+    assert bolt["yours"] == {"listed": 2, "from": "20s 50c", "listed_below_yours": 5}, "five cheaper ones stand in front of the player's own"
+    assert "error" in depth(item="Silk Cloth", price="480") and "error" in depth(item="Silk Cloth", quantity=0) and "error" in depth(item="silk")
+    assert "no price ladder" in depth(item="Fine Thread")["error"]
+
+    # the player's own auctions: not only undercut or not, but how many stand in front
+    mine = {a["item"]: a for a in run_tool(game, "my_auctions", {})["auctions"]}
+    assert mine["Silk Cloth"]["listed_for_less"] == 70 and mine["Bolt of Silk Cloth"]["listed_for_less"] == 0 and "listed_for_less" not in mine["Fine Thread"]
+
+    # a ladder that does not climb is not kept; a later look at the same item replaces the earlier one
+    bad = dict(game.snapshot, takenAt=game.snapshot["takenAt"] + 5, listings=[[4306, game.snapshot["takenAt"], 2, 0, 0, 0, 500, 10, 400, 20],
+                                                                               [2589, game.snapshot["takenAt"] + 60, 1, 0, 0, 0, 90, 7]])
+    game.market.ingest(bad)
+    assert depth(item="Silk Cloth")["lowest"] == "4s 50c" and depth(item="Linen Cloth")["ladder"] == [{"up_to": "90c", "listed": 7, "above_the_lowest": "+0%"}]
+    plain = Game.load(make_wow_dir(tmp / "plain"))
+    assert plain.snapshot.get("listings") is None
+
+
 def test_gathering(wow: Path, tmp: Path):
     """GatherMate2's nodes: which zones have the most, a route through one, and the way in from an item."""
     game = Game.load(wow)
@@ -1388,6 +1432,8 @@ if __name__ == "__main__":
         test_this_pc(Path(d))
     with tempfile.TemporaryDirectory() as bk:
         test_bank(Path(bk))
+    with tempfile.TemporaryDirectory() as md:
+        test_market_depth(Path(md))
     with tempfile.TemporaryDirectory() as u:
         test_update(Path(u))
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))
