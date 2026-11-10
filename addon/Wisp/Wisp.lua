@@ -303,19 +303,67 @@ local function auctionator()
   return type(api) == "table" and api or nil
 end
 
--- Auctionator's price for each wanted item, from the player's own last scans. Nil without Auctionator.
+-- Every item Auctionator has a price for. Its public API answers per item and cannot list them,
+-- so the list of ids, and only that, is taken from its price table. The prices themselves come
+-- from the API. Pets and item-level variants are kept under other keys and are left out.
+local function marketIds(into)
+  local db = type(Auctionator) == "table" and type(Auctionator.Database) == "table" and Auctionator.Database.db
+  if type(db) ~= "table" then return end
+  for key in pairs(db) do
+    local id = tonumber(key)
+    if id and id > 0 and id == math.floor(id) then into[id] = true end
+  end
+end
+
+-- Item names are learned while playing and kept: the game loads an item it has not shown yet only
+-- on request and a moment later, which is too late to ask for at logout.
+local function knownName(id)
+  local name = itemName(id)
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.items = WispData.items or {}
+  if name then WispData.items[id] = name end
+  return name or WispData.items[id]
+end
+
+local learning = 0
+local function learnNames(pass)
+  if pass == nil then
+    if learning > 0 then return end   -- already under way
+    pass = 1
+  end
+  learning = pass
+  local ids, asked = {}, 0
+  if not pcall(marketIds, ids) then learning = 0; return end
+  for id in pairs(ids) do
+    if not knownName(id) then
+      asked = asked + 1
+      if asked > 400 then break end   -- a few hundred at a time, so the game never stutters
+      if C_Item and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(id) end
+    end
+  end
+  if asked > 0 and pass < 60 then
+    C_Timer.After(3, function() learnNames(pass + 1) end)
+  else
+    learning = 0
+  end
+end
+
+-- Auctionator's price for every item it has seen and every item wanted, from the player's own
+-- scans, as rows of { item id, copper, days since it was seen or -1, name or "" }: thousands of
+-- rows, so kept small. Nil without Auctionator.
 local function prices(wanted)
   local api = auctionator()
   if not (api and api.GetAuctionPriceByItemID) then return nil end
+  pcall(marketIds, wanted)
   local out = {}
   for id in pairs(wanted) do
     local ok, price = pcall(api.GetAuctionPriceByItemID, "Wisp", id)
-    if ok and type(price) == "number" then
+    if ok and type(price) == "number" and price > 0 then
       local okA, age = pcall(api.GetAuctionAgeByItemID, "Wisp", id)
-      out[#out + 1] = { id = id, price = price, days = okA and type(age) == "number" and age or nil }
+      out[#out + 1] = { id, price, okA and type(age) == "number" and age or -1, knownName(id) or "" }
     end
   end
-  table.sort(out, function(a, b) return a.id < b.id end)
+  table.sort(out, function(a, b) return a[1] < b[1] end)
   return out
 end
 
@@ -504,12 +552,16 @@ frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("TRADE_SKILL_SHOW")
 frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
+frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:SetScript("OnEvent", function(_, event)
   if event == "PLAYER_LOGOUT" then
     save()
+  elseif event == "AUCTION_HOUSE_CLOSED" then
+    pcall(learnNames)   -- a scan has just shown the game these items
   elseif event ~= "PLAYER_LOGIN" then
     pcall(captureRecipes)
   else
+    C_Timer.After(20, function() pcall(learnNames) end)   -- once the login rush is over
     pcall(SetOverrideBindingClick, opener, false, PASTE_KEY, "WispInboxOpener")
   end
 end)

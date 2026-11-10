@@ -263,7 +263,12 @@ end
 -- The profession window: Tailoring at 150. Made-up recipes in the shape the client gives them.
 local itemNames = { [4306] = "Silk Cloth", [4305] = "Bolt of Silk Cloth", [6260] = "Blue Dye", [2321] = "Fine Thread",
                     [7048] = "Azure Silk Hood", [6948] = "Hearthstone", [4245] = "Small Silk Pack" }   -- 4234 is not cached
-C_Item = { GetItemNameByID = function(id) return itemNames[id] end }
+-- 2996 is an item the game has not loaded yet: its name comes only after it is asked for
+local late, asked = { [2996] = "Bolt of Linen Cloth" }, {}
+C_Item = {
+  GetItemNameByID = function(id) return itemNames[id] or (asked[id] and late[id]) or nil end,
+  RequestLoadItemDataByID = function(id) asked[id] = true end,
+}
 Enum = { CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2 } }
 local function slot(id, n, kind) return { reagents = { { itemID = id } }, quantityRequired = n, reagentType = kind or 1, required = true } end
 local recipes = {
@@ -296,8 +301,13 @@ C_Container = {
 -- Auctionator's public API, as its source has it: every call checks who is calling
 if not flags:find("noauctionator") then
   local function caller(id) if type(id) ~= "string" or id == "" then error("Invalid callerID. Use the name of your add-on.") end end
-  local seen = { [4306] = { 450, 0 }, [4305] = { 2100, 3 }, [7048] = { 9000, 1 } }   -- copper, days since seen
-  Auctionator = { API = { v1 = {
+  -- copper, days since seen. 2589 is nothing this character carries or crafts; 31 was last seen too long ago to say
+  local seen = { [4306] = { 450, 0 }, [4305] = { 2100, 3 }, [7048] = { 9000, 1 }, [2589] = { 120, 2 }, [2996] = { 300, 0 }, [31] = { 77 } }
+  itemNames[2589], itemNames[31] = "Linen Cloth", "Old Thing"
+  -- its own price table, keyed by text: item ids, and other keys for pets and item-level variants
+  local db = { ["g:1234:20"] = { m = 5 }, ["p:77"] = { m = 9 } }
+  for id, row in pairs(seen) do db[tostring(id)] = { m = row[1] } end
+  Auctionator = { Database = { db = db }, API = { v1 = {
     GetAuctionPriceByItemID = function(id, item) caller(id); return seen[item] and seen[item][1] end,
     GetAuctionAgeByItemID = function(id, item) caller(id); return seen[item] and seen[item][2] end,
     ConvertToSearchString = function(id, term)
@@ -317,6 +327,10 @@ if mode == "snapshot" then
   local boot
   for _, f in ipairs(FRAMES) do if f.scripts.OnEvent then boot = f end end
   boot.scripts.OnEvent(boot, "PLAYER_LOGIN")
+  if flags:find("visitauction") then   -- names are learned after the auction house closes, a pass at a time
+    boot.scripts.OnEvent(boot, "AUCTION_HOUSE_CLOSED")
+    runTimers()
+  end
   if not flags:find("noprofession") then
     boot.scripts.OnEvent(boot, "TRADE_SKILL_SHOW")
     boot.scripts.OnEvent(boot, "TRADE_SKILL_LIST_UPDATE")   -- it comes again and again: said in chat once

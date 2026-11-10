@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 from wisp import local  # noqa: E402
 from wisp.__main__ import App, check, serve  # noqa: E402
 from wisp.game import Game, encode_wisp1, read_snapshot, run_tool  # noqa: E402
+from wisp.history import History  # noqa: E402
 from wisp.llm import FakeChat, answer  # noqa: E402
 
 
@@ -302,6 +303,35 @@ def test_crafting(wow: Path, tmp: Path):
     assert covered["list"] == [] and "no Copy button" in covered["note"]
     assert "wisp" not in game.cards[-1] and game.cards[-1]["lines"] == [] and game.cards[-1]["plan"]["total"] == "Nothing to buy"
 
+    # prices of anything Auctionator has scanned, not only what this character carries or crafts
+    assert hood["result_listed_for"] == "90s" and "profit_per_craft" not in hood, "no profit while a material has no price"
+    assert (bolt["result_listed_for"], bolt["profit_per_craft"]) == ("21s", "3s"), "a 21s bolt from 18s of cloth"
+    asked = run_tool(game, "auction_prices", {"items": ["linen cloth", "silk", "Old Thing", "nothing like this"]})
+    linen, silk, old, none = asked["prices"]
+    assert linen["found"] == [{"item": "Linen Cloth", "lowest_price": "1s 20c", "seen": "2 days ago"}]
+    assert [f["item"] for f in silk["found"]] == ["Silk Cloth", "Azure Silk Hood", "Bolt of Silk Cloth"], "closest names, shortest first"
+    assert silk["found"][0]["in_bags"] == 32 and silk["found"][0]["bags_worth"] == "1g 44s"
+    assert old["found"][0]["seen"] == "over three weeks ago" and none == {"asked": "nothing like this", "found": [], "note": "no price under that name"}
+    assert asked["items_with_a_price"] == 6 and "error" in run_tool(game, "auction_prices", {"items": []})
+    assert not Game.load(wow).crafting.find("Bolt of Linen Cloth"), "an item the game had not loaded has no name yet"
+    learned = Game.load(make_wow_dir(tmp / "c", flags="visitauction"))
+    assert run_tool(learned, "auction_prices", {"items": ["Bolt of Linen Cloth"]})["prices"][0]["found"][0]["lowest_price"] == "3s", \
+        "its name is learned after a visit to the auction house, and kept"
+
+    # prices over time: one point per change, dated by when the price was seen
+    history = History(tmp / "prices")
+    day = 86400
+    first = dict(game.snapshot, takenAt=1000 * day, prices=[[4306, 400, 1, "Silk Cloth"], [2589, 120, 0, "Linen Cloth"], [31, 77, -1, "Old Thing"]])
+    same = dict(game.snapshot, takenAt=1003 * day, prices=[[4306, 400, 0, "Silk Cloth"], [2589, 120, 3, "Linen Cloth"]])
+    later = dict(game.snapshot, takenAt=1010 * day, prices=[[4306, 450, 0, "Silk Cloth"], [2589, 150, 2, "Linen Cloth"]])
+    for snapshot in (first, same, later, later):
+        history.ingest(snapshot)
+    assert history._prices(later) == {"4306": [[999, 400], [1010, 450]], "2589": [[1000, 120], [1008, 150]]}, history._prices(later)
+    then = Game(later)
+    then.history = history
+    silk = run_tool(then, "auction_prices", {"items": ["Silk Cloth"]})["prices"][0]["found"][0]
+    assert silk["earlier"] == [{"days_ago": 11, "price": "4s"}] and silk["lowest_price"] == "4s 50c"
+
     # the addon checks a pasted list as strictly as a waypoint
     def paste(cmd, flags=""):
         return stub("paste", encode_wisp1([cmd]), flags=flags)
@@ -315,6 +345,7 @@ def test_crafting(wow: Path, tmp: Path):
 
     without = Game.load(make_wow_dir(tmp / "a", flags="noauctionator"))
     assert without.snapshot["addons"]["auctionator"] is False and not without.snapshot.get("prices")
+    assert "not installed" in run_tool(without, "auction_prices", {"items": ["Silk Cloth"]})["error"]
     assert "not installed" in run_tool(without, "shopping_list", {"name": "x", "crafts": crafts})["warning"]
     assert "not installed" in run_tool(without, "craft_plan", {"crafts": crafts})["prices"]
     closed = Game.load(make_wow_dir(tmp / "b", flags="noprofession"))

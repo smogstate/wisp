@@ -43,11 +43,13 @@ class Crafting:
             if count:
                 self.bags[item] = self.bags.get(item, 0) + count
                 self._name(item, line.get("name"))
-        for line in _list(snapshot.get("prices")):
-            item = _int(line.get("id"), 1, 10**9) if isinstance(line, dict) else None
-            price = _int(line.get("price"), 1, 10**10) if item is not None else None
-            if price:
-                self.prices[item] = (price, _int(line.get("days"), 0, 10000))
+        for row in _list(snapshot.get("prices")):   # rows of [item id, copper, days since seen or -1, name or ""]
+            if not isinstance(row, list) or len(row) < 4:
+                continue
+            item, price = _int(row[0], 1, 10**9), _int(row[1], 1, 10**10)
+            if item is not None and price:
+                self.prices[item] = (price, _int(row[2], 0, 10000))
+                self._name(item, row[3])
         skill_now = {p.get("name"): _int(p.get("skill"), 0, 10000) for p in _list(snapshot.get("professions"))
                      if isinstance(p, dict)}
         for book in _list(snapshot.get("recipes")):
@@ -102,6 +104,22 @@ class Crafting:
     def _price(self, item: int) -> int | None:
         return self.prices[item][0] if item in self.prices else None
 
+    def seen(self, item: int) -> str:
+        """When Auctionator last saw the item, in words."""
+        days = self.prices[item][1]
+        return "over three weeks ago" if days is None else "today" if days == 0 else f"{days} day{'s' if days != 1 else ''} ago"
+
+    def find(self, query: str) -> list[int]:
+        """Priced items by name: the exact one, else those containing the words, shortest name first."""
+        query = _text(query, 80).lower()
+        if not query:
+            return []
+        named = [(self.names[item], item) for item in self.prices if item in self.names]
+        exact = [item for name, item in named if name.lower() == query]
+        if exact:
+            return exact[:1]
+        return [item for name, item in sorted((n for n in named if query in n[0].lower()), key=lambda n: (len(n[0]), n[0]))][:8]
+
     def describe(self, recipe: dict) -> dict:
         materials, cost, unpriced, can_make = [], 0, [], None
         for item, count in recipe["reagents"]:
@@ -124,6 +142,12 @@ class Crafting:
             out["materials_cost_per_craft"] = coins(cost) if not unpriced else None
             if unpriced:
                 out["no_auction_price_for"] = unpriced
+        sells = self._price(recipe["makes"]) if recipe["makes"] else None
+        if sells:   # what the result is listed for, and what is left after buying every material
+            out["result_listed_for"] = coins(sells * recipe["makes_count"])
+            if recipe["reagents"] and not unpriced:
+                profit = sells * recipe["makes_count"] - cost
+                out["profit_per_craft"] = ("-" if profit < 0 else "") + coins(abs(profit))
         return out
 
     def plan(self, crafts) -> dict:

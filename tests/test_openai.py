@@ -158,7 +158,7 @@ def main():
         assert sent["stream_options"] == {"include_usage": True} and sent["max_completion_tokens"] == 16000
         assert sent["reasoning_effort"] == "low", "K3 thinks at 'max' unless told otherwise"
         assert sent["messages"][0]["role"] == "system" and sent["messages"][1] == {"role": "user", "content": "where do I hand in the wolf quest?"}
-        assert [t["function"]["name"] for t in sent["tools"]] == ["character", "quests", "quest_done", "changes", "dungeons", "dungeon", "recipes", "craft_plan",
+        assert [t["function"]["name"] for t in sent["tools"]] == ["character", "quests", "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "craft_plan",
             "shopping_list", "waypoint"]
         assert sent["tools"][2]["type"] == "function" and sent["tools"][2]["function"]["parameters"]["required"] == ["quest_ids"]
 

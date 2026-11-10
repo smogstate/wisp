@@ -332,7 +332,45 @@ class Game:
                 "note": "Read from the game while the profession window was open. A recipe gives skill on every craft "
                         "while orange, less often while yellow or green, never once grey. Where colour_read_at_skill is "
                         "given the colour is older than the current skill and may have dropped. Prices are from the "
-                        "player's own Auctionator scans; in_bags does not count the bank. For any totals, call craft_plan."}
+                        "player's own Auctionator scans; in_bags does not count the bank. result_listed_for is the "
+                        "lowest price the crafted item was listed at and profit_per_craft what is left after buying "
+                        "every material at auction: before the auction house's cut, and a listing is not a sale. For "
+                        "any totals, call craft_plan."}
+
+    def tool_auction_prices(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        names = args.get("items")
+        if not isinstance(names, list) or not 1 <= len(names) <= 20 or not all(isinstance(n, str) for n in names):
+            return {"error": "items must be a list of 1 to 20 item names"}
+        craft = self.crafting
+        if not craft.prices:
+            return {"error": "There are no auction prices. They come from the Auctionator addon's own scans: "
+                             + ("the player scans the auction house with it, then logs out." if craft.has_auctionator
+                                else "it was not installed at the last logout.")}
+        log = self.history._prices(self.snapshot) if self.history else {}   # read once for all the items
+        today = int(self.snapshot.get("takenAt", 0)) // 86400
+        out = []
+        for name in names:
+            found = craft.find(name)
+            entry = {"asked": _clean(name, 80), "found": []}
+            for item in found:
+                line = {"item": craft.name(item), "lowest_price": coins(craft.prices[item][0]), "seen": craft.seen(item)}
+                if craft.bags.get(item):
+                    line["in_bags"] = craft.bags[item]
+                    line["bags_worth"] = coins(craft.prices[item][0] * craft.bags[item])
+                earlier = [{"days_ago": today - day, "price": coins(price)} for day, price in reversed(log.get(str(item), [])[:-1])]
+                if earlier:
+                    line["earlier"] = earlier[:5]
+                entry["found"].append(line)
+            if not found:
+                entry["note"] = "no price under that name"
+            out.append(entry)
+        return {"prices": out, "items_with_a_price": len(craft.prices),
+                "note": "From the player's own Auctionator scans: the lowest price it saw listed, not a sale, and before "
+                        "the auction house's cut. Names are as the player's game writes them. 'seen' is counted from "
+                        "the last logout. An item with no price was not at the auction house when Auctionator looked, "
+                        "or is spelled differently."}
 
     def tool_craft_plan(self, args: dict) -> dict:
         if not self.snapshot:
@@ -477,6 +515,18 @@ TOOLS = [
         },
     },
     {
+        "name": "auction_prices",
+        "description": "The auction-house price of items by name, from the player's own Auctionator scans: the "
+                       "lowest price seen, when it was seen, earlier prices where Wisp has kept them, and what the "
+                       "player's own stock of it is worth. A name that is not exact returns the closest matches. "
+                       "This is the only source of prices: never quote one from memory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"items": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 20}},
+            "required": ["items"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "craft_plan",
         "description": "The arithmetic of a crafting plan, done in code: for each recipe and how many times to craft "
                        "it, the total materials, what the plan's own crafts supply (a bolt made in one step and used "
@@ -546,6 +596,9 @@ cover, what to buy and the cost. Your text then adds at most two short sentences
 order or what is uncertain; never repeat its steps or numbers. Prices are the player's own last auction \
 scans and skill is as of the last logout, so say how old they are when it matters. Wisp only knows the recipes the \
 character's profession window listed; for a path beyond those, say what is missing rather than fill it in from memory.
+
+The price of anything at the auction house comes only from auction_prices, never from memory. It is the lowest price \
+the player's Auctionator addon saw listed, as of its last scan: a listing, not a sale, and before the auction house's cut.
 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
 into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.
