@@ -110,6 +110,21 @@ Limits: the route is as of the last logout and knows the next step of a quest on
 
 Not built, and the natural next steps: **experience per hour** and time to the next level (the addon would note each session), and **what really sold and for how much** (from the auction house's mail), which would turn "listed for" into "sold for".
 
+## Investments — built 2026-11-10
+
+Denis: "can we add an asset entity? I bought this item as an asset; I can see how it behaves, how much gold I made so far. Investments."
+
+- **An investment is a record of trades the player reports.** "I bought 200 Silk Cloth at 3s each to sell later", "I sold 150 of them at 5s". The model calls `investments` with the item, the quantity and the price **exactly as the player gave it**, as text with its units (`3s 50c`, `1g 20s`), for one or for the whole lot. The price is read in code; a number without units is refused, since guessing between gold and copper would be a hundredfold mistake. With no price given, the day's lowest listing is taken and the trade is marked as assumed.
+- **Everything else is worked out in code** (`wisp/assets.py`): how many are held, the average cost (a moving average over the buys), the worth at today's listing, the gain on what is unsold, what the sales made (each sale set against the average cost of what was held then), and the sum of the two: "made in all".
+- **How it behaves**: for each position, the lowest and highest listing since it was bought, the number of scan days behind that, and the direction once there are enough of them. One position in depth comes with a chart: the price line, and the level that was paid.
+- **A hint from the bags**: when fewer are carried than are recorded as held, the tool says so. The rest may be in the bank, at auction, or sold and not yet reported.
+- **Kept for good** in the same SQLite file as the price history, per realm and faction; a mistaken trade is removed by its number, a whole record by item. A purchase that a later sale rests on cannot be removed before the sale.
+- **Cards**: a table of every position after any change and on request; the chart for one.
+
+Limits: Wisp knows only the trades it is told about; it does not see purchases or sales in the game. Worth is the lowest listing before the auction house's cut, not a sale. An item has to be known to Wisp (carried, crafted, or seen at auction by Auctionator) before it can be recorded.
+
+The natural next step is to read purchases and sales from the auction house's mail, so that trades can be offered for recording, not typed.
+
 ## The item graph — built 2026-11-10
 
 Denis: "build a graph of items, what is used for what, for the LLM to navigate; bind recipes, items, quests".

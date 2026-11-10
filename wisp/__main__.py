@@ -28,6 +28,7 @@ from pathlib import Path
 from . import local
 from .game import Game, find_saved_file
 from .history import History, ago_words, diff, recap
+from .assets import Assets
 from .market import Market
 from . import update
 from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
@@ -194,6 +195,7 @@ class App:
         self.session = self.sessions.new()
         self.history = History(local.APP_DIR / "snapshots" if persist else Path(tempfile.mkdtemp(prefix="wisp-snapshots-")))
         self.market = Market((local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-market-"))) / "market.sqlite")
+        self.assets = Assets(self.market.file)   # investments live in the same file as the prices
         self.notes = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-notes-"))) / "notes"   # research reports
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
 
@@ -339,6 +341,7 @@ class App:
             self.history.ingest(game.snapshot)
             game.history = self.history
             game.notes_dir = self.notes
+            game.assets = self.assets
             try:
                 self.market.ingest(game.snapshot)
                 game.market = self.market

@@ -35,6 +35,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **What to sell.** *What should I sell?* lists what your bags would fetch and says for each item whether to sell now, hold, or vendor it. *What can I craft for money?* ranks your recipes by profit at today's listings.
 
+**Investments.** Tell Wisp what you bought to sell later: *I bought 200 Silk Cloth at 3s each as an investment*. It keeps the position and shows what you paid, what it is listed for now, how the price has moved since, and what you have made, both on what you sold (*I sold 150 at 5s*) and on what you still hold. *How are my investments doing?* shows them all; asking about one shows its chart against what you paid.
+
 **Quests around you.** *What quests are open here?*, *what elite quests can I do?*, *where should I quest next?* Wisp reads the list of quests Questie has open for your character, with levels and quest givers, and can put the givers on a waypoint card.
 
 **Professions.** Open your profession window once in the game (Wisp says in chat that it read the recipes), then log out. Now ask *what should I craft to level tailoring, and what do I need to buy?* Wisp counts the materials, takes off what is in your bags, prices the rest from your own **Auctionator** scans, and gives you a card that creates the shopping list in Auctionator. It knows the recipes your character has; the bank is not counted.

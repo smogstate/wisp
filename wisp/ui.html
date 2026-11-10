@@ -579,7 +579,7 @@ function chartBlock(c) {
     }
     svg.append(svgEl("line", { class: "usual", x1: L, x2: x(last[0]), y1: yy(c.usual), y2: yy(c.usual) }),
                // the label goes on the side of the line the first prices are not on
-               svgEl("text", { x: L + 4, y: yy(c.usual) + (pts.slice(0, 5).reduce((sum, p) => sum + p[1], 0) / Math.min(5, pts.length) > c.usual ? 12 : -5) }, "usual"),
+               svgEl("text", { x: L + 4, y: yy(c.usual) + (pts.slice(0, 5).reduce((sum, p) => sum + p[1], 0) / Math.min(5, pts.length) > c.usual ? 12 : -5) }, c.line || "usual"),
                svgEl("path", { class: "price", d: pts.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + " " + yy(p[1]).toFixed(1)).join("") }),
                svgEl("text", { x: L, y: H - 6 }, dayDate(day0)));
     if (pts.length > 1) svg.append(svgEl("text", { x: x(last[0]), y: H - 6, "text-anchor": "end" }, dayDate(last[0])));
@@ -684,7 +684,7 @@ function showCard(card, into = log) {
   if (into === log && card.wisp) lastCard = card;
   const el = add("section", "card", undefined, into);
   const h = document.createElement("h2");
-  h.textContent = card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market"
+  h.textContent = card.heading ? card.heading : card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market"
     : card.report ? "Research" : card.sources ? "Sources" : card.route ? "Route" : "For the game";
   const list = document.createElement("ul");
   for (const line of card.lines) {

@@ -565,6 +565,79 @@ def test_gold(wow: Path, tmp: Path):
     assert "not installed" in run_tool(without, "gold", {"view": "bags"})["error"]
 
 
+def test_investments(wow: Path, tmp: Path):
+    """Things bought to sell later: the trades the player reports, and what they come to."""
+    from wisp.assets import Assets, parse_money
+    for text, copper in (("3s 50c", 350), ("1g", 10000), ("2 gold 5 silver", 20500), ("1.5g", 15000), ("45c", 45), ("1g and 20s", 12000)):
+        assert parse_money(text) == copper, text
+    for text in ("350", "3", "about 3s", "1,200g", "", "0c", None, 5):
+        assert parse_money(text) is None, f"{text!r}: no units or not sure enough, so not guessed"
+
+    game = Game.load(wow)
+    game.market = Market(tmp / "wisp.sqlite")
+    game.market.ingest(game.snapshot)
+    game.assets = Assets(tmp / "wisp.sqlite")
+
+    def invest(**args):
+        out = run_tool(game, "investments", args)
+        out.pop("note", None)
+        return out
+    assert invest()["investments"] == []
+
+    # bought five days ago at 3s; listed at 4s 50c today
+    bought = invest(action="buy", item="silk cloth", quantity=200, price_each="3s", days_ago=5)
+    assert bought["recorded"] == {"trade": 1, "action": "buy", "item": "Silk Cloth", "quantity": 200, "each": "3s"}
+    silk = bought["investments"][0]
+    assert (silk["held"], silk["paid_each"], silk["invested"], silk["now_each"], silk["worth_now"]) == (200, "3s", "6g", "4s 50c", "9g")
+    assert (silk["unsold_gain"], silk["unsold_gain_percent"], silk["days_held"], silk["bags_hold"]) == ("+3g", "+50%", 5, 32)
+    assert silk["since_bought"] == {"lowest": "3s 80c", "highest": "4s 50c", "scan_days": 3}, "how the price has behaved since"
+    assert bought["totals"] == {"invested_in_what_is_held": "6g", "worth_now": "9g", "unsold_gain": "+3g", "made_on_sales": "0c", "made_in_all": "+3g"}
+    table = game.cards[-1]["table"]
+    assert table["rows"] == [["Silk Cloth", 200, "3s", "4s 50c", "+3g"]] and table["sub"] == "paid 6g · worth 9g · made +3g in all"
+
+    # more at a higher price, for the lot: the cost is averaged; then a sale against that average
+    invest(action="buy", item="Silk Cloth", quantity=100, total="5g")
+    assert invest()["investments"][0]["paid_each"] == "3s 67c", "200 at 3s and 100 at 5s"
+    sold = invest(action="sell", item="Silk Cloth", quantity=150, price_each="5s")
+    silk = sold["investments"][0]
+    assert (silk["held"], silk["invested"], silk["worth_now"], silk["unsold_gain"], silk["made_on_sales"]) == (150, "5g 50s", "6g 75s", "+1g 25s", "+2g")
+    assert sold["totals"]["made_in_all"] == "+3g 25s", "what the sale made and what the rest would"
+
+    # what must not slip through
+    assert "only 150" in invest(action="sell", item="Silk Cloth", quantity=151, price_each="5s")["error"]
+    assert "with its units" in invest(action="buy", item="Silk Cloth", quantity=10, price_each="350")["error"]
+    assert "not both" in invest(action="buy", item="Silk Cloth", quantity=10, price_each="3s", total="30s")["error"]
+    assert "less than a copper" in invest(action="buy", item="Silk Cloth", quantity=1000, total="5c")["error"]
+    assert "error" in invest(action="buy", item="Silk Cloth", quantity=0, price_each="3s") and "error" in invest(action="buy", quantity=5, price_each="3s")
+    assert invest(action="buy", item="silk", quantity=5, price_each="3s")["several_items_match"][0] == "Silk Cloth"
+    assert "no single item" in invest(action="buy", item="Dragon Scale", quantity=5, price_each="3s")["error"]
+    assert len(game.assets.trades("Test Realm-Alliance")) == 3, "none of those was recorded"
+
+    # no price given: today's listing, marked as assumed; an item with no listing needs the player's word
+    ore = invest(action="buy", item="Copper Ore", quantity=40)
+    assert ore["recorded"]["each"] == "80c" and "price_assumed" in ore["recorded"]
+    assert "ask the player" in invest(action="buy", item="Fine Thread", quantity=5)["error"]
+
+    # one investment in depth, with its chart: the price against what was paid
+    detail = invest(item="Silk Cloth", show=True)
+    assert [(t["action"], t["quantity"], t["each"], t["days_ago"]) for t in detail["trades"]] == [
+        ("buy", 200, "3s", 5), ("buy", 100, "5s", 0), ("sell", 150, "5s", 0)]
+    chart = game.cards[-1]["chart"]
+    assert (chart["title"], chart["line"], chart["usual"], chart["estimate"]) == ("Silk Cloth", "paid", 367, None)
+    assert [s[0] for s in chart["stats"]] == ["Paid", "Now", "Gain", "Unsold gain"] and len(chart["points"]) == 3
+
+    # a mistake undone; a whole record forgotten; and another realm is another book
+    assert "remove the sale first" in invest(action="remove", trade=1)["error"], "the 150 sold cannot rest on the 100 left"
+    invest(action="remove", trade=2)
+    assert invest()["investments"][0]["paid_each"] in ("3s", "–") and "error" in invest(action="remove", trade=999)
+    invest(action="remove", item="Copper Ore")
+    assert [i["item"] for i in invest()["investments"]] == ["Silk Cloth"]
+    elsewhere = Game(dict(game.snapshot, who={"name": "Other", "realm": "Other Realm"}))
+    elsewhere.assets = game.assets
+    assert run_tool(elsewhere, "investments", {})["investments"] == []
+    assert "not available" in run_tool(Game.load(wow), "investments", {})["error"]
+
+
 def test_gathering(wow: Path, tmp: Path):
     """GatherMate2's nodes: which zones have the most, a route through one, and the way in from an item."""
     game = Game.load(wow)
@@ -1121,6 +1194,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as v:
+            test_investments(wow, Path(v))
         with tempfile.TemporaryDirectory() as r:
             test_gold(wow, Path(r))
         with tempfile.TemporaryDirectory() as k:

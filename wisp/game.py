@@ -7,6 +7,7 @@ import statistics
 import time
 from pathlib import Path
 
+from .assets import parse_money
 from .crafting import Crafting, coins
 from .farming import Farming
 from .gathering import Gathering
@@ -82,6 +83,7 @@ class Game:
         self.cards: list[dict] = []        # action cards made during the current answer
         self.history = None                # the snapshot history, when the app has one
         self.market = None                 # the auction prices kept over time, when the app has them
+        self.assets = None                 # the player's investments, when the app has a place for them
         self.web_seen: dict[str, str] = {}  # url -> title of every web page this conversation was given
         self.notes_dir: Path | None = None  # where research reports are kept, when the app has a place
 
@@ -410,6 +412,148 @@ class Game:
                 "starts": "from where the character stands" if here else "at the first quest giver",
                 "note": "The player now sees the route. Do not repeat its stops: say in a sentence or two what it achieves or what "
                         "to watch for (an elite quest, a quest that is orange). Nothing has happened in the game yet."}
+
+    def _holdings(self) -> tuple[list[dict], dict]:
+        """Every investment still held or once held, valued at today's listings, and the totals."""
+        from .market import market_key, summarise
+        rows, today = [], int(time.time()) // 86400
+        for p in self.assets.positions(market_key(self.snapshot)).values():
+            now = self.crafting.prices.get(p["item"], (None,))[0]
+            entry = {"item": p["name"], "held": p["held"], "paid_each": coins(p["average"]) if p["held"] else "–",
+                     "invested": coins(p["average"] * p["held"]), "bought": p["bought"], "sold": p["sold"],
+                     "days_held": max(0, today - p["since"]), "made_on_sales": self._signed(p["realised"]) if p["sold"] else "–",
+                     "_item": p["item"], "_invested": p["average"] * p["held"], "_realised": p["realised"], "_worth": None, "_average": p["average"]}
+            if now and p["held"]:
+                gain = (now - p["average"]) * p["held"]
+                entry.update(now_each=coins(now), worth_now=coins(now * p["held"]), unsold_gain=self._signed(gain),
+                             unsold_gain_percent=f"{(now - p['average']) / p['average']:+.0%}" if p["average"] else "–",
+                             _worth=now * p["held"], _gain=gain)
+            elif p["held"]:
+                entry["now_each"] = "no listing known"
+            past = self.market.series(self.snapshot, p["item"], max(2, today - p["since"] + 1)) if self.market and p["held"] else []
+            if len(past) >= 2:   # how the price has behaved since it was bought
+                lows = [low for _, low, _, _ in past]
+                entry["since_bought"] = {"lowest": coins(min(lows)), "highest": coins(max(lows)), "scan_days": len(past)}
+                slope = summarise(past, today)["slope"]
+                if slope is not None and p["average"]:
+                    weekly = slope * 7 / p["average"]
+                    entry["since_bought"]["direction"] = "steady" if abs(weekly) < 0.03 else f"{'rising' if weekly > 0 else 'falling'} about {abs(weekly):.0%} a week"
+            carried = self.crafting.bags.get(p["item"], 0)
+            if p["held"] and carried < p["held"]:
+                entry["bags_hold"] = carried   # the rest is in the bank, at auction, or already sold
+            rows.append(entry)
+        rows.sort(key=lambda r: (-(r["_worth"] or r["_invested"]), r["item"]))
+        invested = sum(r["_invested"] for r in rows)
+        worth = sum(r["_worth"] if r["_worth"] is not None else r["_invested"] for r in rows)
+        realised = sum(r["_realised"] for r in rows)
+        totals = {"invested_in_what_is_held": coins(invested), "worth_now": coins(worth), "unsold_gain": self._signed(worth - invested),
+                  "made_on_sales": self._signed(realised), "made_in_all": self._signed(worth - invested + realised)}
+        return rows, totals
+
+    @staticmethod
+    def _signed(copper) -> str:
+        return ("-" if copper < -0.5 else "+" if copper > 0.5 else "") + coins(abs(copper))
+
+    def tool_investments(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        if self.assets is None:
+            return {"error": "investments are not available in this run"}
+        from .market import market_key
+        action, market = args.get("action", "list"), market_key(self.snapshot)
+        if action not in ("list", "buy", "sell", "remove"):
+            return {"error": "action must be list, buy, sell or remove"}
+        caveat = ("Worth and gain are at the lowest listing from the player's own Auctionator scans: what the items are listed "
+                  "for, before the auction house's cut, not what they will sell for. made_on_sales uses the prices the player "
+                  "reported. Wisp only knows the trades it was told about.")
+        item = name = None
+        if action != "list" or isinstance(args.get("item"), str) and args["item"].strip():
+            asked = _clean(args.get("item"), 80) if isinstance(args.get("item"), str) else ""
+            if not asked and not (action == "remove" and isinstance(args.get("trade"), int)):
+                return {"error": "name the item"}
+            if asked:
+                held = {p["name"].lower(): p["item"] for p in self.assets.positions(market).values()}
+                found = [held[asked.lower()]] if asked.lower() in held else self.graph.find(asked)
+                if len(found) != 1:
+                    return {"error": f"no single item is named like '{asked}'" + (". Wisp knows the items the character carries, crafts or has a "
+                                     "price for; scan the auction house so it learns this one." if not found else ""),
+                            **({"several_items_match": [self.graph.names[i] for i in found]} if found else {})}
+                item, name = found[0], self.graph.names.get(found[0], asked)
+        if action in ("buy", "sell"):
+            qty = args.get("quantity")
+            if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= 1_000_000:
+                return {"error": "quantity must be a whole number from 1 to 1000000"}
+            each, total = args.get("price_each"), args.get("total")
+            if each is not None and total is not None:
+                return {"error": "give price_each or total, not both"}
+            assumed = each is None and total is None
+            if assumed:   # the player gave no price: today's lowest listing, and it is marked as assumed
+                price = self.crafting.prices.get(item, (None,))[0]
+                if not price:
+                    return {"error": f"there is no listing known for {name}: ask the player what they paid" if action == "buy"
+                                     else f"there is no listing known for {name}: ask the player what they sold it for"}
+            else:
+                money = parse_money(each if each is not None else total)
+                if money is None:
+                    return {"error": "the price must be money with its units, as the player gave it: '3s 50c', '1g 20s', '45c'"}
+                price = money if each is not None else round(money / qty)
+                if price < 1:
+                    return {"error": "that comes to less than a copper each"}
+            days_ago = args.get("days_ago", 0)
+            if not isinstance(days_ago, int) or isinstance(days_ago, bool) or not 0 <= days_ago <= 730:
+                return {"error": "days_ago must be a whole number from 0 to 730"}
+            position = self.assets.positions(market).get(item)
+            if action == "sell" and (position is None or position["held"] < qty):
+                return {"error": f"only {position['held'] if position else 0} {name} are recorded as held: record the purchase first, or sell fewer"}
+            trade = self.assets.add(market, item, name, action, qty, price, int(time.time()) // 86400 - days_ago, assumed,
+                                    _clean(args.get("note"), 200))
+        elif action == "remove":
+            by_number = isinstance(args.get("trade"), int) and not isinstance(args.get("trade"), bool)
+            if by_number:   # a purchase that a later sale rests on cannot go before the sale does
+                held = {}
+                for t in self.assets.trades(market):
+                    if t["id"] != args["trade"]:
+                        held[t["item"]] = held.get(t["item"], 0) + (t["qty"] if t["kind"] == "buy" else -t["qty"])
+                        if held[t["item"]] < 0:
+                            return {"error": "a later sale rests on that purchase: remove the sale first"}
+            removed = self.assets.remove(market, trade=args["trade"]) if by_number else self.assets.remove(market, item=item)
+            if not removed:
+                return {"error": "nothing recorded matches that"}
+        rows, totals = self._holdings()
+        if not rows:
+            return {"investments": [], "note": "Nothing is recorded as an investment yet. When the player says they bought something "
+                                               "to sell later, record it with action buy: the item, how many, and what they paid."}
+        out = {"totals": totals, "investments": [{k: v for k, v in r.items() if k[0] != "_"} for r in rows], "note": caveat}
+        if action in ("buy", "sell"):
+            out["recorded"] = {"trade": trade, "action": action, "item": name, "quantity": qty, "each": coins(price),
+                               **({"price_assumed": "the player gave no price: today's lowest listing was taken. Say so."} if assumed else {})}
+        chosen = next((r for r in rows if r["_item"] == item), None) if item else None
+        if chosen and action == "list":   # one investment in depth: its trades, and its price since it was bought
+            position = self.assets.positions(market)[item]
+            out = {"investment": {k: v for k, v in chosen.items() if k[0] != "_"}, "note": caveat,
+                   "trades": [{"trade": t["id"], "action": t["kind"], "quantity": t["qty"], "each": coins(t["each"]),
+                               "days_ago": int(time.time()) // 86400 - t["day"], **({"price_assumed": True} if t["assumed"] else {}),
+                               **({"note": t["note"]} if t["note"] else {})} for t in position["trades"]]}
+            past = self.market.series(self.snapshot, item, max(14, int(time.time()) // 86400 - position["since"] + 8)) if self.market else []
+            if args.get("show") is True and len(past) >= 2:
+                self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Investment", "chart": {
+                    "title": chosen["item"], "sub": f"{chosen['held']} held · bought {chosen['days_held']} days ago",
+                    "points": [list(row) for row in past[-180:]], "usual": round(position["average"]), "line": "paid", "estimate": None,
+                    "stats": [["Paid", chosen["paid_each"]], ["Now", chosen.get("now_each", "–")], ["Gain", chosen.get("unsold_gain_percent", "–")],
+                              ["Unsold gain", chosen.get("unsold_gain", "–")]],
+                    "notes": ["The line is the day's lowest listing from your own scans; the level marked is what you paid. Listed worth, before the auction house's cut."]}})
+                out["shown"] = "a chart card of its price against what was paid is now shown to the player"
+            return out
+        if args.get("show") is True or action in ("buy", "sell", "remove"):
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Investments", "table": {
+                "title": "Your investments",
+                "sub": f"paid {totals['invested_in_what_is_held']} · worth {totals['worth_now']} · made {totals['made_in_all']} in all",
+                "columns": ["Item", "Held", "Paid", "Now", "Gain"],
+                "rows": [[r["item"], r["held"], r["paid_each"], r.get("now_each", "–"),
+                          r.get("unsold_gain", r["made_on_sales"]) if r["held"] else "sold: " + r["made_on_sales"]] for r in rows[:20]],
+                "notes": ["At the lowest listing from your own scans, before the auction house's cut. \"Made in all\" adds what your sales brought."]}})
+            out["shown"] = "a table card of the investments is now shown to the player: do not repeat its rows"
+        return out
 
     def tool_gold(self, args: dict) -> dict:
         """What the character's own things would fetch: bags to sell, recipes to craft for profit."""
@@ -1106,6 +1250,32 @@ TOOLS = [
         },
     },
     {
+        "name": "investments",
+        "description": "The player's investments: things bought to sell later. list (the default) shows every "
+                       "position: how many are held, what was paid, what they are worth at today's listing, the "
+                       "gain, what sales have brought, and how the price has behaved since. With an item, that one "
+                       "in depth with its trades. buy and sell record a trade: the item, how many, and the price "
+                       "exactly as the player gave it, as price_each or as total for the lot; leave both out only "
+                       "if the player gave no price, and today's listing is taken and marked as assumed. remove "
+                       "deletes one trade by its number, or an item's whole record. Record a trade only when the "
+                       "player says they made it. Never work out gains yourself: this does.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "buy", "sell", "remove"]},
+                "item": {"type": "string"},
+                "quantity": {"type": "integer", "minimum": 1, "maximum": 1000000},
+                "price_each": {"type": "string", "description": "For one, with units, as the player said it: '3s 50c'."},
+                "total": {"type": "string", "description": "For the whole lot, with units: '6g'."},
+                "days_ago": {"type": "integer", "minimum": 0, "maximum": 730, "description": "When it happened. Default 0, today."},
+                "note": {"type": "string"},
+                "trade": {"type": "integer", "description": "For remove: the trade's number."},
+                "show": {"type": "boolean", "description": "true to also show the player a card: the table, or with an item its chart."},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "quest_done",
         "description": "Whether the player has completed given quests, by quest id.",
         "input_schema": {
@@ -1378,6 +1548,10 @@ level next, compare zones by their quests worth doing and their quest levels aga
 For earning gold at the auction house, start from the player's own things: gold shows what their bags would fetch \
 and which of their recipes turn a profit; market_scan and price_history show what is cheap or dear against its usual \
 price. Say plainly that a listing is not a sale.
+
+When the player says they bought something to sell later, or sold some of it, record it with investments, using the \
+quantity and the price exactly as they gave them; if a number is missing, ask rather than guess. For how their \
+investments are doing, call investments and show the card: every figure there is worked out in code.
 
 Never state a quest id, an NPC, a location or coordinates from memory. WoW Forever differs from every earlier version \
 of the game, so what you remember is unreliable. If the tools do not have something, say that plainly.

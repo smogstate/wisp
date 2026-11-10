@@ -19,6 +19,7 @@ and architecture decision lives there. Update the wiki when decisions change.
 - Three providers: Anthropic (its own SDK), Kimi and OpenRouter (the `openai` SDK on the shared OpenAI-shaped wire, `OpenAIChat`; OpenRouter reads limits, prices and abilities per model from its public catalogue). A chat object owns its history in its provider's format; a conversation never changes provider. Tests: `tests/test_anthropic.py`, `tests/test_openai.py`, each against a local stand-in API.
 - The model never handles coordinates: locations carry refs, and `waypoint` accepts only refs. Keep that when adding tools.
 - The model never adds up quantities or prices either: `wisp/crafting.py` does the sums (`craft_plan`), and `shopping_list` takes the same plan. Recipes are read by the addon while the profession window is open and kept in `WispData`.
+- `wisp/assets.py`: investments. Trades as the player reports them, money parsed in code from text with units (never a bare number), every figure derived in code.
 - `wisp/gathering.py`: GatherMate2's nodes, zone rankings and routes (built in code, one ref for `waypoint`).
 - `wisp/farming.py`: no addon has drop rates for ordinary loot (Questie's are quest items only), so the addon records the player's own looting (`WispData.loot`) and everything about farming is computed from that.
 - A daily spending limit (`App.spent_today`, `DAILY_CAP`, default $5) is checked before every question and between requests; anything new that spends the player's key must go through `App.ask` so it is counted.
