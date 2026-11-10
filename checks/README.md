@@ -8,9 +8,9 @@ It reads, and reports. Side effects, all undone at once: it creates one macro na
 
 ### Run it
 
-1. Copy the folder `WispCheck` into the `Interface\AddOns` folder of your Forever installation. Start the game (a new addon is only seen at startup) and enable it on the character screen.
+1. Copy the folder `WispCheck` into `World of Warcraft\_forever_\Interface\AddOns` (the Forever folder is reported to be `_forever_`). Start the game (a new addon is only seen at startup) and enable it on the character screen.
 2. Log in. Stand in an ordinary outdoor zone or a city, not in a dungeon.
-3. Open your profession window once and leave it open. Optionally talk to a vendor, a trainer and a flight master first.
+3. Have at least one quest in your log (the Questie check looks one up). Open your profession window once and leave it open. Optionally talk to a vendor, a trainer and a flight master first.
 4. Type `/wispcheck`. Wait for the line that starts with `done:`.
 5. Paste test. Open `paste-samples.txt`, copy sample 1, type `/wispcheck paste` in game, press Ctrl+V. Repeat with sample 2.
 6. Key test. Press Ctrl+V once with no chat box open. The paste box should appear; press Esc.
@@ -26,7 +26,7 @@ The report, the paste results, and up to 30 NPCs you talked to with their positi
 | Question | Check |
 |---|---|
 | Is this really client 1.60.1, interface 16001? | `client` |
-| Which of 72 interfaces exist? | `presence` |
+| Which of 75 interfaces exist? | `presence` |
 | JSON, base64, compression; a message made outside the game decodes inside it | `encoding` |
 | Quest lines for the zone you are in, and the quests in a line | `questLines` |
 | The game's own waypoint to a quest objective | `questLog` |
@@ -38,6 +38,8 @@ The report, the paste results, and up to 30 NPCs you talked to with their positi
 | Spellbook, bags, completed quests, reputations | `spellbook`, `bags`, `completedQuests`, `misc` |
 | Creating a macro from an addon; the slot counts | `macros` |
 | TomTom and Auctionator called from another addon | `tomtom`, `auctionator` |
+| Which addons you have installed and running | `addons` |
+| Can another addon read Questie's database: a quest, its chain link, the NPC that starts it and where it stands | `questie` |
 | Does a paste arrive in one piece, at 130 and at 7690 characters? | `paste` |
 | Can an addon take Ctrl+V as its key? | `bindingSet`, `bindingFired` |
 | Does talking to an NPC give its id and your position? | `seen` |

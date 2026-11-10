@@ -34,6 +34,16 @@ local function check(name, fn)
   end
 end
 
+-- the field names of a table, so the report shows a structure without guessing it
+local function keys(t)
+  local names = {}
+  for k in pairs(t) do
+    if type(k) == "string" then names[#names + 1] = k end
+  end
+  table.sort(names)
+  return table.concat(names, " ", 1, math.min(#names, 60))
+end
+
 local function playerMap()
   local map = C_Map.GetBestMapForUnit("player")
   local x, y
@@ -71,6 +81,7 @@ local WANTED = {
   "TomTom.AddWaypoint", "TomTom.RemoveWaypoint",
   "Auctionator.API.v1.CreateShoppingList", "Auctionator.API.v1.ConvertToSearchString",
   "Auctionator.API.v1.GetAuctionPriceByItemID",
+  "QuestieLoader.ImportModule", "C_AddOns.GetNumAddOns", "C_AddOns.GetAddOnInfo",
 }
 
 -------------------------------------------------------------- checks ----
@@ -297,6 +308,45 @@ local function runChecks()
       out.searchString = Auctionator.API.v1.ConvertToSearchString("WispCheck",
         { searchString = "Linen Cloth", isExact = true, quantity = 5 })
       out.createList = type(Auctionator.API.v1.CreateShoppingList)
+    end
+    return out
+  end)
+
+  check("addons", function()   -- which addons are installed and running
+    local loaded = {}
+    for i = 1, C_AddOns.GetNumAddOns() do
+      local name = C_AddOns.GetAddOnInfo(i)
+      if C_AddOns.IsAddOnLoaded(i) and not name:match("^Blizzard_") then loaded[#loaded + 1] = name end
+    end
+    return { installed = C_AddOns.GetNumAddOns(), loaded = table.concat(loaded, ", ") }
+  end)
+
+  check("questie", function()   -- can another addon read Questie's database?
+    local out = { loaded = C_AddOns.IsAddOnLoaded("Questie"), loader = type(QuestieLoader) }
+    if type(QuestieLoader) ~= "table" then return out end
+    local DB = QuestieLoader:ImportModule("QuestieDB")
+    out.getQuest, out.getNpc, out.dropRate = type(DB.GetQuest), type(DB.GetNPC), type(DB.GetItemDroprate)
+    local questId
+    for i = 1, C_QuestLog.GetNumQuestLogEntries() do
+      local q = C_QuestLog.GetInfo(i)
+      if q and not q.isHeader then questId = q.questID; break end
+    end
+    out.questId = questId
+    local quest = questId and DB.GetQuest(questId)
+    if not quest then return out end
+    out.questName, out.questFields = quest.name, keys(quest)
+    out.nextInChain, out.requiredLevel = quest.nextQuestInChain, quest.requiredLevel
+    local npcId = quest.Starts and quest.Starts.NPC and quest.Starts.NPC[1]
+    out.starterNpc = npcId
+    local npc = npcId and DB:GetNPC(npcId)
+    if npc then
+      out.npcName, out.npcFields = npc.name, keys(npc)
+      local zones = 0
+      for zone, points in pairs(npc.spawns or {}) do
+        zones = zones + 1
+        if not out.spawnZone and points[1] then out.spawnZone, out.spawnX, out.spawnY = zone, points[1][1], points[1][2] end
+      end
+      out.spawnZones = zones
     end
     return out
   end)
