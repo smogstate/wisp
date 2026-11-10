@@ -110,6 +110,22 @@ Limits: the route is as of the last logout and knows the next step of a quest on
 
 Not built, and the natural next steps: **experience per hour** and time to the next level (the addon would note each session), and **what really sold and for how much** (from the auction house's mail), which would turn "listed for" into "sold for".
 
+## Auction house mail: what really sold — built 2026-11-10
+
+Denis: "read buys and sells from auction house mail". Until now every gold figure in Wisp was a listing. The auction house's mail is the one place the game states what really happened.
+
+- **Every auction ends in a mail with an invoice**: bought or sold, the item, what it went for, the deposit, the house's cut, the quantity (`GetInboxInvoiceInfo`, as the game's own mail window reads it; verified in the Forever source). The addon notes each one whenever the mailbox is open and keeps the note after the mail is gone.
+- **Mails have no number of their own**, so one is told from another by what it says and by when it runs out (to the second, in practice). Several that say exactly the same and arrived together — five stacks bought in one go — are counted; if some are emptied before the next look, the count never goes down. "Your money is on its way" notices are not sales and are skipped.
+- **When it happened** is worked out from when the mail runs out: an auction mail lives thirty days.
+- **The other player's name never leaves the game's own file.** It is used only to tell mails apart.
+- **The overlay keeps the deals for good** in the same file as prices and investments; the addon drops a note sixty days after its auction.
+- **`auction_ledger`** ([Tools](Tools.md)): a summary (received, paid, the house's cut and its rate, the balance, the items that brought and cost the most), the sales, or the purchases, each with its mail's number. Real prices.
+- **Investments from the mailbox.** `investments` now lists purchases that are not tracked and sales of tracked items that are not recorded. The model offers them once; on a yes it records one with `from_mail`, and the item, the quantity and the price come from the mail itself. **A sale is recorded at what came in**, the price less the house's cut, so "made" is what was really made. No mail is recorded twice.
+
+Limits: a mail emptied before the mailbox was opened with Wisp's addon loaded is never seen. Auctions that ran out unsold leave no invoice, so lost deposits are not counted. A sale's item is known by name only, so it is matched to an item Wisp already knows.
+
+Not yet run in the game.
+
 ## Investments — built 2026-11-10
 
 Denis: "can we add an asset entity? I bought this item as an asset; I can see how it behaves, how much gold I made so far. Investments."
@@ -122,8 +138,6 @@ Denis: "can we add an asset entity? I bought this item as an asset; I can see ho
 - **Cards**: a table of every position after any change and on request; the chart for one.
 
 Limits: Wisp knows only the trades it is told about; it does not see purchases or sales in the game. Worth is the lowest listing before the auction house's cut, not a sale. An item has to be known to Wisp (carried, crafted, or seen at auction by Auctionator) before it can be recorded.
-
-The natural next step is to read purchases and sales from the auction house's mail, so that trades can be offered for recording, not typed.
 
 ## The item graph — built 2026-11-10
 

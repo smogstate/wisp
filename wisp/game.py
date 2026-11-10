@@ -454,6 +454,75 @@ class Game:
     def _signed(copper) -> str:
         return ("-" if copper < -0.5 else "+" if copper > 0.5 else "") + coins(abs(copper))
 
+    def _deal(self, d: dict) -> dict:
+        """One auction mail in figures. A sale brings its price less the house's cut; the deposit
+        is the player's own money coming back, so it is no part of what was made."""
+        item = d["item"] if d["item"] else next((i for i, n in self.graph.names.items() if n.lower() == d["name"].lower()), None)
+        qty = d["count"] * d["n"]
+        net = (d["bid"] - d["cut"]) * d["n"] if d["kind"] == "sell" else d["bid"] * d["n"]
+        return {"mail": d["id"], "kind": d["kind"], "item": self.graph.names.get(item, d["name"]) if item else d["name"], "_item": item,
+                "quantity": qty, "each": coins(d["bid"] / d["count"]), "_total": d["bid"] * d["n"], "_cut": d["cut"] * d["n"], "_net": net,
+                "_each_net": net / qty, "days_ago": max(0, (int(time.time()) - d["sent"]) // 86400), "_day": d["sent"] // 86400,
+                "_ref": f"{d['who']}#{d['id']}", "_auctions": d["n"], "tracked": d["trade"] is not None}
+
+    def tool_auction_ledger(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        if self.assets is None:
+            return {"error": "the ledger is not available in this run"}
+        from .market import market_key
+        view, days = args.get("view", "summary"), args.get("days", 30)
+        if view not in ("summary", "sales", "purchases"):
+            return {"error": "view must be summary, sales or purchases"}
+        if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 3650:
+            return {"error": "days must be a whole number from 1 to 3650"}
+        deals = [self._deal(d) for d in self.assets.deals(market_key(self.snapshot), int(time.time()) - days * 86400)]
+        if isinstance(args.get("item"), str) and args["item"].strip():
+            wanted = _clean(args["item"], 80).lower()
+            deals = [d for d in deals if wanted in d["item"].lower()]
+        note = ("What the auction house's mail said, noted by Wisp's addon whenever the mailbox was open: real purchases and real "
+                "sales, not listings. A sale's 'received' is its price less the house's cut. An auction whose mail was emptied "
+                "before the mailbox was opened with Wisp running is not here, and neither are auctions that ran out unsold.")
+        if not deals:
+            return {"deals": [], "note": "No auction mail has been noted in that period. " + note}
+        sold, bought = [d for d in deals if d["kind"] == "sell"], [d for d in deals if d["kind"] == "buy"]
+
+        def rows(some):
+            return [{"mail": d["mail"], "item": d["item"], "quantity": d["quantity"], "each": d["each"],
+                     **({"sold_for": coins(d["_total"]), "received": coins(d["_net"])} if d["kind"] == "sell" else {"paid": coins(d["_total"])}),
+                     "days_ago": d["days_ago"], **({"tracked_as_investment": True} if d["tracked"] else {})} for d in some[:40]]
+        if view == "summary":
+            def by_item(some, top=6):
+                items = {}
+                for d in some:
+                    entry = items.setdefault(d["item"], {"item": d["item"], "quantity": 0, "_money": 0})
+                    entry["quantity"] += d["quantity"]
+                    entry["_money"] += d["_net"]
+                ranked = sorted(items.values(), key=lambda e: -e["_money"])[:top]
+                return [{"item": e["item"], "quantity": e["quantity"], "total": coins(e["_money"]), "each_on_average": coins(e["_money"] / e["quantity"])}
+                        for e in ranked]
+            gross, cut, spent = sum(d["_total"] for d in sold), sum(d["_cut"] for d in sold), sum(d["_total"] for d in bought)
+            out = {"period_days": days,
+                   "sold": {"auctions": sum(d["_auctions"] for d in sold), "for": coins(gross), "auction_house_cut": coins(cut), "received": coins(gross - cut),
+                            **({"cut_rate": f"{cut / gross:.1%}"} if gross else {}), "most_money_from": by_item(sold)},
+                   "bought": {"auctions": sum(d["_auctions"] for d in bought), "paid": coins(spent), "most_money_on": by_item(bought)},
+                   "balance": self._signed(gross - cut - spent), "note": note}
+            table = {"title": "Auction house, in and out", "sub": f"last {days} days · received {coins(gross - cut)} · paid {coins(spent)} · balance {out['balance']}",
+                     "columns": ["Item", "Sold", "Received", "Each"],
+                     "rows": [[e["item"], e["quantity"], e["total"], e["each_on_average"]] for e in out["sold"]["most_money_from"]],
+                     "notes": ["Real sales from your auction mail, after the house's cut" + (f" ({cut / gross:.1%})" if gross else "") + "."]}
+        else:
+            some = sold if view == "sales" else bought
+            out = {"view": view, "period_days": days, "deals": rows(some), **({"left_out": len(some) - 40} if len(some) > 40 else {}), "note": note}
+            table = {"title": "What you sold" if view == "sales" else "What you bought", "sub": f"last {days} days, from your auction mail",
+                     "columns": ["Item", "Qty", "Each", "Received" if view == "sales" else "Paid", "Days ago"],
+                     "rows": [[d["item"], d["quantity"], d["each"], coins(d["_net"] if view == "sales" else d["_total"]), d["days_ago"]] for d in some[:20]],
+                     "notes": ["Received is the sale price less the auction house's cut." if view == "sales" else "What each auction really cost."]}
+        if args.get("show") is True and table["rows"]:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Auction house", "table": table})
+            out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
+        return out
+
     def tool_investments(self, args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
@@ -466,8 +535,20 @@ class Game:
         caveat = ("Worth and gain are at the lowest listing from the player's own Auctionator scans: what the items are listed "
                   "for, before the auction house's cut, not what they will sell for. made_on_sales uses the prices the player "
                   "reported. Wisp only knows the trades it was told about.")
-        item = name = None
-        if action != "list" or isinstance(args.get("item"), str) and args["item"].strip():
+        item = name = deal = None
+        if args.get("from_mail") is not None:   # the trade as the auction house's mail has it: nothing to type, nothing to get wrong
+            if action not in ("buy", "sell"):
+                return {"error": "from_mail goes with buy or sell"}
+            deal = next((d for d in map(self._deal, self.assets.deals(market)) if d["mail"] == args["from_mail"]), None)
+            if deal is None or deal["kind"] != action:
+                return {"error": "no auction mail with that number is a " + ("purchase" if action == "buy" else "sale")}
+            if deal["tracked"]:
+                return {"error": "that mail is already recorded as an investment trade"}
+            if not deal["_item"]:
+                return {"error": f"Wisp does not know the item '{deal['item']}' yet: it learns items the character carries or that "
+                                 "Auctionator has scanned"}
+            item, name = deal["_item"], deal["item"]
+        elif action != "list" or isinstance(args.get("item"), str) and args["item"].strip():
             asked = _clean(args.get("item"), 80) if isinstance(args.get("item"), str) else ""
             if not asked and not (action == "remove" and isinstance(args.get("trade"), int)):
                 return {"error": "name the item"}
@@ -479,7 +560,14 @@ class Game:
                                      "price for; scan the auction house so it learns this one." if not found else ""),
                             **({"several_items_match": [self.graph.names[i] for i in found]} if found else {})}
                 item, name = found[0], self.graph.names.get(found[0], asked)
-        if action in ("buy", "sell"):
+        if deal is not None:
+            qty, price, assumed = deal["quantity"], max(1, round(deal["_each_net"])), False
+            position = self.assets.positions(market).get(item)
+            if action == "sell" and (position is None or position["held"] < qty):
+                return {"error": f"only {position['held'] if position else 0} {name} are recorded as held: record the purchase first"}
+            trade = self.assets.add(market, item, name, action, qty, price, deal["_day"], False,
+                                    "from the auction house's mail" + (", after its cut" if action == "sell" else ""), mail=deal["_ref"])
+        elif action in ("buy", "sell"):
             qty = args.get("quantity")
             if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= 1_000_000:
                 return {"error": "quantity must be a whole number from 1 to 1000000"}
@@ -520,10 +608,22 @@ class Game:
             if not removed:
                 return {"error": "nothing recorded matches that"}
         rows, totals = self._holdings()
+        # what the mailbox knows that the record does not: purchases not tracked, and sales of things that are
+        recent = [d for d in map(self._deal, self.assets.deals(market, int(time.time()) - 30 * 86400)) if not d["tracked"]]
+        held = {r["_item"] for r in rows if r["held"]}
+        mailbox = {"purchases_not_tracked": [{"mail": d["mail"], "item": d["item"], "quantity": d["quantity"], "each": d["each"], "days_ago": d["days_ago"]}
+                                             for d in recent if d["kind"] == "buy" and d["_item"]][:8],
+                   "sales_of_tracked_items_not_recorded": [{"mail": d["mail"], "item": d["item"], "quantity": d["quantity"], "each": d["each"],
+                                                            "days_ago": d["days_ago"]} for d in recent if d["kind"] == "sell" and d["_item"] in held][:8]}
+        mailbox = {k: v for k, v in mailbox.items() if v}
+        offer = ("from_the_mailbox lists real trades the record does not have. Offer them to the player once, in a line each, and "
+                 "record one with from_mail only when they say yes: not every purchase is an investment.")
         if not rows:
-            return {"investments": [], "note": "Nothing is recorded as an investment yet. When the player says they bought something "
-                                               "to sell later, record it with action buy: the item, how many, and what they paid."}
-        out = {"totals": totals, "investments": [{k: v for k, v in r.items() if k[0] != "_"} for r in rows], "note": caveat}
+            return {"investments": [], **({"from_the_mailbox": mailbox, "what_to_do": offer} if mailbox else {}),
+                    "note": "Nothing is recorded as an investment yet. When the player says they bought something "
+                            "to sell later, record it with action buy: the item, how many, and what they paid."}
+        out = {"totals": totals, "investments": [{k: v for k, v in r.items() if k[0] != "_"} for r in rows], "note": caveat,
+               **({"from_the_mailbox": mailbox, "what_to_do": offer} if mailbox and action == "list" else {})}
         if action in ("buy", "sell"):
             out["recorded"] = {"trade": trade, "action": action, "item": name, "quantity": qty, "each": coins(price),
                                **({"price_assumed": "the player gave no price: today's lowest listing was taken. Say so."} if assumed else {})}
@@ -1270,8 +1370,25 @@ TOOLS = [
                 "days_ago": {"type": "integer", "minimum": 0, "maximum": 730, "description": "When it happened. Default 0, today."},
                 "note": {"type": "string"},
                 "trade": {"type": "integer", "description": "For remove: the trade's number."},
+                "from_mail": {"type": "integer", "description": "For buy or sell: the number of an auction mail. The item, the quantity "
+                                                                "and the price are then taken from the mail, and nothing else is needed."},
                 "show": {"type": "boolean", "description": "true to also show the player a card: the table, or with an item its chart."},
             },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "auction_ledger",
+        "description": "What the player really bought and sold at the auction house, from its mail: summary (money "
+                       "received and paid, the house's cut, the balance, the items that brought and cost the most), "
+                       "sales, or purchases, each with the mail's number. Real prices, not listings. Use it for 'what "
+                       "did I sell', 'how much did I make at the auction house', 'what did I pay for that'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"view": {"type": "string", "enum": ["summary", "sales", "purchases"]},
+                           "days": {"type": "integer", "minimum": 1, "maximum": 3650, "description": "How far back. Default 30."},
+                           "item": {"type": "string", "description": "Only deals in items whose name contains this."},
+                           "show": {"type": "boolean", "description": "true to also show the player the result as a table card."}},
             "additionalProperties": False,
         },
     },
@@ -1551,7 +1668,9 @@ price. Say plainly that a listing is not a sale.
 
 When the player says they bought something to sell later, or sold some of it, record it with investments, using the \
 quantity and the price exactly as they gave them; if a number is missing, ask rather than guess. For how their \
-investments are doing, call investments and show the card: every figure there is worked out in code.
+investments are doing, call investments and show the card: every figure there is worked out in code. What they really \
+bought and sold at the auction house is in auction_ledger, from the house's own mail; where investments lists such \
+mail that is not recorded, offer it once and record it with from_mail only on a yes.
 
 Never state a quest id, an NPC, a location or coordinates from memory. WoW Forever differs from every earlier version \
 of the game, so what you remember is unreliable. If the tools do not have something, say that plainly.

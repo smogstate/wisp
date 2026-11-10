@@ -451,6 +451,26 @@ local function goLooting(boot)
   boot.scripts.OnEvent(boot, "UNIT_SPELLCAST_SENT", "player", "Copper Vein", "cast-2", 2575)
   lootWindow(boot, 800, 0, { { 2770, { vein2, 3 } } })   -- after a long break: that break is not looting time
 end
+-- The mailbox. Auction mails carry an invoice; three of them say exactly the same (three stacks bought in one go).
+local function bought(name, id, count, paid, days) return { "buyer", name, "Bob", paid, paid, 0, 0, count, id = id, days = days } end
+local inbox = {
+  bought("Silk Cloth", 4306, 20, 6000, 29.9), bought("Silk Cloth", 4306, 20, 6000, 29.9), bought("Silk Cloth", 4306, 20, 6000, 29.9),
+  { "seller", "Bolt of Silk Cloth", "Ann", 10000, 10000, 150, 500, 5, days = 29.5 },
+  { "seller_temp_invoice", "Bolt of Silk Cloth", "Ann", 10000, 10000, 150, 500, 5, days = 29.9 },   -- "your money is on its way": not a sale yet
+  { nil, days = 12 },                                                                              -- a letter from a friend
+  bought("Strange Dust", 10940, 10, 2000, 28),
+}
+function GetInboxNumItems() return #inbox end
+function GetInboxInvoiceInfo(i) local m = inbox[i]; return m[1], m[2], m[3], m[4], m[5], m[6], m[7], 0, 0, 0, m[8] end
+function GetInboxHeaderInfo(i) return nil, nil, "x", "x", 0, 0, inbox[i].days end
+function GetInboxItem(i) local m = inbox[i]; return m[2], m.id, nil, m[8] end
+local function openMailbox(boot)
+  boot.scripts.OnEvent(boot, "MAIL_SHOW")
+  table.remove(inbox, 1)   -- one of the three stacks is taken: the mail goes, the note of it must not
+  clock = clock + 40
+  for _, m in ipairs(inbox) do m.days = m.days - 40 / 86400 end
+  boot.scripts.OnEvent(boot, "MAIL_INBOX_UPDATE")
+end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end
@@ -466,6 +486,7 @@ if mode == "snapshot" then
     runTimers()
   end
   if not flags:find("noloot") then goLooting(boot) end
+  if not flags:find("nomail") then openMailbox(boot) end
   if not flags:find("noprofession") then
     boot.scripts.OnEvent(boot, "TRADE_SKILL_SHOW")
     boot.scripts.OnEvent(boot, "TRADE_SKILL_LIST_UPDATE")   -- it comes again and again: said in chat once

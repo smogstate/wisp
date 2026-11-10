@@ -13,7 +13,7 @@ import json
 import re
 from pathlib import Path
 
-REFERENCE = ("dungeons", "recipes", "prices", "market")   # large; prices have their own store (market.py)
+REFERENCE = ("dungeons", "recipes", "prices", "market", "gather", "sources", "available", "auctionMail", "loot")   # large; prices have their own store (market.py)
 
 
 def character_key(snapshot: dict) -> str:

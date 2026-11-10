@@ -159,11 +159,11 @@ def main():
         assert sent["reasoning_effort"] == "low", "K3 thinks at 'max' unless told otherwise"
         assert sent["messages"][0]["role"] == "system" and sent["messages"][1] == {"role": "user", "content": "where do I hand in the wolf quest?"}
         assert [t["function"]["name"] for t in sent["tools"]] == ["character", "quests", "available_quests", "questing_route", "gold", "investments",
-            "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "price_history",
+            "auction_ledger", "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "price_history",
             "market_scan", "market_query", "item_links", "gathering", "farming",
             "craft_plan",
             "shopping_list", "notes", "waypoint"]
-        assert sent["tools"][6]["type"] == "function" and sent["tools"][6]["function"]["parameters"]["required"] == ["quest_ids"]
+        assert sent["tools"][7]["type"] == "function" and sent["tools"][7]["function"]["parameters"]["required"] == ["quest_ids"]
 
         history = REQUESTS[2]["body"]["messages"]
         assert [m["role"] for m in history] == ["system", "user", "assistant", "tool", "assistant", "tool"]

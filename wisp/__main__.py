@@ -110,6 +110,9 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                     f"{game.gathering.total} places of {len(game.gathering.nodes)} kinds",
                     "none yet: GatherMate2 notes each herb, vein and pool as you gather; log out after gathering",
                     optional=True)
+            mails = game.snapshot.get("auctionMail")
+            add("Auction mail noted by Wisp", bool(mails), f"{len(mails or [])} purchases and sales in the last two months",
+                "none yet: open a mailbox that holds auction mail, then log out", optional=True)
             looted = sum(s["looted"] for r in game.farming.records for s in r["sources"])
             add("Looting measured by Wisp", looted > 0, f"{looted} corpses and nodes over {len({r['day'] for r in game.farming.records})} days",
                 "none yet: it starts with the first thing you loot after this update", optional=True)
@@ -342,6 +345,12 @@ class App:
             game.history = self.history
             game.notes_dir = self.notes
             game.assets = self.assets
+            try:   # what the auction house's mail said, kept beyond the addon's sixty days
+                from .history import character_key
+                from .market import market_key
+                self.assets.ingest_mail(market_key(game.snapshot), character_key(game.snapshot), game.snapshot.get("auctionMail"))
+            except Exception:
+                pass
             try:
                 self.market.ingest(game.snapshot)
                 game.market = self.market

@@ -630,6 +630,91 @@ local function vendorPrices(ids)
   return out
 end
 
+------------------------------------------------------- auction house mail ----
+-- What was really bought and sold: every auction ends in a mail with an invoice (who paid what,
+-- the deposit, the house's cut). The addon notes each one when the mailbox is open, once, and
+-- keeps it after the mail itself is gone. Mails have no number of their own, so one is told from
+-- another by what it says and by when it runs out; several that say the same and arrived together
+-- (five stacks bought in one go) are counted.
+--   WispData.mail[character][what it says] = { { id, expires, n, kind, name, item, count, bid, buyout, deposit, cut }, ... }
+-- The other player's name is part of telling mails apart and stays in this file: it is never exported.
+
+local function scanMail()
+  if not (GetInboxNumItems and GetInboxInvoiceInfo and GetInboxHeaderInfo) then return end
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.mail = WispData.mail or {}
+  local mine = WispData.mail[myKey()] or {}
+  WispData.mail[myKey()] = mine
+  local now, present = time(), {}
+  for i = 1, GetInboxNumItems() do
+    local kind, name, other, bid, buyout, deposit, cut, _, _, _, count = GetInboxInvoiceInfo(i)
+    if (kind == "buyer" or kind == "seller") and type(name) == "string" and type(bid) == "number" and bid > 0 then
+      local _, _, _, _, _, _, daysLeft = GetInboxHeaderInfo(i)
+      local item
+      if kind == "buyer" and GetInboxItem then   -- what was bought is still attached, and says which item it is
+        local _, id, _, attached = GetInboxItem(i, 1)
+        item, count = id, count or attached
+      end
+      local mail = { kind = kind, name = name, item = item, count = tonumber(count) or 1, bid = bid, buyout = buyout or 0,
+                     deposit = deposit or 0, cut = cut or 0, expires = now + (tonumber(daysLeft) or 0) * 86400 }
+      local says = table.concat({ kind, name, tostring(other), bid, mail.buyout, mail.deposit, mail.cut, mail.count }, "|")
+      present[says] = present[says] or {}
+      table.insert(present[says], mail)
+    end
+  end
+  for says, mails in pairs(present) do
+    table.sort(mails, function(a, b) return a.expires < b.expires end)
+    local groups = {}   -- mails that say the same and run out within a minute and a half of each other
+    for _, mail in ipairs(mails) do
+      local last = groups[#groups]
+      if last and mail.expires - last.expires < 90 then
+        last.n = last.n + 1
+      else
+        mail.n = 1
+        groups[#groups + 1] = mail
+      end
+    end
+    local known = mine[says] or {}
+    mine[says] = known
+    for _, group in ipairs(groups) do
+      local seen
+      for _, record in ipairs(known) do
+        if math.abs(record.expires - group.expires) < 90 then seen = record end
+      end
+      if seen then   -- seen before: there may be fewer left by now, never more that were missed
+        if group.n > seen.n then seen.n = group.n end
+        seen.item = seen.item or group.item
+      else
+        WispData.mailSeq = (WispData.mailSeq or 0) + 1
+        group.id = WispData.mailSeq
+        known[#known + 1] = group
+      end
+    end
+  end
+end
+
+local MAIL_LIFE = 30 * 86400   -- an auction mail runs out thirty days after it was sent
+
+-- The notes for the snapshot, and the housekeeping: a note is dropped sixty days after its auction.
+local function auctionMail()
+  local mine = type(WispData) == "table" and type(WispData.mail) == "table" and WispData.mail[myKey()]
+  local out, now = {}, time()
+  for says, records in pairs(type(mine) == "table" and mine or {}) do
+    for i = #records, 1, -1 do
+      local r = records[i]
+      if r.expires + MAIL_LIFE < now then
+        table.remove(records, i)
+      else
+        out[#out + 1] = { id = r.id, kind = r.kind == "buyer" and "buy" or "sell", name = r.name, item = r.item, count = r.count,
+                          n = r.n, bid = r.bid, deposit = r.deposit, cut = r.cut, sent = math.floor(r.expires - MAIL_LIFE) }
+      end
+    end
+    if #records == 0 then mine[says] = nil end
+  end
+  table.sort(out, function(a, b) return a.id < b.id end)
+  return out
+end
+
 local function myMarket() return tostring(GetRealmName()) .. "-" .. tostring((UnitFactionGroup("player"))) end
 
 -- Auctionator's day-by-day record: for each day it scanned, each item's lowest and highest price
@@ -732,6 +817,8 @@ local function buildSnapshot()
   if not okM then record = nil end
   local okG, nodes = pcall(gathering)
   if not okG then nodes = nil end
+  local okT, deals = pcall(auctionMail)
+  if not okT then deals = {} end
   return {
     v = 1,
     takenAt = time(),
@@ -759,6 +846,7 @@ local function buildSnapshot()
     market = record,
     gather = nodes,
     loot = looted,
+    auctionMail = deals,
     vendor = vendor,
     quests = log,
     available = open,
@@ -906,6 +994,8 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("TRADE_SKILL_SHOW")
 frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
+frame:RegisterEvent("MAIL_SHOW")
+frame:RegisterEvent("MAIL_INBOX_UPDATE")
 frame:RegisterEvent("LOOT_OPENED")
 frame:RegisterEvent("LOOT_CLOSED")
 frame:RegisterEvent("UNIT_SPELLCAST_SENT")
@@ -919,6 +1009,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
     end
   elseif event == "AUCTION_HOUSE_CLOSED" then
     pcall(learnNames)   -- a scan has just shown the game these items
+  elseif event == "MAIL_SHOW" or event == "MAIL_INBOX_UPDATE" then
+    pcall(scanMail)
   elseif event == "LOOT_OPENED" then
     pcall(lootOpened)
   elseif event == "LOOT_CLOSED" then

@@ -25,6 +25,7 @@ The model calls them, Python runs them, the model reads the result and can call 
 | `questing_route` | **Built.** A zone as a route card: hand-ins, pick-ups worth doing, quests under way, ordered to walk, with a waypoint per stop | [Integrations](Integrations.md) |
 | `gold` | **Built.** What the character's own things would fetch: bags to sell, hold or vendor; recipes ranked by profit | [Integrations](Integrations.md) |
 | `investments` | **Built.** Things bought to sell later: record buys and sells as the player reports them; positions valued at today's listing, gain unsold and made on sales, the price since it was bought | [Integrations](Integrations.md) |
+| `auction_ledger` | **Built.** What was really bought and sold, from the auction house's mail: summary with the house's cut and the balance, sales, purchases | [Integrations](Integrations.md) |
 | `craft_plan` | **Built.** The arithmetic of a plan, in code: recipes × times → materials needed, made along the way, covered by the bags, left to buy, and the cost | [Integrations](Integrations.md) |
 | `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state. With a date, the snapshot from then | [Architecture](Architecture.md) |
 | `changes` | **Built.** What changed between two snapshots, computed in code: level, money, quests finished, picked up and dropped, profession skill, zone. For the last session, or looking back a number of days | [Architecture](Architecture.md) |

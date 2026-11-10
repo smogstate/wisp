@@ -37,6 +37,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **Investments.** Tell Wisp what you bought to sell later: *I bought 200 Silk Cloth at 3s each as an investment*. It keeps the position and shows what you paid, what it is listed for now, how the price has moved since, and what you have made, both on what you sold (*I sold 150 at 5s*) and on what you still hold. *How are my investments doing?* shows them all; asking about one shows its chart against what you paid.
 
+**What really sold.** Open your mailbox as usual; Wisp's addon notes every auction mail. Then *what did I sell this week?*, *how much did I make at the auction house?*, *what did I pay for that?* are answered from real sales and purchases, with the house's cut. Purchases that look like investments are offered for tracking, and a sale of something you track is recorded at what actually came in.
+
 **Quests around you.** *What quests are open here?*, *what elite quests can I do?*, *where should I quest next?* Wisp reads the list of quests Questie has open for your character, with levels and quest givers, and can put the givers on a waypoint card.
 
 **Professions.** Open your profession window once in the game (Wisp says in chat that it read the recipes), then log out. Now ask *what should I craft to level tailoring, and what do I need to buy?* Wisp counts the materials, takes off what is in your bags, prices the rest from your own **Auctionator** scans, and gives you a card that creates the shopping list in Auctionator. It knows the recipes your character has; the bank is not counted.

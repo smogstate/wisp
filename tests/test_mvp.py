@@ -638,6 +638,74 @@ def test_investments(wow: Path, tmp: Path):
     assert "not available" in run_tool(Game.load(wow), "investments", {})["error"]
 
 
+def test_auction_mail(wow: Path, tmp: Path):
+    """What was really bought and sold, from the auction house's mail, and investments recorded from it."""
+    from wisp.assets import Assets
+    app = App(wow, fake=True)
+    game = app.load_game()   # the app files the addon's notes as it reads the snapshot
+    notes = {m["name"]: m for m in game.snapshot["auctionMail"]}
+    assert set(notes) == {"Silk Cloth", "Bolt of Silk Cloth", "Strange Dust"}, "a letter and a 'money on its way' notice are not deals"
+    assert (notes["Silk Cloth"]["n"], notes["Silk Cloth"]["count"], notes["Silk Cloth"]["bid"]) == (3, 20, 6000), \
+        "three stacks bought in one go, still three after one mail was emptied"
+    assert "Bob" not in json.dumps(game.snapshot["auctionMail"]) and "Ann" not in json.dumps(game.snapshot["auctionMail"]), \
+        "the other player's name stays in the game's own file"
+
+    def ledger(**args):
+        out = run_tool(game, "auction_ledger", args)
+        out.pop("note", None)
+        return out
+    summary = ledger(show=True)
+    assert summary["sold"] == {"auctions": 1, "for": "1g", "auction_house_cut": "5s", "received": "95s", "cut_rate": "5.0%",
+                               "most_money_from": [{"item": "Bolt of Silk Cloth", "quantity": 5, "total": "95s", "each_on_average": "19s"}]}
+    assert (summary["bought"]["auctions"], summary["bought"]["paid"], summary["balance"]) == (4, "2g", "-1g 5s")
+    assert game.cards[-1]["table"]["sub"] == "last 30 days · received 95s · paid 2g · balance -1g 5s"
+    bought = ledger(view="purchases")["deals"]
+    assert [(d["item"], d["quantity"], d["each"], d["paid"]) for d in bought] == [("Silk Cloth", 60, "3s", "1g 80s"), ("Strange Dust", 10, "2s", "20s")]
+    assert ledger(view="sales")["deals"][0]["received"] == "95s" and ledger(view="sales", item="dust")["deals"] == []
+    assert ledger(days=1, view="purchases")["deals"][0]["item"] == "Silk Cloth" and len(ledger(days=1, view="purchases")["deals"]) == 1
+    assert "error" in ledger(view="x") and "error" in ledger(days=0)
+
+    # the mailbox offers what the record does not have; a trade is taken from a mail exactly as it was
+    def invest(**args):
+        out = run_tool(game, "investments", args)
+        out.pop("note", None)
+        return out
+    offered = invest()["from_the_mailbox"]["purchases_not_tracked"]
+    assert [(o["item"], o["quantity"], o["each"]) for o in offered] == [("Silk Cloth", 60, "3s"), ("Strange Dust", 10, "2s")]
+    silk_mail = offered[0]["mail"]
+    took = invest(action="buy", from_mail=silk_mail)
+    assert took["recorded"]["quantity"] == 60 and took["recorded"]["each"] == "3s" and took["investments"][0]["paid_each"] == "3s"
+    assert "already recorded" in invest(action="buy", from_mail=silk_mail)["error"] and "error" in invest(action="sell", from_mail=silk_mail)
+    assert "error" in invest(action="buy", from_mail=99999) and "error" in invest(action="list", from_mail=silk_mail)
+    assert ledger(view="purchases")["deals"][0]["tracked_as_investment"] is True
+    assert [o["item"] for o in invest()["from_the_mailbox"]["purchases_not_tracked"]] == ["Strange Dust"]
+
+    # a sale of something tracked: offered, and recorded at what really came in, after the house's cut
+    invest(action="buy", item="Bolt of Silk Cloth", quantity=10, price_each="15s")
+    sale = invest()["from_the_mailbox"]["sales_of_tracked_items_not_recorded"][0]
+    assert (sale["item"], sale["quantity"], sale["each"]) == ("Bolt of Silk Cloth", 5, "20s")
+    sold = invest(action="sell", from_mail=sale["mail"])
+    assert sold["recorded"]["each"] == "19s", "20s each, less the 5% the house kept"
+    bolt = next(i for i in sold["investments"] if i["item"] == "Bolt of Silk Cloth")
+    assert (bolt["held"], bolt["made_on_sales"]) == (5, "+20s") and "sales_of_tracked_items_not_recorded" not in invest().get("from_the_mailbox", {})
+
+    # a note seen again replaces itself; an older file gains the new column
+    assert app.assets.ingest_mail("Test Realm-Alliance", "Test Realm-Тестер", game.snapshot["auctionMail"]) == 3
+    assert len(app.assets.deals("Test Realm-Alliance")) == 3
+    import sqlite3
+    old = tmp / "old.sqlite"
+    db = sqlite3.connect(old)
+    db.execute("CREATE TABLE trade(id INTEGER PRIMARY KEY AUTOINCREMENT, market TEXT, item INTEGER, name TEXT, kind TEXT, "
+               "qty INTEGER, each INTEGER, day INTEGER, at INTEGER, assumed INTEGER, note TEXT)")
+    db.execute("INSERT INTO trade(market, item, name, kind, qty, each, day, at, assumed, note) VALUES ('m', 1, 'x', 'buy', 2, 3, 4, 5, 0, '')")
+    db.commit()
+    db.close()
+    assert Assets(old).positions("m")[1]["held"] == 2 and Assets(old).deals("m") == []
+    quiet = Game.load(make_wow_dir(tmp / "a", flags="nomail"))
+    quiet.assets = Assets(tmp / "quiet.sqlite")
+    assert run_tool(quiet, "auction_ledger", {})["deals"] == []
+
+
 def test_gathering(wow: Path, tmp: Path):
     """GatherMate2's nodes: which zones have the most, a route through one, and the way in from an item."""
     game = Game.load(wow)
@@ -1196,6 +1264,8 @@ if __name__ == "__main__":
         test_questing_route(wow)
         with tempfile.TemporaryDirectory() as v:
             test_investments(wow, Path(v))
+        with tempfile.TemporaryDirectory() as m:
+            test_auction_mail(wow, Path(m))
         with tempfile.TemporaryDirectory() as r:
             test_gold(wow, Path(r))
         with tempfile.TemporaryDirectory() as k:

@@ -11,7 +11,15 @@ and faction):
     trade(id, market, item, name, kind, qty, each, day, at, assumed, note)
 
 `each` is copper for one. `assumed` marks a price the player did not give, where
-the day's lowest listing was taken instead.
+the day's lowest listing was taken instead. `mail` names the auction mail a trade
+was recorded from, so that no mail is recorded twice.
+
+The same file keeps what the auction house's mail said was really bought and sold:
+
+    mail(who, id, market, kind, item, name, count, n, bid, deposit, cut, sent)
+
+One row per auction, or per `n` auctions that said exactly the same and arrived
+together. `bid` is what one of them went for, `cut` what the house kept of it.
 """
 import re
 import sqlite3
@@ -20,7 +28,9 @@ from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trade(id INTEGER PRIMARY KEY AUTOINCREMENT, market TEXT, item INTEGER, name TEXT, kind TEXT,
-                                 qty INTEGER, each INTEGER, day INTEGER, at INTEGER, assumed INTEGER, note TEXT);
+                                 qty INTEGER, each INTEGER, day INTEGER, at INTEGER, assumed INTEGER, note TEXT, mail TEXT);
+CREATE TABLE IF NOT EXISTS mail(who TEXT, id INTEGER, market TEXT, kind TEXT, item INTEGER, name TEXT, count INTEGER, n INTEGER,
+                                bid INTEGER, deposit INTEGER, cut INTEGER, sent INTEGER, PRIMARY KEY (who, id)) WITHOUT ROWID;
 """
 UNITS = {"g": 10000, "gold": 10000, "s": 100, "silver": 100, "c": 1, "copper": 1}
 
@@ -46,14 +56,17 @@ class Assets:
         self.file.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.file, timeout=10)
         db.executescript(SCHEMA)
+        if "mail" not in [row[1] for row in db.execute("PRAGMA table_info(trade)")]:   # a file from before trades knew their mail
+            db.execute("ALTER TABLE trade ADD COLUMN mail TEXT")
         return db
 
-    def add(self, market: str, item: int, name: str, kind: str, qty: int, each: int, day: int, assumed: bool, note: str) -> int:
+    def add(self, market: str, item: int, name: str, kind: str, qty: int, each: int, day: int, assumed: bool, note: str,
+            mail: str | None = None) -> int:
         db = self._open()
         try:
             with db:
-                return db.execute("INSERT INTO trade(market, item, name, kind, qty, each, day, at, assumed, note) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                                  (market, item, name, kind, qty, each, day, int(time.time()), int(assumed), note)).lastrowid
+                return db.execute("INSERT INTO trade(market, item, name, kind, qty, each, day, at, assumed, note, mail) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                                  (market, item, name, kind, qty, each, day, int(time.time()), int(assumed), note, mail)).lastrowid
         finally:
             db.close()
 
@@ -75,6 +88,41 @@ class Assets:
         finally:
             db.close()
         return [dict(zip(("id", "item", "name", "kind", "qty", "each", "day", "assumed", "note"), row)) for row in rows]
+
+    # -- what the auction house's mail said ------------------------------------
+
+    def ingest_mail(self, market: str, who: str, notes) -> int:
+        """File the addon's notes of auction mails. A note seen again replaces itself: its count can only have grown."""
+        rows = []
+        for m in notes if isinstance(notes, list) else []:
+            if not isinstance(m, dict) or m.get("kind") not in ("buy", "sell") or not isinstance(m.get("name"), str):
+                continue
+            number = {k: m.get(k) if isinstance(m.get(k), int) and not isinstance(m.get(k), bool) else None
+                      for k in ("id", "item", "count", "n", "bid", "deposit", "cut", "sent")}
+            if number["id"] is None or not number["bid"] or number["bid"] < 0 or not number["sent"]:
+                continue
+            rows.append((who, number["id"], market, m["kind"], number["item"], m["name"].strip()[:80], max(1, number["count"] or 1),
+                         max(1, number["n"] or 1), number["bid"], max(0, number["deposit"] or 0), max(0, number["cut"] or 0), number["sent"]))
+        if not rows:
+            return 0
+        db = self._open()
+        try:
+            with db:
+                return db.executemany("INSERT OR REPLACE INTO mail VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows).rowcount
+        finally:
+            db.close()
+
+    def deals(self, market: str, since: int = 0) -> list[dict]:
+        """Auctions bought and sold, newest first, each with the trade it was recorded as, if any."""
+        db = self._open()
+        try:
+            rows = db.execute("SELECT m.who, m.id, m.kind, m.item, m.name, m.count, m.n, m.bid, m.deposit, m.cut, m.sent, "
+                              "(SELECT t.id FROM trade t WHERE t.mail = m.who || '#' || m.id) FROM mail m "
+                              "WHERE m.market = ? AND m.sent >= ? ORDER BY m.sent DESC, m.id DESC", (market, since)).fetchall()
+        finally:
+            db.close()
+        keys = ("who", "id", "kind", "item", "name", "count", "n", "bid", "deposit", "cut", "sent", "trade")
+        return [dict(zip(keys, row)) for row in rows]
 
     def positions(self, market: str) -> dict[int, dict]:
         """Per item, from its trades in order: how many are held, what they cost on average, and
