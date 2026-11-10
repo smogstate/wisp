@@ -521,9 +521,9 @@ class Game:
                 if slope is not None and p["average"]:
                     weekly = slope * 7 / p["average"]
                     entry["since_bought"]["direction"] = "steady" if abs(weekly) < 0.03 else f"{'rising' if weekly > 0 else 'falling'} about {abs(weekly):.0%} a week"
-            carried = self.crafting.bags.get(p["item"], 0)
-            if p["held"] and carried < p["held"]:
-                entry["bags_hold"] = carried   # the rest is in the bank, at auction, or already sold
+            carried = self.crafting.bags.get(p["item"], 0) + self.crafting.bank.get(p["item"], 0)
+            if p["held"] and carried < p["held"]:   # the rest is at auction, already sold, or in a bank Wisp has not seen
+                entry["bags_and_bank_hold" if self.crafting.bank_seen else "bags_hold"] = carried
             rows.append(entry)
         rows.sort(key=lambda r: (-(r["_worth"] or r["_invested"]), r["item"]))
         invested = sum(r["_invested"] for r in rows)
@@ -809,7 +809,8 @@ class Game:
             return statistics.median(low for _, low, _, _ in past) if len(past) >= 3 else None
         if view == "bags":
             rows, bound, unpriced = [], 0, 0
-            for item, count in craft.bags.items():
+            stock = {item: craft.bags.get(item, 0) + craft.bank.get(item, 0) for item in {*craft.bags, *craft.bank}}
+            for item, count in stock.items():
                 price, vendor = craft.prices.get(item, (0,))[0], self.farming.vendor.get(item, 0)
                 if item in craft.bound:
                     bound += 1
@@ -828,15 +829,17 @@ class Game:
                     advice = f"{(price - level) / level:+.0%} against its usual price: hold if you can"
                 else:
                     advice = "at its usual price" if level else "no price history yet"
-                rows.append({"item": craft.name(item), "have": count, "each": coins(price) if price else "–",
+                rows.append({"item": craft.name(item), "have": count, **({"of_them_in_bank": craft.bank[item]} if craft.bank.get(item) else {}),
+                             "each": coins(price) if price else "–",
                              "worth": coins(max(price, vendor) * count), "vendor_pays": coins(vendor * count) if vendor else "–",
                              "advice": advice, "_worth": max(price, vendor) * count})
             rows.sort(key=lambda r: (-r["_worth"], r["item"]))
             total = sum(r["_worth"] for r in rows)
             out = {"view": "bags", "sellable_worth": coins(total), "items": [{k: v for k, v in r.items() if k[0] != "_"} for r in rows[:40]],
                    "left_out": {"bound_to_the_character": bound, "no_price_known": unpriced},
-                   "note": caveat + " Bank contents are not known."}
-            table = {"title": "What your bags would fetch", "sub": f"about {coins(total)} in all, at auction or from a vendor",
+                   "note": caveat + (" The bank is counted as it was when last opened." if craft.bank_seen
+                                     else " The bank is not known: it is counted once the player has opened it.")}
+            table = {"title": "What your bags and bank would fetch" if craft.bank else "What your bags would fetch", "sub": f"about {coins(total)} in all, at auction or from a vendor",
                      "columns": ["Item", "Have", "Each", "Worth"], "rows": [[r["item"], r["have"], r["each"], r["worth"]] for r in rows[:15]],
                      "notes": ["Lowest listings from your own scans, or what a vendor pays. Listed worth, not sales."]}
         else:

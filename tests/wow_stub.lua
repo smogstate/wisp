@@ -497,6 +497,12 @@ C_AuctionHouse = { GetOwnedAuctions = function() return {
   { auctionID = 3, itemKey = { itemID = 7048 }, status = 1, quantity = 1, buyoutAmount = 12000 },                             -- sold, money waiting
   { auctionID = 4, itemKey = { itemID = 2321 }, status = 0, quantity = 10, buyoutAmount = 50, timeLeftSeconds = 100 },        -- nothing known to compare with
 } end }
+-- The bank: one tab of the character's own (container 6) and one shared by the account (container 15).
+bagSlots[6] = { { itemID = 4306, stackCount = 20, itemName = "Silk Cloth" }, { itemID = 6260, stackCount = 15, itemName = "Blue Dye" },
+                { itemID = 6948, stackCount = 1, itemName = "Hearthstone", isBound = true } }
+bagSlots[15] = { { itemID = 4306, stackCount = 10, itemName = "Silk Cloth" }, { itemID = 2770, stackCount = 30, itemName = "Copper Ore" } }
+Enum.BankType = { Character = 0, Guild = 1, Account = 2 }
+C_Bank = { FetchPurchasedBankTabData = function(kind) return kind == 0 and { { ID = 6 } } or kind == 2 and { { ID = 15 } } or {} end }
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end
@@ -516,6 +522,12 @@ if mode == "snapshot" then
   if not flags:find("noloot") then goLooting(boot) end
   if not flags:find("nomail") then openMailbox(boot) end
   if not flags:find("noauctions") then boot.scripts.OnEvent(boot, "OWNED_AUCTIONS_UPDATED") end
+  if flags:find("bank") then   -- a visit to the bank, and the window shut again long before logout
+    boot.scripts.OnEvent(boot, "BANKFRAME_OPENED")
+    boot.scripts.OnEvent(boot, "BANKFRAME_CLOSED")
+    bagSlots[6] = {}
+    boot.scripts.OnEvent(boot, "PLAYERBANKSLOTS_CHANGED", 1)   -- with the window shut nothing can be read, and nothing is
+  end
   if not flags:find("noprofession") then
     boot.scripts.OnEvent(boot, "TRADE_SKILL_SHOW")
     boot.scripts.OnEvent(boot, "TRADE_SKILL_LIST_UPDATE")   -- it comes again and again: said in chat once

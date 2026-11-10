@@ -283,9 +283,10 @@ def test_crafting(wow: Path, tmp: Path):
         {"text": "20 × Bolt of Silk Cloth", "colour": "yellow", "each": "4 Silk Cloth", "warning": ""},
         {"text": "10 × Azure Silk Hood", "colour": "orange", "each": "2 Bolt of Silk Cloth, 2 Blue Dye, 1 Fine Thread", "warning": ""}]
     assert laid["materials"] == [
-        {"item": "Silk Cloth", "need": 80, "bags": 32, "buy": 48, "cost": "2g 16s", "unpriced": False},
-        {"item": "Blue Dye", "need": 20, "bags": 0, "buy": 20, "cost": "", "unpriced": True},
-        {"item": "Fine Thread", "need": 10, "bags": 3, "buy": 7, "cost": "", "unpriced": True}], "bolts the plan makes for itself are a step, not a material"
+        {"item": "Silk Cloth", "need": 80, "bags": 32, "bank": 0, "buy": 48, "cost": "2g 16s", "unpriced": False},
+        {"item": "Blue Dye", "need": 20, "bags": 0, "bank": 0, "buy": 20, "cost": "", "unpriced": True},
+        {"item": "Fine Thread", "need": 10, "bags": 3, "bank": 0, "buy": 7, "cost": "", "unpriced": True}], "bolts the plan makes for itself are a step, not a material"
+    assert "the bank is not known" in laid["notes"][0]
     assert laid["total"] == "To buy: about 2g 16s · 2 without an auction price" and "Only orange" in laid["notes"][0]
     assert "Do not repeat" in made["note"]
     pasted = stub("paste", card["wisp"])
@@ -761,6 +762,46 @@ def test_my_auctions(wow: Path, tmp: Path):
     assert run_tool(later, "my_auctions", {})["seen"].startswith("3.") and "hours before the last logout" in run_tool(later, "my_auctions", {})["seen"]
     unseen = Game.load(make_wow_dir(tmp, flags="noauctions"))
     assert "Auctions tab" in run_tool(unseen, "my_auctions", {})["error"]
+
+
+def test_bank(tmp: Path):
+    """The bank, read while its window was open: counted in plans, in what to sell, and for investments."""
+    game = Game.load(make_wow_dir(tmp, flags="bank"))
+    banked = game.snapshot["bank"]["items"]
+    assert [(i["name"], i["count"], i.get("shared"), i.get("bound")) for i in banked] == [
+        ("Silk Cloth", 20, None, None), ("Blue Dye", 15, None, None), ("Hearthstone", 1, None, True),
+        ("Silk Cloth", 10, True, None), ("Copper Ore", 30, True, None)], "the character's tab and the account's; nothing read once the window is shut"
+    assert game.crafting.bank == {4306: 30, 6260: 15, 6948: 1, 2770: 30}
+
+    # a plan takes from the bags first, then the bank, and buys only the rest
+    crafts = [{"recipe_id": 3839, "times": 20}, {"recipe_id": 8760, "times": 10}]
+    plan = run_tool(game, "craft_plan", {"crafts": crafts})
+    assert plan["materials"][0] == {"item": "Silk Cloth", "needed": 80, "made_in_this_plan": 0, "from_bags": 32, "from_bank": 30, "to_buy": 18,
+                                    "price_each": "4s 50c", "cost": "81s"}
+    assert plan["materials"][2] == {"item": "Blue Dye", "needed": 20, "made_in_this_plan": 0, "from_bags": 0, "from_bank": 15, "to_buy": 5}
+    made = run_tool(game, "shopping_list", {"name": "x", "crafts": crafts})
+    assert made["list"] == ["18 × Silk Cloth", "5 × Blue Dye", "7 × Fine Thread"]
+    laid = game.cards[-1]["plan"]
+    assert laid["materials"][0]["bank"] == 30 and "the bank as it was when you last opened it" in laid["notes"][0]
+    hood = run_tool(game, "recipes", {})["professions"][0]["recipes"][0]
+    assert hood["materials"][1] == {"item": "Blue Dye", "per_craft": 2, "in_bags": 0, "in_bank": 15, "price_each": None}
+
+    # what to sell counts both; a bound item stays out; an item only in the bank is there too
+    sell = run_tool(game, "gold", {"view": "bags", "show": True})
+    by_item = {i["item"]: i for i in sell["items"]}
+    assert (by_item["Silk Cloth"]["have"], by_item["Silk Cloth"]["of_them_in_bank"], by_item["Silk Cloth"]["worth"]) == (62, 30, "2g 79s")
+    assert by_item["Copper Ore"]["have"] == 34 and "Hearthstone" not in by_item and "Blue Dye" not in by_item, "dye: no price anywhere"
+    assert game.cards[-1]["table"]["title"] == "What your bags and bank would fetch"
+    assert run_tool(game, "item_links", {"item": "Silk Cloth"})["in_bank"] == 30
+
+    # an investment: what is held is looked for in bags and bank together
+    from wisp.assets import Assets
+    game.assets = Assets(tmp / "a.sqlite")
+    held = run_tool(game, "investments", {"action": "buy", "item": "Silk Cloth", "quantity": 100, "price_each": "3s"})["investments"][0]
+    assert held["bags_and_bank_hold"] == 62 and "bags_hold" not in held
+    assert "bags_and_bank_hold" not in run_tool(game, "investments", {"action": "buy", "item": "Copper Ore", "quantity": 30, "price_each": "50c"})["investments"][1]
+    plain = Game.load(make_wow_dir(tmp / "plain"))
+    assert plain.crafting.bank == {} and plain.crafting.bank_seen is None and plain.snapshot.get("bank") is None
 
 
 def test_gathering(wow: Path, tmp: Path):
@@ -1345,6 +1386,8 @@ if __name__ == "__main__":
             test_sessions(wow, Path(e))
     with tempfile.TemporaryDirectory() as d:
         test_this_pc(Path(d))
+    with tempfile.TemporaryDirectory() as bk:
+        test_bank(Path(bk))
     with tempfile.TemporaryDirectory() as u:
         test_update(Path(u))
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

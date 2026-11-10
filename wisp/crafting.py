@@ -32,7 +32,9 @@ class Crafting:
         self.has_auctionator = bool((snapshot.get("addons") or {}).get("auctionator"))
         self.names: dict[int, str] = {}                 # item id -> the game's name for it
         self.bags: dict[int, int] = {}                  # item id -> how many are carried
-        self.bound: set[int] = set()                    # carried items that are bound: not for sale
+        self.bound: set[int] = set()                    # carried or banked items that are bound: not for sale
+        self.bank: dict[int, int] = {}                  # item id -> how many are in the bank, as it was when last open
+        self.bank_seen = None                           # when that was
         self.prices: dict[int, tuple[int, int | None]] = {}   # item id -> (copper, days since seen)
         self.recipes: dict[int, dict] = {}              # recipe id -> recipe
         self.books: list[dict] = []                     # one per profession whose window was opened
@@ -43,6 +45,17 @@ class Crafting:
                 count = _int(line.get("count"), 1, 10**7)
             if count:
                 self.bags[item] = self.bags.get(item, 0) + count
+                self._name(item, line.get("name"))
+                if line.get("bound"):
+                    self.bound.add(item)
+        banked = snapshot.get("bank") if isinstance(snapshot.get("bank"), dict) else {}
+        if isinstance(banked.get("seenAt"), (int, float)):
+            self.bank_seen = banked["seenAt"]
+        for line in _list(banked.get("items")):
+            item = _int(line.get("id"), 1, 10**9) if isinstance(line, dict) else None
+            count = _int(line.get("count"), 1, 10**7) if item is not None else None
+            if count:
+                self.bank[item] = self.bank.get(item, 0) + count
                 self._name(item, line.get("name"))
                 if line.get("bound"):
                     self.bound.add(item)
@@ -128,6 +141,7 @@ class Crafting:
         for item, count in recipe["reagents"]:
             price, have = self._price(item), self.bags.get(item, 0)
             materials.append({"item": self.name(item), "per_craft": count, "in_bags": have,
+                              **({"in_bank": self.bank[item]} if self.bank.get(item) else {}),
                               "price_each": coins(price) if price else None})
             if price:
                 cost += price * count
@@ -188,8 +202,10 @@ class Crafting:
         for item, wanted in need.items():
             from_plan = min(made.get(item, 0), wanted)
             from_bags = min(self.bags.get(item, 0), wanted - from_plan)
-            to_buy = wanted - from_plan - from_bags
-            line = {"item": self.name(item), "needed": wanted, "made_in_this_plan": from_plan, "from_bags": from_bags, "to_buy": to_buy}
+            from_bank = min(self.bank.get(item, 0), wanted - from_plan - from_bags)
+            to_buy = wanted - from_plan - from_bags - from_bank
+            line = {"item": self.name(item), "needed": wanted, "made_in_this_plan": from_plan, "from_bags": from_bags,
+                    **({"from_bank": from_bank} if from_bank else {}), "to_buy": to_buy}
             if to_buy:
                 buy.append((item, to_buy))
                 price = self._price(item)
@@ -201,18 +217,20 @@ class Crafting:
                     unpriced.append(self.name(item))
             materials.append(line)
             if wanted > from_plan:   # what the plan makes for itself is a step, not something to gather
-                rows.append({"item": self.name(item), "need": wanted - from_plan, "bags": from_bags, "buy": to_buy,
+                rows.append({"item": self.name(item), "need": wanted - from_plan, "bags": from_bags, "bank": from_bank, "buy": to_buy,
                              "cost": line.get("cost", ""), "unpriced": bool(to_buy) and "cost" not in line})
         card = {"sub": " · ".join(f"{name}, skill {skill}" if skill is not None else name for name, skill in professions.items()),
                 "steps": shown, "materials": rows,
                 "total": ("Nothing to buy" if not buy else
                           (f"To buy: about {coins(total)}" if total else "To buy")
                           + (f" · {len(unpriced)} without an auction price" if unpriced else "")),
-                "notes": ["As of your last logout; the bank is not counted."
+                "notes": [("As of your last logout; the bank as it was when you last opened it."
+                           if self.bank_seen else "As of your last logout; the bank is not known: open it once and Wisp counts it.")
                           + (" Only orange gives a point on every craft: the rest may take more."
                              if any(step["colour"] != "orange" for step in shown) else "")]}
         out = {"steps": steps, "materials": materials, "to_buy_cost": coins(total), "_buy": buy, "_card": card,
-               "note": "Counted in code from the recipes and the bags as of the last logout; the bank is not counted. "
+               "note": "Counted in code from the recipes and the bags as of the last logout, and the bank as it was when last "
+                       "opened (not at all if it never was). "
                        "Only orange recipes give a skill point on every craft, so for yellow and green ones the number "
                        "of crafts needed is an estimate: say so."}
         if unpriced:

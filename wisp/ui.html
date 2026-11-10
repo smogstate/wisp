@@ -519,11 +519,13 @@ function planBlock(plan) {
   if (plan.materials.length) {
     block.append(make("h3", "", "Materials"));
     const table = make("table"), head = make("tr");
-    for (const name of ["Item", "Need", "In bags", "Buy", "Cost"]) head.append(make("th", "", name));
+    const banked = plan.materials.some(row => row.bank);   // a column for the bank only when it supplies something
+    for (const name of ["Item", "Need", "In bags", ...(banked ? ["Bank"] : []), "Buy", "Cost"]) head.append(make("th", "", name));
     table.append(head);
     for (const row of plan.materials) {
       const tr = make("tr");
       tr.append(make("td", "", row.item), make("td", "", row.need), make("td", row.bags ? "" : "none", row.bags || "–"),
+                ...(banked ? [make("td", row.bank ? "" : "none", row.bank || "–")] : []),
                 make("td", row.buy ? "buy" : "none", row.buy || "–"),
                 make("td", row.cost ? "" : "none", row.cost || (row.unpriced ? "no price" : "–")));
       table.append(tr);

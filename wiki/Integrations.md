@@ -121,6 +121,13 @@ For Denis's interest in leveling. Two things the route and the zone comparison l
 
 Limits: time is "time between gains", so a rate is a little generous and says nothing about travel. Quest experience is Questie's figure, not the game's; where Questie has none, the quest simply shows none. Not yet run in the game.
 
+## The bank — built 2026-11-10
+
+- **Read while its window is open, and kept**, since the bank is shut at logout. Forever's bank is the modern one: tabs, each a container, for the character and for the whole account (`C_Bank.FetchPurchasedBankTabData`, then the ordinary container calls; read from the game's own bank window code). The addon reads them when the bank opens and whenever a slot changes while it is open; with the window shut it reads nothing, so an empty answer can never overwrite what was seen.
+- **Counted wherever stock matters**: a crafting plan takes from the bags, then the bank, and buys the rest (the plan card gains a Bank column when the bank supplies anything); recipe materials show what is banked; "what to sell" counts bags and bank together and says how many are banked; an investment's "do I still hold it" looks in both; item links show the banked count.
+- **As old as the last visit.** Every answer that uses it says the bank is as it was when last opened; before the first visit it says the bank is not known.
+- The account's shared tabs are counted as the character's stock; bound items are left out of what can be sold.
+
 ## Your own auctions — built 2026-11-10
 
 - **Read, never asked for.** Forever uses the modern auction house interface (`C_AuctionHouse`). When the player looks at the Auctions tab, the game fires `OWNED_AUCTIONS_UPDATED`, and the addon copies what `GetOwnedAuctions` then holds: item, quantity, the price for one, time left, whether it sold, whether it has a bid. Wisp sends the auction house no query of its own, so it cannot get in the way of the game's limit on queries or of Auctionator's scans. The bidder's name is not kept.

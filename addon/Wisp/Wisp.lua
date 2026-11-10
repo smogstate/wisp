@@ -701,6 +701,53 @@ local function xpRecord()
   return { rested = GetXPExhaustion and GetXPExhaustion() or nil, days = days }
 end
 
+------------------------------------------------------------------ the bank ----
+-- What is in the bank, read while its window is open and kept, since it is shut at logout.
+-- Forever's bank is a set of tabs, each a container: the character's own, and the account's,
+-- which every character of the account shares.
+--   WispData.bank[character] = { seenAt, items = { { id, name, count, bound, shared }, ... } }
+
+local bankOpen = false
+
+local function bankSeen()
+  local C, B = C_Container, C_Bank
+  if not (bankOpen and C and C.GetContainerNumSlots and C.GetContainerItemInfo and B and B.FetchPurchasedBankTabData) then return end
+  local kinds = Enum and Enum.BankType or {}
+  local seen, out = {}, {}
+  for _, bank in ipairs({ { kinds.Character or 0, false }, { kinds.Account or 2, true } }) do
+    local ok, tabs = pcall(B.FetchPurchasedBankTabData, bank[1])
+    for _, tab in ipairs(ok and type(tabs) == "table" and tabs or {}) do
+      for slot = 1, type(tab.ID) == "number" and C.GetContainerNumSlots(tab.ID) or 0 do
+        local item = C.GetContainerItemInfo(tab.ID, slot)
+        if item and item.itemID then
+          local key = item.itemID .. (bank[2] and "s" or "c")
+          local line = seen[key]
+          if not line then
+            line = { id = item.itemID, name = item.itemName or knownName(item.itemID), count = 0, shared = bank[2] or nil }
+            seen[key] = line
+            out[#out + 1] = line
+          end
+          line.count = line.count + (item.stackCount or 1)
+          if item.isBound then line.bound = true end
+        end
+      end
+    end
+  end
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.bank = WispData.bank or {}
+  WispData.bank[myKey()] = { seenAt = time(), items = out }
+end
+
+local function bankRecord(wanted)
+  local mine = type(WispData) == "table" and type(WispData.bank) == "table" and WispData.bank[myKey()]
+  if type(mine) ~= "table" or type(mine.items) ~= "table" then return nil end
+  for _, line in ipairs(mine.items) do
+    wanted[line.id] = true
+    line.name = knownName(line.id) or line.name
+  end
+  return mine
+end
+
 -------------------------------------------------------------- own auctions ----
 -- What the character has up for sale, as the auction house lists it whenever its Auctions tab
 -- is looked at. Wisp asks the auction house nothing itself: it only reads what is already shown.
@@ -909,6 +956,8 @@ local function buildSnapshot()
       for _, need in ipairs(quest.items or {}) do wanted[need.id] = true end
     end
   end
+  local okK, banked = pcall(bankRecord, wanted)
+  if not okK then banked = nil end
   local okO, listed = pcall(ownAuctions, wanted)
   if not okO then listed = nil end
   local okL, looted = pcall(lootRecord, wanted, DB)
@@ -949,6 +998,7 @@ local function buildSnapshot()
                dungeonjournal = journal ~= nil, auctionator = auctionator() ~= nil, gathermate = nodes ~= nil },
     dungeons = journal,
     bags = carried,
+    bank = banked,
     recipes = books,
     prices = market,
     market = record,
@@ -1106,6 +1156,10 @@ frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:RegisterEvent("PLAYER_XP_UPDATE")
 frame:RegisterEvent("QUEST_TURNED_IN")
+frame:RegisterEvent("BANKFRAME_OPENED")
+frame:RegisterEvent("BANKFRAME_CLOSED")
+frame:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
+frame:RegisterEvent("PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED")
 frame:RegisterEvent("OWNED_AUCTIONS_UPDATED")
 frame:RegisterEvent("MAIL_SHOW")
 frame:RegisterEvent("MAIL_INBOX_UPDATE")
@@ -1126,6 +1180,14 @@ frame:SetScript("OnEvent", function(_, event, ...)
     pcall(xpChanged)
   elseif event == "QUEST_TURNED_IN" then
     pcall(questHandedIn, ...)
+  elseif event == "BANKFRAME_OPENED" then
+    bankOpen = true
+    pcall(bankSeen)
+    C_Timer.After(1, function() pcall(bankSeen) end)   -- once more when the tabs have had a moment to fill
+  elseif event == "BANKFRAME_CLOSED" then
+    bankOpen = false
+  elseif event == "PLAYERBANKSLOTS_CHANGED" or event == "PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED" then
+    pcall(bankSeen)
   elseif event == "OWNED_AUCTIONS_UPDATED" then
     pcall(ownAuctionsSeen)
   elseif event == "MAIL_SHOW" or event == "MAIL_INBOX_UPDATE" then

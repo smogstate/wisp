@@ -101,6 +101,8 @@ class ItemGraph:
             out["auction_price"] = {"lowest": coins(craft.prices[item][0]), "seen": craft.seen(item)}
         if craft.bags.get(item):
             out["in_bags"] = craft.bags[item]
+        if craft.bank.get(item):
+            out["in_bank"] = craft.bank[item]
         if item in self.used_in:
             out["used_in_your_recipes"] = [
                 {"recipe_id": r["id"], "recipe": r["name"], "profession": r["profession"], "needs_each": count, "colour": r["colour"],
