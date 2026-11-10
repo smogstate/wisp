@@ -5,7 +5,7 @@ in one SQLite file on this PC:
     price(market, item, day, low, high, listed)   one row per item and day scanned
     item(id, name)
 
-`market` is realm and faction. `day` counts days since 1970. Everything said
+`market` is one for every character (Denis: "shared among all chars"). `day` counts days since 1970. Everything said
 about a price (its usual level, its direction, a forecast) is computed here
 from those rows, in code; the model only words it.
 """
@@ -30,10 +30,25 @@ CREATE TABLE IF NOT EXISTS depth(market TEXT, item INTEGER, day INTEGER, at INTE
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
+SHARED = "all"
+
+
 def market_key(snapshot: dict) -> str:
-    who = snapshot.get("who") if isinstance(snapshot.get("who"), dict) else {}
-    faction = (snapshot.get("character") or {}).get("faction") or "any"
-    return re.sub(r"[\x00-\x1f]", "", f"{who.get('realm') or 'realm'}-{faction}")[:80]
+    """Every character shares one market: prices scanned on any of them, investments, auction mail."""
+    return SHARED
+
+
+def share_markets(db: sqlite3.Connection):
+    """Fold what earlier versions kept per realm and faction into the one shared market. Where two
+    held the same item on the same day, the row already shared is kept."""
+    for table, keyed in (("price", True), ("handed", True), ("depth", True), ("trade", False), ("mail", False)):
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone():
+            continue
+        if not db.execute(f"SELECT 1 FROM {table} WHERE market != ? LIMIT 1", (SHARED,)).fetchone():
+            continue
+        with db:
+            db.execute(f"UPDATE {'OR IGNORE ' if keyed else ''}{table} SET market = ? WHERE market != ?", (SHARED, SHARED))
+            db.execute(f"DELETE FROM {table} WHERE market != ?", (SHARED,))
 
 
 def _whole(value, low: int, high: int) -> bool:
@@ -99,6 +114,7 @@ class Market:
         self.file.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.file, timeout=10)   # one connection per use: the app answers from several threads
         db.executescript(SCHEMA)
+        share_markets(db)
         return db
 
     def ingest(self, snapshot: dict) -> int:
@@ -217,7 +233,7 @@ class Market:
     def query(self, snapshot: dict, sql: str, limit: int = 200) -> dict:
         """Run one read-only SELECT the model wrote. The file is opened read-only,
         an authorizer refuses everything but reading, and a query that runs long
-        is stopped. `p` is this realm and faction's prices with names and dates."""
+        is stopped. `p` is the shared market's prices with names and dates."""
         self._open().close()   # make sure the file and its tables exist
         db = sqlite3.connect(f"file:{self.file.as_posix()}?mode=ro", uri=True, timeout=5)
         try:

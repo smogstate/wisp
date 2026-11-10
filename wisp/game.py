@@ -1858,7 +1858,7 @@ TOOLS = [
     {
         "name": "market_query",
         "description": "Ask the kept price history anything, with one read-only SQL SELECT (SQLite). One table, p, "
-                       "for the player's realm and faction: item (id), name, date ('2026-11-03'), days_ago (0 = the "
+                       "shared by all the player's characters: item (id), name, date ('2026-11-03'), days_ago (0 = the "
                        "last scan day known), low and high (the day's lowest and highest listing, in copper), listed "
                        "(how many were listed; may be null). One row per item and day scanned; days without a scan "
                        "have no row. coins(copper) writes money as '2g 16s'. Use it when market_scan and "

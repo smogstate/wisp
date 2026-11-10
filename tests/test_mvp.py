@@ -363,6 +363,7 @@ def test_crafting(wow: Path, tmp: Path):
         return {"takenAt": today * 86400 + 3600, "who": {"realm": "R"}, "character": {"faction": "Horde"},
                 "prices": [[1, 700, 0, "Steady Ore"], [2, 3450, 0, "Rising Gem"], [3, 900, 0, "Weekly Herb"], [4, 20, 0, "Junk"]],
                 "market": {"day0": 0, "today": today, "days": days}}
+    fixture_market, market = market, Market(tmp / "month.sqlite")   # made-up dates of their own: kept apart from the fixture's
     far = Game(month(20000))
     far.market = market
     assert market.ingest(far.snapshot) == 120
@@ -386,7 +387,7 @@ def test_crafting(wow: Path, tmp: Path):
     asked = run_tool(far, "market_query", {"sql": "SELECT name, coins(low) AS now, listed FROM p WHERE days_ago = 0 AND low >= 100 ORDER BY low DESC"})
     assert asked["columns"] == ["name", "now", "listed"] and asked["rows"] == [["Rising Gem", "34s 50c", 5], ["Weekly Herb", "9s", 300], ["Steady Ore", "7s", 50]]
     assert run_tool(far, "market_query", {"sql": "SELECT count(*), min(date), max(days_ago) FROM p"})["rows"] == [[120, "2024-09-05", 29]]
-    assert run_tool(far, "market_query", {"sql": "SELECT count(*) FROM price"})["rows"] == [[129]], "the raw table can be read too"
+    assert run_tool(far, "market_query", {"sql": "SELECT count(*) FROM price"})["rows"] == [[120]], "the raw table can be read too"
     for refused in ("DELETE FROM price", "UPDATE item SET name = 'x'", "DROP TABLE price", "ATTACH DATABASE 'x.db' AS x",
                     "PRAGMA journal_mode = DELETE", "INSERT INTO item VALUES (9, 'x')", "SELECT 1; DELETE FROM price", "not sql", ""):
         assert "error" in run_tool(far, "market_query", {"sql": refused}), refused
@@ -408,7 +409,8 @@ def test_crafting(wow: Path, tmp: Path):
     assert len(far.cards) == before + 2 and "wisp" not in far.cards[-1], "nothing to paste: these cards only show"
     for bad in ({"find": "x"}, {"find": "rising", "days": 1}, {"find": "rising", "limit": 0}, {"find": "rising", "among": "x"}):
         assert "error" in run_tool(far, "market_scan", bad), bad
-    assert market.size(game.snapshot)["rows"] == 9, "each realm and faction is its own market"
+    alt = dict(game.snapshot, who={"name": "Alt", "realm": "Elsewhere"}, character={"faction": "Horde"})
+    assert fixture_market.size(game.snapshot)["rows"] == fixture_market.size(alt)["rows"] == 9, "every character shares one market"
 
     # the addon checks a pasted list as strictly as a waypoint
     def paste(cmd, flags=""):
@@ -648,7 +650,7 @@ def test_investments(wow: Path, tmp: Path):
     assert "error" in invest(action="buy", item="Silk Cloth", quantity=0, price_each="3s") and "error" in invest(action="buy", quantity=5, price_each="3s")
     assert invest(action="buy", item="silk", quantity=5, price_each="3s")["several_items_match"][0] == "Silk Cloth"
     assert "no single item" in invest(action="buy", item="Dragon Scale", quantity=5, price_each="3s")["error"]
-    assert len(game.assets.trades("Test Realm-Alliance")) == 3, "none of those was recorded"
+    assert len(game.assets.trades("all")) == 3, "none of those was recorded"
 
     # no price given: today's listing, marked as assumed; an item with no listing needs the player's word
     ore = invest(action="buy", item="Copper Ore", quantity=40)
@@ -663,7 +665,7 @@ def test_investments(wow: Path, tmp: Path):
     assert (chart["title"], chart["line"], chart["usual"], chart["estimate"]) == ("Silk Cloth", "paid", 367, None)
     assert [s[0] for s in chart["stats"]] == ["Bought at", "Now", "Gain", "Unsold gain"] and len(chart["points"]) == 3
 
-    # a mistake undone; a whole record forgotten; and another realm is another book
+    # a mistake undone; a whole record forgotten; and every character shares the book
     assert "remove the sale first" in invest(action="remove", trade=1)["error"], "the 150 sold cannot rest on the 100 left"
     invest(action="remove", trade=2)
     assert invest()["investments"][0]["paid_each"] in ("3s", "–") and "error" in invest(action="remove", trade=999)
@@ -671,7 +673,7 @@ def test_investments(wow: Path, tmp: Path):
     assert [i["item"] for i in invest()["investments"]] == ["Silk Cloth"]
     elsewhere = Game(dict(game.snapshot, who={"name": "Other", "realm": "Other Realm"}))
     elsewhere.assets = game.assets
-    assert run_tool(elsewhere, "investments", {})["investments"] == []
+    assert [i["item"] for i in run_tool(elsewhere, "investments", {})["investments"]] == ["Silk Cloth"], "an alt on another realm sees it too"
     assert "not available" in run_tool(Game.load(wow), "investments", {})["error"]
 
 
@@ -727,8 +729,8 @@ def test_auction_mail(wow: Path, tmp: Path):
     assert (bolt["held"], bolt["made_on_sales"]) == (5, "+20s") and "sales_of_tracked_items_not_recorded" not in invest().get("from_the_mailbox", {})
 
     # a note seen again replaces itself; an older file gains the new column
-    assert app.assets.ingest_mail("Test Realm-Alliance", "Test Realm-Тестер", game.snapshot["auctionMail"]) == 3
-    assert len(app.assets.deals("Test Realm-Alliance")) == 3
+    assert app.assets.ingest_mail("all", "Test Realm-Тестер", game.snapshot["auctionMail"]) == 3
+    assert len(app.assets.deals("all")) == 3
     import sqlite3
     old = tmp / "old.sqlite"
     db = sqlite3.connect(old)
@@ -737,7 +739,7 @@ def test_auction_mail(wow: Path, tmp: Path):
     db.execute("INSERT INTO trade(market, item, name, kind, qty, each, day, at, assumed, note) VALUES ('m', 1, 'x', 'buy', 2, 3, 4, 5, 0, '')")
     db.commit()
     db.close()
-    assert Assets(old).positions("m")[1]["held"] == 2 and Assets(old).deals("m") == []
+    assert Assets(old).positions("all")[1]["held"] == 2 and Assets(old).deals("all") == [], "an old file: its trades join the shared market"
     quiet = Game.load(make_wow_dir(tmp / "a", flags="nomail"))
     quiet.assets = Assets(tmp / "quiet.sqlite")
     assert run_tool(quiet, "auction_ledger", {})["deals"] == []
@@ -1557,6 +1559,26 @@ def test_quest_search(tmp: Path):
     assert "about a minute after login" in run_tool(plain, "quest_search", {"name": "defias"})["error"]
 
 
+def test_shared_market(tmp: Path):
+    """Every character shares one market: what one scanned, another sees, whatever its realm or faction."""
+    import sqlite3
+    file = tmp / "market.sqlite"
+    old = sqlite3.connect(file)   # as earlier versions kept it: per realm and faction
+    old.executescript("CREATE TABLE price(market TEXT, item INTEGER, day INTEGER, low INTEGER, high INTEGER, listed INTEGER, PRIMARY KEY (market, item, day)) WITHOUT ROWID;"
+                      "CREATE TABLE trade(id INTEGER PRIMARY KEY AUTOINCREMENT, market TEXT, item INTEGER, name TEXT, kind TEXT, qty INTEGER, each INTEGER, day INTEGER, at INTEGER, assumed INTEGER, note TEXT, mail TEXT);")
+    old.executemany("INSERT INTO price VALUES (?, ?, ?, ?, ?, ?)", [("R-Alliance", 4306, 20000, 400, 450, 10), ("R-Horde", 4306, 20000, 380, 420, 5),
+                                                                    ("R-Horde", 4306, 20001, 390, 390, 7), ("Other-Alliance", 2589, 20001, 100, 120, 3)])
+    old.execute("INSERT INTO trade(market, item, name, kind, qty, each, day, at, assumed, note) VALUES ('R-Horde', 4306, 'Silk Cloth', 'buy', 5, 300, 20000, 0, 0, '')")
+    old.commit(); old.close()
+    market = Market(file)
+    alliance = {"who": {"name": "A", "realm": "R"}, "character": {"faction": "Alliance"}, "takenAt": 20001 * 86400}
+    horde = {"who": {"name": "H", "realm": "Other"}, "character": {"faction": "Horde"}, "takenAt": 20001 * 86400}
+    assert market.size(alliance) == market.size(horde) and market.size(horde)["rows"] == 3, "folded into one: a clash keeps one row"
+    assert [row[0] for row in market.series(horde, 4306, 30)] == [20000, 20001], "a Horde character on another realm sees the Alliance scans"
+    from wisp.assets import Assets
+    assert len(Assets(file).trades("all")) == 1, "investments are shared too"
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -1570,6 +1592,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as sm:
+            test_shared_market(Path(sm))
         with tempfile.TemporaryDirectory() as qs:
             test_quest_search(Path(qs))
         test_leveling(wow)

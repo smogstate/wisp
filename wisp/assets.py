@@ -5,8 +5,8 @@ buy and sell as a trade and works out the rest: what is still held, what it
 cost on average, what it is worth at today's listings, what has been made on
 what was sold and what would be made on the rest. All of it in code.
 
-Kept for good in Wisp's data file, beside the price history, per market (realm
-and faction):
+Kept for good in Wisp's data file, beside the price history, in the one market
+every character shares:
 
     trade(id, market, item, name, kind, qty, each, day, at, assumed, note)
 
@@ -62,6 +62,8 @@ class Assets:
         db.executescript(SCHEMA)
         if "mail" not in [row[1] for row in db.execute("PRAGMA table_info(trade)")]:   # a file from before trades knew their mail
             db.execute("ALTER TABLE trade ADD COLUMN mail TEXT")
+        from .market import share_markets
+        share_markets(db)
         return db
 
     def add(self, market: str, item: int, name: str, kind: str, qty: int, each: int, day: int, assumed: bool, note: str,
