@@ -200,7 +200,9 @@ C_QuestLog = {
 -- ends at Eagan (npc 196) and leads to quest 34, given by a wanted poster
 local quests = {
   [33] = { name = "Wolves Across the Border", level = 7, requiredLevel = 2, nextQuestInChain = 34,
-           Starts = { NPC = { 196 } }, Finisher = { NPC = { 196 } } },
+           Starts = { NPC = { 196 } }, Finisher = { NPC = { 196 } },
+           ObjectiveData = { { Type = "monster", Id = 118 }, { Type = "item", Id = 750, Text = "Tough Wolf Meat" } } },
+  [214] = { name = "Red Silk Bandanas", ObjectiveData = { { Type = "item", Id = 915, Text = "Red Silk Bandana" } } },
   [34] = { name = "An Unwelcome Guest", level = 9, requiredLevel = 5, nextQuestInChain = 0,
            Starts = { GameObject = { 55 } }, Finisher = { NPC = { 196 } } },
   [76] = { name = "The Jasperlode Mine", level = 10, requiredLevel = 7,
@@ -210,8 +212,28 @@ local npcs = {
   [196] = { name = "Eagan |cffff0000Peltskinner", spawns = { [12] = { { 48.94, 40.16 } } } },
   [240] = { name = "Marshal Dughan", spawns = { [12] = { { 42.1, 65.9 } }, [1519] = { { -1, -1 } } } },
 }
-local objects = { [55] = { name = "Wanted Poster", spawns = { [12] = { { 24.6, 74.7 } } } } }
+local objects = { [55] = { name = "Wanted Poster", spawns = { [12] = { { 24.6, 74.7 } } } },
+                  [77] = { name = "Silk Crate", spawns = { [12] = { { 51, 52 } } } } }
+npcs[1347] = { name = "Alexandra Bolero", spawns = { [1519] = { { 43.2, 73.9 } } } }
+npcs[118] = { name = "Prowler", spawns = { [12] = { { 30, 60 } } } }
+for id = 100, 106 do npcs[id] = { name = "Defias Weaver " .. id, spawns = { [12] = { { id - 60, 55 } } } } end
+-- where items come from: sold by a vendor, dropped by creatures, found in an object
+local function from(vendors, drops, things)
+  local sources = {}
+  for _, id in ipairs(vendors) do sources[#sources + 1] = { Id = id, Type = "monster", Vendor = true } end
+  for _, id in ipairs(drops) do sources[#sources + 1] = { Id = id, Type = "monster" } end
+  for _, id in ipairs(things) do sources[#sources + 1] = { Id = id, Type = "object" } end
+  return sources
+end
+local questieItems = {
+  [2321] = { name = "Fine Thread", Sources = from({ 1347 }, {}, {}) },
+  [6260] = { name = "Blue Dye", Sources = from({ 1347 }, {}, {}) },
+  [4306] = { name = "Silk Cloth", Sources = from({}, { 100, 101, 102, 103, 104, 105, 106 }, { 77 }) },
+  [750] = { name = "Tough Wolf Meat", Sources = from({}, { 118 }, {}) },
+  [6948] = { name = "Hearthstone", Sources = {} },
+}
 local QuestieDB = {
+  GetItem = function(_, id) return questieItems[id] end,
   GetQuest = function(id) return quests[id] end,
   GetNPC = function(_, id) return npcs[id] end,
   GetObject = function(_, id) return objects[id] end,

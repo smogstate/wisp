@@ -10,7 +10,7 @@ Each integration is one Lua file registered through [Protocol](Protocol.md). Com
 |---|---|---|---|---|
 | Built-in map | pin on the world map | — | nothing | no |
 | TomTom | waypoint | — | TomTom | **works in the game** (Denis, 2026-11-10) |
-| Questie | — | quests, chains, NPC positions | Questie | **works in the game** |
+| Questie | — | quests, chains, NPC positions; the items a quest asks for; who sells an item, what drops it, what holds it | Questie | quests **work in the game**; the item side is built and not yet run there |
 | DungeonJournal | — | dungeons, their quests and prerequisites, bosses, loot, entrances | DungeonJournal | export tested against its real data files; not yet run in the game |
 | Auctionator | create a shopping list **with quantities** | auction price and its age, per item | Auctionator | **built 2026-11-10**; API read in source (v343), tested against a stand-in of it; not yet run in the game |
 | The game's profession window | — | every recipe it lists: colour, the skill it turns grey at, what it makes, materials | nothing | built; the client's API read in Blizzard's source, not yet run in the game |
@@ -72,6 +72,31 @@ The one place Wisp looks past Auctionator's public API is its price table (`Auct
 - **Colours go stale.** They are as of the last time the window was open. Past the grey point Wisp corrects them itself; otherwise the tool says at which skill the colour was read.
 
 Not yet run in the game: the recipe calls (`GetRecipeInfo`, `GetRecipeSchematic`, and whether `GetAllRecipeIDs` exists there), the bag scan, and Auctionator's API from another addon.
+
+## The item graph — built 2026-11-10
+
+Denis: "build a graph of items, what is used for what, for the LLM to navigate; bind recipes, items, quests".
+
+An item is the hub; everything else hangs off it. One tool, `item_links`, takes an item name and returns everything one step away. The model walks on from there one item at a time, the way the kintale assistant walks the family tree.
+
+| Link | From | Covers |
+|---|---|---|
+| recipe uses item, recipe makes item | the profession window | the character's own recipes |
+| quest asks for item | Questie (`ObjectiveData` of type item) | quests in the log, and every dungeon quest of the DungeonJournal |
+| boss drops item | DungeonJournal loot | every dungeon |
+| vendor sells item, creature drops item, object holds item — each with places and refs | Questie (`GetItem(...).Sources`) | only items that matter to this character |
+| item has a price | Auctionator | every scanned item |
+
+- **Items that matter** are the ones carried, crafted with, crafted, or asked for by a quest, 500 at most. Asking Questie about every item in the game at logout would take too long. Of each kind of source the first few are listed (4 vendors, 5 creatures, 3 objects), with the total where Questie knows more.
+- **Vendors close the gap in crafting plans**: a material with no auction price can be looked up, and its seller goes straight onto a waypoint card.
+- **Built in memory** from the current snapshot (`wisp/graph.py`); nothing is kept between snapshots yet.
+
+Open:
+
+- **Sources are in Questie's order, not the best first.** Questie has drop rates (`GetItemDroprate`); they are not read yet, so "where do I farm this" names creatures that drop it, not the best spot.
+- **Farming for gold needs sources for items the character has nothing to do with.** That takes a background pass over every priced item while playing, and keeping the result in the SQLite file.
+- **How complete Questie's item data is for Forever is not known.** Its code has the fields; its repository lists Forever work still to do. To see in the game.
+- Quest rewards are not linked; recipes of other professions and unlearned recipes are not known.
 
 ## Auctionator — what its API offers
 

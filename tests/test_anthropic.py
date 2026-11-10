@@ -133,7 +133,7 @@ def main():
         assert first["fallbacks"] == "default" and first["output_config"] == {"effort": "medium"}
         assert "server-side-fallback-2026-07-01" in REQUESTS[0]["headers"].get("anthropic-beta", "")
         assert [t["name"] for t in first["tools"]] == ["character", "quests", "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "price_history",
-            "market_scan", "market_query", "craft_plan",
+            "market_scan", "market_query", "item_links", "craft_plan",
             "shopping_list", "waypoint"]
         assert all(t["eager_input_streaming"] is True for t in first["tools"])
         third = REQUESTS[2]["body"]["messages"]

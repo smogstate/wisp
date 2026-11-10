@@ -17,6 +17,7 @@ The model calls them, Python runs them, the model reads the result and can call 
 | `price_history` | **Built.** One item's price over every scan day kept: series, usual level, direction, weekday pattern, an estimate for next week with its confidence | [Integrations](Integrations.md) |
 | `market_scan` | **Built.** The whole kept market ranked in code: below or above usual, rising, falling, swinging, most listed; narrowed to bags, materials or crafts | [Integrations](Integrations.md) |
 | `market_query` | **Built.** One read-only SQL `SELECT` over the kept price history, for anything the fixed tools do not cover | [Integrations](Integrations.md) |
+| `item_links` | **Built.** Everything one step from an item: recipes that use and make it, quests that ask for it, bosses, creatures and objects that drop it, who sells it, its price | [Integrations](Integrations.md) |
 | `craft_plan` | **Built.** The arithmetic of a plan, in code: recipes × times → materials needed, made along the way, covered by the bags, left to buy, and the cost | [Integrations](Integrations.md) |
 | `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state. With a date, the snapshot from then | [Architecture](Architecture.md) |
 | `changes` | **Built.** What changed between two snapshots, computed in code: level, money, quests finished, picked up and dropped, profession skill, zone. For the last session, or looking back a number of days | [Architecture](Architecture.md) |

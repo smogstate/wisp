@@ -48,9 +48,9 @@ local function places(record, ZoneDB)
   return out
 end
 
-local function people(into, kind, ids, DB, ZoneDB)
+local function people(into, kind, ids, DB, ZoneDB, cap)
   for _, id in ipairs(ids or {}) do
-    if #into >= 3 then return end
+    if #into >= (cap or 3) then return end
     local ok, record = pcall(kind == "npc" and DB.GetNPC or DB.GetObject, DB, id)
     if ok and record then
       into[#into + 1] = { kind = kind, id = id, name = record.name, places = places(record, ZoneDB) }
@@ -67,6 +67,12 @@ local function fromQuestie(questId, DB, ZoneDB, follow)
   people(out.starts, "object", q.Starts and q.Starts.GameObject, DB, ZoneDB)
   people(out.ends, "npc", q.Finisher and q.Finisher.NPC, DB, ZoneDB)
   people(out.ends, "object", q.Finisher and q.Finisher.GameObject, DB, ZoneDB)
+  for _, objective in ipairs(type(q.ObjectiveData) == "table" and q.ObjectiveData or {}) do   -- the items it asks for
+    if type(objective) == "table" and objective.Type == "item" and type(objective.Id) == "number" then
+      out.needs = out.needs or {}
+      out.needs[#out.needs + 1] = { id = objective.Id, name = objective.Text }
+    end
+  end
   local nextId = q.nextQuestInChain
   if follow and type(nextId) == "number" and nextId > 0 then
     local nextQuest = fromQuestie(nextId, DB, ZoneDB, false)
@@ -95,7 +101,7 @@ local function questLog(DB, ZoneDB)
         local okQ, known = pcall(fromQuestie, info.questID, DB, ZoneDB, true)
         if okQ and known then
           quest.starts, quest.ends, quest.next = known.starts, known.ends, known.next
-          quest.requiredLevel = known.requiredLevel
+          quest.requiredLevel, quest.needs = known.requiredLevel, known.needs
         end
       end
       quests[#quests + 1] = quest
@@ -121,7 +127,7 @@ local function questState(id)
   return nil
 end
 
-local function dungeons()
+local function dungeons(DB)
   local J = _G.ForeverDungeonJournal_NS
   if type(J) ~= "table" or type(J.DB) ~= "table" then return nil end
   local faction = UnitFactionGroup("player")
@@ -145,6 +151,15 @@ local function dungeons()
                           objective = q.objective, pickup = q.pickup, turnin = q.turnin,
                           rewards = q.rewards or q.rewardSummary, state = questState(q.id),
                           start = journalPlace(q.startMap or starts[q.id]), needs = {} }
+          if DB then   -- the items it asks for, where Questie knows the quest
+            local okQ, known = pcall(DB.GetQuest, q.id)
+            for _, objective in ipairs(okQ and type(known) == "table" and type(known.ObjectiveData) == "table" and known.ObjectiveData or {}) do
+              if type(objective) == "table" and objective.Type == "item" and type(objective.Id) == "number" then
+                quest.items = quest.items or {}
+                quest.items[#quest.items + 1] = { id = objective.Id, name = objective.Text }
+              end
+            end
+          end
           for _, step in ipairs(chains[q.id] or {}) do
             if type(step) == "table" and type(step.id) == "number" then
               local detail = details[step.id] or {}
@@ -367,6 +382,40 @@ local function prices(wanted)
   return out
 end
 
+-- Where items come from, as Questie has it: who sells one, what drops it, what it is found in.
+-- Only for the items given (what is carried, crafted with, crafted, or asked for by a quest):
+-- asking Questie about every item in the game at logout would take too long.
+-- ponytail: the first few sources as Questie lists them, not the best ones; drop rates, and a
+-- background pass over every priced item, when "where do I farm this" needs them
+local function itemSources(ids, DB, ZoneDB)
+  local out, done = {}, 0
+  if not (DB and ZoneDB and type(DB.GetItem) == "function") then return out end
+  local order = {}
+  for id in pairs(ids) do order[#order + 1] = id end
+  table.sort(order)
+  for _, id in ipairs(order) do
+    if done >= 500 then break end
+    local ok, item = pcall(DB.GetItem, DB, id)
+    if ok and type(item) == "table" and type(item.Sources) == "table" and #item.Sources > 0 then
+      done = done + 1
+      local vendorIds, dropIds, objectIds = {}, {}, {}
+      for _, source in ipairs(item.Sources) do
+        if type(source) == "table" and type(source.Id) == "number" then
+          local list = source.Type == "object" and objectIds or source.Vendor and vendorIds or dropIds
+          list[#list + 1] = source.Id
+        end
+      end
+      local entry = { id = id, name = item.name or knownName(id), vendors = {}, drops = {}, objects = {},
+                      dropCount = #dropIds, objectCount = #objectIds }
+      people(entry.vendors, "npc", vendorIds, DB, ZoneDB, 4)
+      people(entry.drops, "npc", dropIds, DB, ZoneDB, 5)
+      people(entry.objects, "object", objectIds, DB, ZoneDB, 3)
+      out[#out + 1] = entry
+    end
+  end
+  return out
+end
+
 local function myMarket() return tostring(GetRealmName()) .. "-" .. tostring((UnitFactionGroup("player"))) end
 
 -- Auctionator's day-by-day record: for each day it scanned, each item's lowest and highest price
@@ -436,7 +485,7 @@ local function buildSnapshot()
   local DB, ZoneDB = questieModule("QuestieDB"), questieModule("ZoneDB")
   if DB and type(DB.GetQuest) ~= "function" then DB = nil end   -- Questie still starting up
   local _, classFile = UnitClass("player")
-  local okD, journal = pcall(dungeons)   -- one addon's surprise must not cost the whole snapshot
+  local okD, journal = pcall(dungeons, DB)   -- one addon's surprise must not cost the whole snapshot
   if not okD then journal = nil end
   local okP, skills = pcall(professions)
   if not okP then skills = {} end
@@ -446,6 +495,17 @@ local function buildSnapshot()
   for _, line in ipairs(carried) do wanted[line.id] = true end
   local okC, books = pcall(crafting, wanted)
   if not okC then books = {} end
+  local log = questLog(DB, ZoneDB)
+  for _, quest in ipairs(log) do
+    for _, need in ipairs(quest.needs or {}) do wanted[need.id] = true end
+  end
+  for _, dungeon in ipairs(journal or {}) do
+    for _, quest in ipairs(dungeon.quests) do
+      for _, need in ipairs(quest.items or {}) do wanted[need.id] = true end
+    end
+  end
+  local okS, sources = pcall(itemSources, wanted, DB, ZoneDB)   -- before every priced item joins the list
+  if not okS then sources = {} end
   local okA, market = pcall(prices, wanted)
   if not okA then market = nil end
   local okM, record = pcall(marketDays)
@@ -472,7 +532,8 @@ local function buildSnapshot()
     recipes = books,
     prices = market,
     market = record,
-    quests = questLog(DB, ZoneDB),
+    quests = log,
+    sources = sources,
     completed = C_QuestLog.GetAllCompletedQuestIDs(),
   }
 end

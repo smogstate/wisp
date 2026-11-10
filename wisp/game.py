@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .crafting import Crafting, coins
+from .graph import ItemGraph
 from .history import diff
 
 SNAPSHOT_VERSION = 1
@@ -71,6 +72,7 @@ class Game:
         self.dungeons = [self._dungeon(i, d) for i, d in enumerate(_as_list(self.snapshot.get("dungeons")))
                          if isinstance(d, dict)]
         self.crafting = Crafting(self.snapshot)
+        self.graph = ItemGraph(self)       # how items tie recipes, quests, bosses, vendors and drops together
         self.cards: list[dict] = []        # action cards made during the current answer
         self.history = None                # the snapshot history, when the app has one
         self.market = None                 # the auction prices kept over time, when the app has them
@@ -466,6 +468,31 @@ class Game:
                         "sale, and thinly traded items can show big moves that mean nothing. For one item in depth, call "
                         "price_history." + ("" if found else " Nothing stood out; with only a few scan days that is normal.")}
 
+    def tool_item_links(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        name = args.get("item")
+        if not isinstance(name, str) or not name.strip():
+            return {"error": "item must be an item name"}
+        found = self.graph.find(_clean(name, 80))
+        if not found:
+            return {"error": f"Wisp knows no item named like '{_clean(name, 80)}'. It knows the items the character carries, "
+                             "crafts with, crafts, is asked for by quests, sees drop from dungeon bosses, or has a price for. "
+                             "Names are as the player's game writes them."}
+        if len(found) > 1:
+            return {"several_items_match": [self.graph.names[i] for i in found], "note": "Ask again with one of these names exactly."}
+        out = self.graph.around(found[0], self.crafting)
+        if len(out) == 1:
+            out["nothing_known"] = "Wisp has the name but no links for this item."
+        addons = self.snapshot.get("addons") or {}
+        out["note"] = ("One step in every direction from this item. Follow a link with the tool for that kind of thing: "
+                       "recipes and craft_plan for a recipe, quests or dungeon for a quest or a boss, price_history for the "
+                       "price, item_links again for another item. Every place has a ref for the waypoint tool. Recipes are "
+                       "only the character's own; sellers, drops and quest needs come from the Questie addon and are listed "
+                       "only for items that matter to this character, the first few of each"
+                       + ("." if addons.get("questie") else "; Questie was not available at the last logout, so those are missing."))
+        return out
+
     def tool_craft_plan(self, args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
@@ -686,6 +713,19 @@ TOOLS = [
         },
     },
     {
+        "name": "item_links",
+        "description": "Everything one step from an item, to follow how things connect: its auction price and the "
+                       "count in the bags, the character's recipes that use it and those that make it, the quests "
+                       "that ask for it (in the log or for a dungeon), the dungeon bosses that drop it, who sells "
+                       "it, what creatures drop it and what objects hold it, each with places that have refs. Use "
+                       "it for 'what is this for', 'where do I get this', 'is it worth keeping', and walk on from "
+                       "its answer one item at a time. Never state a use or a source of an item from memory.",
+        "input_schema": {
+            "type": "object", "properties": {"item": {"type": "string"}},
+            "required": ["item"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "craft_plan",
         "description": "The arithmetic of a crafting plan, done in code: for each recipe and how many times to craft "
                        "it, the total materials, what the plan's own crafts supply (a bolt made in one step and used "
@@ -763,6 +803,12 @@ where a price is heading, look there first; say how many scan days an answer res
 future price as a range with its confidence, never as a certainty. When your answer rests on a price_history or \
 market_scan result, call it with show set to true for the one result you are answering with: the player then sees a \
 chart or a table, and your text adds only what it means for them, in a sentence or two.
+
+How things connect goes through items: item_links gives, for one item, the recipes that use and make it, the quests \
+that ask for it, the bosses, creatures and objects that drop it, who sells it, and its price. For a question that \
+spans several of these, follow the links one item at a time rather than guessing the chain. When a crafting plan has \
+materials with no auction price, look them up there: a vendor may sell them, and the plan's card can be followed by a \
+waypoint to that vendor.
 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
 into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.

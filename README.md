@@ -29,6 +29,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **Professions.** Open your profession window once in the game (Wisp says in chat that it read the recipes), then log out. Now ask *what should I craft to level tailoring, and what do I need to buy?* Wisp counts the materials, takes off what is in your bags, prices the rest from your own **Auctionator** scans, and gives you a card that creates the shopping list in Auctionator. It knows the recipes your character has; the bank is not counted.
 
+**What is this for, where do I get it.** Ask about any item you carry, craft with or need for a quest: Wisp shows which of your recipes use it, which quests ask for it, which boss drops it, who sells it and what drops it, with a waypoint to the seller.
+
 **Gold and prices.** Scan the auction house with Auctionator as you normally do and log out. Wisp keeps every scan day for good (Auctionator itself forgets after three weeks), so you can ask *what is cheap right now?*, *what in my bags is worth selling?*, *how has Silk Cloth moved, and where is it heading?* Prices are your own scans: the lowest listing of the day, not a sale.
 6. **Copy** on the card, then in the game press **Ctrl+V twice**: the first opens Wisp's inbox, the second pastes. `/wisp` opens the inbox too.
 

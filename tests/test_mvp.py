@@ -426,6 +426,43 @@ def test_crafting(wow: Path, tmp: Path):
     assert "window" in run_tool(closed, "recipes", {})["error"] and closed.snapshot["bags"], "bags are read without the window"
 
 
+def test_item_graph(wow: Path, tmp: Path):
+    """One item, and everything a step away: recipes, quests, bosses, sellers, drops, price."""
+    game = Game.load(wow)
+
+    def links(name):
+        out = run_tool(game, "item_links", {"item": name})
+        out.pop("note", None)
+        return out
+    silk = links("silk cloth")
+    assert silk["auction_price"] == {"lowest": "4s 50c", "seen": "today"} and silk["in_bags"] == 32
+    assert silk["used_in_your_recipes"] == [{"recipe_id": 3839, "recipe": "Bolt of Silk Cloth", "profession": "Tailoring",
+                                             "needs_each": 4, "colour": "yellow", "makes": "Bolt of Silk Cloth"}]
+    assert len(silk["dropped_by"]) == 5 and silk["dropped_by_in_all"] == 7, "the first few sources, and how many there are"
+    assert silk["found_in"][0]["name"] == "Silk Crate" and "found_in_in_all" not in silk
+    bolt = links("Bolt of Silk Cloth")   # a step on: what the bolt is made from and what it goes into
+    assert bolt["made_by_your_recipes"][0]["from"] == "4 Silk Cloth"
+    assert [r["recipe"] for r in bolt["used_in_your_recipes"]] == ["Small Silk Pack", "Azure Silk Hood", "Not Learned Yet"]
+    assert bolt["used_in_your_recipes"][2]["learned"] is False
+    thread = links("Fine Thread")   # no auction price, but a vendor: the gap in a crafting plan
+    seller = thread["sold_by"][0]
+    assert "auction_price" not in thread and seller["name"] == "Alexandra Bolero" and seller["where"][0]["zone"] == "Stormwind City"
+    assert run_tool(game, "waypoint", {"refs": [seller["where"][0]["ref"]]})["shown"] == 1
+    assert game.cards[-1]["lines"][0]["text"] == "Waypoint: Alexandra Bolero (sells Fine Thread)"
+    meat = links("Tough Wolf Meat")
+    assert meat["asked_for_by_quests"] == [{"quest": "Wolves Across the Border", "where": "in your quest log", "status": "ready to hand in"}]
+    assert meat["dropped_by"][0]["name"] == "Prowler"
+    assert links("Rockslicer") == {"item": "Rockslicer", "dropped_by_bosses": [{"boss": "Rhahk'Zor", "dungeon": "The Deadmines"}]}
+    assert links("Red Silk Bandana")["asked_for_by_quests"][0] == {
+        "quest": "Red Silk Bandanas", "where": "dungeon quest: The Deadmines", "status": "locked: an earlier quest is not done"}
+    assert links("Linen Cloth") == {"item": "Linen Cloth", "auction_price": {"lowest": "1s 20c", "seen": "2 days ago"}}, \
+        "priced but nothing to do with this character: no sources were asked of Questie"
+    assert links("silk")["several_items_match"][0] == "Silk Cloth" and "error" in links("no such item") and "error" in links("")
+    bare = Game.load(make_wow_dir(tmp, flags="noquestie"))
+    out = run_tool(bare, "item_links", {"item": "Fine Thread"})
+    assert "sold_by" not in out and "Questie was not available" in out["note"] and out["used_in_your_recipes"]
+
+
 def test_inbox_is_strict():
     def paste(text, flags=""):
         return stub("paste", text, flags=flags)
@@ -708,6 +745,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as g:
             test_history(wow, Path(g))
         test_inbox_is_strict()
+        with tempfile.TemporaryDirectory() as i:
+            test_item_graph(wow, Path(i))
         with tempfile.TemporaryDirectory() as h:
             test_crafting(wow, Path(h))
         test_without_questie(Path(b))
