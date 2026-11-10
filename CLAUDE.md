@@ -14,6 +14,7 @@ and architecture decision lives there. Update the wiki when decisions change.
 - BYOK: Anthropic, Kimi, OpenRouter behind one provider contract modelled on kintale's (wiki/LLM-Providers.md). Tools return validated structures, not pages (wiki/Tools.md).
 - No live data out of the game except a screenshot. Do not reintroduce the pixel beacon.
 - Code so far is the MVP: `addon/Wisp` (Lua) and `wisp/` (Python, stdlib server + Anthropic SDK + pywebview). Run the tests with `npm install && python3 tests/test_mvp.py`; they need Node for a Lua VM (or `WISP_LUA=/path/to/lua5.1`, which is the game's Lua version), no game and no key. `python -m wisp --fake` shows the interface with a scripted model.
+- Players get `Wisp.exe`, not Python: `.github/workflows/build.yml` builds, tests and publishes it as the `mvp` release on every push that touches code. `--smoke FILE` is the self-test it runs on the built exe. Nothing may require a command line or an environment variable.
 - The model never handles coordinates: locations carry refs, and `waypoint` accepts only refs. Keep that when adding tools.
 - `checks/` is throwaway code for milestone 0 (wiki/Checks.md), not part of the product.
 - Does not use Loom.
