@@ -626,6 +626,22 @@ function chartBlock(c) {
   return block;
 }
 
+// A route: numbered stops, each with what to do there.
+function routeBlock(r) {
+  const block = el("div", "plan");
+  block.append(el("div", "plan-title", r.title), el("div", "plan-sub", r.sub));
+  const steps = el("ol", "steps");
+  steps.style.marginTop = "10px";
+  for (const step of r.steps) {
+    const li = el("li");
+    li.append(el("span", "", step.text), el("span", "detail", step.detail));
+    steps.append(li);
+  }
+  block.append(steps);
+  for (const note of r.notes || []) block.append(el("div", "notes", note));
+  return block;
+}
+
 // The pages an answer rests on. A click opens the page in the player's own browser.
 function sourcesList(sources) {
   const list = el("ol", "sources");
@@ -669,7 +685,7 @@ function showCard(card, into = log) {
   const el = add("section", "card", undefined, into);
   const h = document.createElement("h2");
   h.textContent = card.plan ? "Crafting plan" : card.chart ? "Price history" : card.table ? "Market"
-    : card.report ? "Research" : card.sources ? "Sources" : "For the game";
+    : card.report ? "Research" : card.sources ? "Sources" : card.route ? "Route" : "For the game";
   const list = document.createElement("ul");
   for (const line of card.lines) {
     const li = document.createElement("li");
@@ -695,7 +711,8 @@ function showCard(card, into = log) {
   foot.append(hint, button);
   el.append(h, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
             ...(card.table ? [tableBlock(card.table)] : []), ...(card.report ? [reportBlock(card.report)] : []),
-            ...(card.sources ? [sourcesList(card.sources)] : []), list, ...(card.wisp ? [foot] : []));
+            ...(card.sources ? [sourcesList(card.sources)] : []), ...(card.route ? [routeBlock(card.route)] : []),
+            list, ...(card.wisp ? [foot] : []));
   into.scrollTop = into.scrollHeight;
   return el;
 }
@@ -775,7 +792,7 @@ async function ask(text, research = false) {
         if (collapsed && event.type === "done" && orb.dataset.state !== "card") orb.dataset.state = "ready";
         if (event.type === "text") { bubble.textContent += event.text; log.scrollTop = log.scrollHeight; }
         else if (event.type === "tool") { add("div", "trace", traceText(event)); bubble = add("div", "msg wisp"); }
-        else if (event.type === "card") { const el = showCard(event.card); if (event.card.plan || event.card.chart || event.card.table || event.card.report) planEl = el; bubble = add("div", "msg wisp"); }
+        else if (event.type === "card") { const el = showCard(event.card); if (event.card.plan || event.card.chart || event.card.table || event.card.report || event.card.route) planEl = el; bubble = add("div", "msg wisp"); }
         else if (event.type === "usage") { usage = event.usage; showMeter(); }
         else if (event.type === "error") add("div", "msg error", event.message);
         else if (event.type === "done" && event.reason === "stopped") add("div", "note", "stopped");

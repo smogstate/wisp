@@ -31,6 +31,10 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **Updates.** Wisp keeps itself current without touching `Wisp.exe`: a newer version of its code (about a hundred kilobytes) is downloaded into its own data folder, checked and tried, and used the next time you open Wisp, or right away if you press *Restart*. Nothing appears next to the exe. Settings has a switch to turn this off. The addon is updated along with it; restart the game to load a new addon.
 
+**What to do now.** *What should I do here?* gives a route card for your zone: where to hand in, what to pick up (grey and out-of-reach quests left out), which quests to go on with, in an order to walk them, with a numbered waypoint for each stop. *Where should I level next?* compares zones by the quests worth doing at your level.
+
+**What to sell.** *What should I sell?* lists what your bags would fetch and says for each item whether to sell now, hold, or vendor it. *What can I craft for money?* ranks your recipes by profit at today's listings.
+
 **Quests around you.** *What quests are open here?*, *what elite quests can I do?*, *where should I quest next?* Wisp reads the list of quests Questie has open for your character, with levels and quest givers, and can put the givers on a waypoint card.
 
 **Professions.** Open your profession window once in the game (Wisp says in chat that it read the recipes), then log out. Now ask *what should I craft to level tailoring, and what do I need to buy?* Wisp counts the materials, takes off what is in your bags, prices the rest from your own **Auctionator** scans, and gives you a card that creates the shopping list in Auctionator. It knows the recipes your character has; the bank is not counted.

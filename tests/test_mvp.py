@@ -467,16 +467,18 @@ def test_item_graph(wow: Path, tmp: Path):
 def test_available_quests(wow: Path, tmp: Path):
     """The quests Questie has down as open to the character: by zone, by kind, nearest first."""
     game = Game.load(wow)
-    assert [q["id"] for q in game.snapshot["available"]] == [34, 40, 176, 314, 386], "one Questie has no record of is left out"
+    assert [q["id"] for q in game.snapshot["available"]] == [34, 40, 84, 176, 314, 386], "one Questie has no record of is left out"
 
     def quests(**args):
         out = run_tool(game, "available_quests", args)
         out.pop("note", None)
         return out
     everywhere = quests()
-    assert everywhere["open_quests"] == 5 and everywhere["character_zone"] == "Elwynn Forest"
-    assert everywhere["by_zone"] == [{"zone": "Elwynn Forest", "open_quests": 4, "elite": 1, "dungeon": 1},
-                                     {"zone": "Dun Morogh", "open_quests": 1, "elite": 1}]
+    assert everywhere["open_quests"] == 6 and everywhere["character_zone"] == "Elwynn Forest"
+    assert everywhere["by_zone"] == [
+        {"zone": "Elwynn Forest", "open_quests": 5, "worth_doing": 3, "elite": 1, "dungeon": 1, "quest_levels": "5-25"},
+        {"zone": "Dun Morogh", "open_quests": 1, "worth_doing": 1, "elite": 1, "quest_levels": "12"}], \
+        "worth doing: not grey (level 5 at 12) and not red (level 25)"
 
     # the example asked for: which elite quests are open around here
     here = quests(zone="here", kind="elite")
@@ -488,8 +490,13 @@ def test_available_quests(wow: Path, tmp: Path):
     assert game.cards[-1]["lines"][0]["text"] == "Waypoint: Wanted Poster (quest giver)"
     assert [q["title"] for q in quests(kind="elite")["quests"]] == ["Wanted: Hogger", "Protecting the Herd"], "everywhere: by level"
     near = [q["title"] for q in quests(zone="elwynn")["quests"]]
-    assert near == ["A Fishy Peril", "What Comes Around", "An Unwelcome Guest", "Wanted: Hogger"], \
+    assert near == ["A Fishy Peril", "What Comes Around", "An Unwelcome Guest", "Wanted: Hogger", "Back to Billy"], \
         "from where the character stands, at the marshal's feet: his two first, then the poster's"
+    colours = {q["title"]: q["colour"] for q in quests(zone="elwynn")["quests"]}
+    assert colours == {"A Fishy Peril": "yellow", "What Comes Around": "red", "An Unwelcome Guest": "green",
+                       "Wanted: Hogger": "yellow", "Back to Billy": "grey"}, "as the quest log would colour them at level 12"
+    assert Game({"v": 1, "character": {"level": 45}}).colour(35) == "green" and Game({"v": 1, "character": {"level": 45}}).colour(34) == "grey", \
+        "without the game's own number, its table"
     assert quests(zone="Dun Morogh")["ordered"] == "by level" and quests(kind="raid")["quests"] == []
     assert "zones_with_open_quests" in quests(zone="Nowhere") and "error" in quests(kind="x") and "error" in quests(limit=0)
     claw = run_tool(game, "item_links", {"item": "Huge Gnoll Claw"})["asked_for_by_quests"]
@@ -499,6 +506,63 @@ def test_available_quests(wow: Path, tmp: Path):
     assert "may keep it elsewhere" in run_tool(older, "available_quests", {})["error"]
     without = Game.load(make_wow_dir(tmp / "b", flags="noquestie"))
     assert "Questie was not running" in run_tool(without, "available_quests", {})["error"]
+
+
+def test_questing_route(wow: Path):
+    """What to do in the zone, in an order to walk it, as one card."""
+    game = Game.load(wow)
+    out = run_tool(game, "questing_route", {})
+    assert out["zone"] == "Elwynn Forest" and out["starts"] == "from where the character stands"
+    assert [(s["text"], s["detail"]) for s in out["stops"]] == [
+        ("Marshal Dughan", "Pick up: A Fishy Peril (level 10)"),
+        ("Wanted Poster", "Pick up: An Unwelcome Guest (level 9) · Pick up: Wanted: Hogger (level 11, elite)"),
+        ("Eagan Peltskinner", "Hand in: Wolves Across the Border"),
+        ("The Jasperlode Mine", "Go on: Scout through the Jasperlode Mine")], \
+        "quest givers first, the nearest each time, two quests at one giver as one stop; then the quest under way"
+    assert out["left_out"] == {"grey": 1, "red": 1}, "a level 5 quest gives nothing at 12, a level 25 one is out of reach"
+    card = game.cards[-1]
+    assert card["route"]["title"] == "Questing in Elwynn Forest" and card["route"]["sub"] == "level 12 · 1 to hand in, 3 to pick up, 1 to go on with"
+    assert "Left out: 1 grey and 1 red." in card["route"]["notes"][0] and "TomTom" in card["hint"]
+    ways = [l for l in stub("paste", card["wisp"]) if l.startswith("WAY ")]
+    assert ways == ["WAY tomtom 1429 0.421 0.659 1. Marshal Dughan", "WAY tomtom 1429 0.246 0.747 2. Wanted Poster",
+                    "WAY tomtom 1429 0.489 0.402 3. Eagan Peltskinner", "WAY tomtom 1429 0.615 0.538 4. The Jasperlode Mine"], ways
+    far = run_tool(game, "questing_route", {"zone": "dun morogh"})
+    assert [s["text"] for s in far["stops"]] == ["Rudra Amberstill"] and far["starts"] == "at the first quest giver"
+    assert "zones_with_quests" in run_tool(game, "questing_route", {"zone": "Nowhere"})
+    assert "nothing_to_do" in run_tool(game, "questing_route", {"zone": "Stormwind"}), "a zone known only for a vendor"
+
+
+def test_gold(wow: Path, tmp: Path):
+    """What the character's own things would fetch: bags to sell, recipes that turn a profit."""
+    game = Game.load(wow)
+    bags = run_tool(game, "gold", {"view": "bags", "show": True})
+    assert bags["sellable_worth"] == "1g 47s 26c" or bags["sellable_worth"] == "1g 47s"
+    assert bags["items"][0] == {"item": "Silk Cloth", "have": 32, "each": "4s 50c", "worth": "1g 44s", "vendor_pays": "32s",
+                                "advice": "no price history yet"}
+    assert [i["item"] for i in bags["items"]] == ["Silk Cloth", "Copper Ore"], "what can be sold, the most valuable first"
+    assert bags["left_out"] == {"bound_to_the_character": 1, "no_price_known": 1}, "the hearthstone; thread nobody lists or buys"
+    assert game.cards[-1]["table"]["rows"][0] == ["Silk Cloth", 32, "4s 50c", "1g 44s"]
+
+    # with a price history behind it, each item is set against its usual price
+    market = Market(tmp / "market.sqlite")
+    today = game.snapshot["market"]["today"]
+    past = dict(game.snapshot, takenAt=game.snapshot["takenAt"] - 10, prices=[[4306, 300, 0, "Silk Cloth"]],
+                market={"day0": game.snapshot["market"]["day0"], "today": today,
+                        "days": [{"day": today - d, "rows": [4306, 300, 300, 50, 2770, 200, 200, 50]} for d in (2, 3, 4, 6, 7)]})
+    market.ingest(past)
+    market.ingest(game.snapshot)
+    game.market = market
+    advice = {i["item"]: i["advice"] for i in run_tool(game, "gold", {"view": "bags"})["items"]}
+    assert advice == {"Silk Cloth": "+50% against its usual price: a good time to sell",
+                      "Copper Ore": "-60% against its usual price: hold if you can"}, advice
+
+    crafts = run_tool(game, "gold", {"view": "crafts", "show": True})
+    assert crafts["recipes"] == [{"recipe_id": 3839, "recipe": "Bolt of Silk Cloth", "profession": "Tailoring", "materials": "18s",
+                                  "sells_for": "21s", "profit": "3s", "return": "+17%", "can_make_from_bags": 8}]
+    assert crafts["recipes_without_full_prices"] == 2 and game.cards[-1]["table"]["title"] == "Crafting for profit"
+    assert "error" in run_tool(game, "gold", {"view": "x"})
+    without = Game.load(make_wow_dir(tmp / "a", flags="noauctionator"))
+    assert "not installed" in run_tool(without, "gold", {"view": "bags"})["error"]
 
 
 def test_gathering(wow: Path, tmp: Path):
@@ -1056,6 +1120,9 @@ if __name__ == "__main__":
         test_inbox_is_strict()
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
+        test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as r:
+            test_gold(wow, Path(r))
         with tempfile.TemporaryDirectory() as k:
             test_farming(wow, Path(k))
         with tempfile.TemporaryDirectory() as j:

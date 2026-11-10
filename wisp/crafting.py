@@ -32,6 +32,7 @@ class Crafting:
         self.has_auctionator = bool((snapshot.get("addons") or {}).get("auctionator"))
         self.names: dict[int, str] = {}                 # item id -> the game's name for it
         self.bags: dict[int, int] = {}                  # item id -> how many are carried
+        self.bound: set[int] = set()                    # carried items that are bound: not for sale
         self.prices: dict[int, tuple[int, int | None]] = {}   # item id -> (copper, days since seen)
         self.recipes: dict[int, dict] = {}              # recipe id -> recipe
         self.books: list[dict] = []                     # one per profession whose window was opened
@@ -43,6 +44,8 @@ class Crafting:
             if count:
                 self.bags[item] = self.bags.get(item, 0) + count
                 self._name(item, line.get("name"))
+                if line.get("bound"):
+                    self.bound.add(item)
         for row in _list(snapshot.get("prices")):   # rows of [item id, copper, days since seen or -1, name or ""]
             if not isinstance(row, list) or len(row) < 4:
                 continue

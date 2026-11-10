@@ -90,6 +90,26 @@ Limits:
 - The list is read from a field Questie keeps for itself, not a documented call; if a Questie version moves it, the tool says the list was not found.
 - How complete Questie's quest data is for Forever's new content is not known. Not yet run in the game.
 
+## Questing routes and gold from your own things — built 2026-11-10
+
+Denis: "I am now interested in leveling, questing and earning gold with the auction house." Both rest on data Wisp already had; what was missing were the two views that put it to use.
+
+**Questing**
+
+- **Quest colours.** Every quest, in the log or open, gets the colour the quest log would give it for this character: red, orange, yellow, green, grey. The band below the character's level that stays green is the game's own number (`GetQuestGreenRange`), read at logout; without it, the game's table.
+- **`questing_route`** lays a zone out as a route card. Three kinds of stop: quests to **hand in** (complete in the log, turn-in in this zone), open quests to **pick up** (not grey, not red; elite, dungeon and so on are marked), and quests to **go on** with (the game's own pointer to the next step). Two quests at one giver are one stop. The order is made in code: quest givers first, then the quests under way, each time the nearest, from where the character stands. One Copy sets a numbered TomTom waypoint for each stop. Fourteen givers and ten outings at most.
+- **Where to level next**: `available_quests` with no arguments now says, per zone, how many open quests are worth doing and the span of their levels.
+
+**Gold**
+
+- **`gold`, view `bags`**: every carried item that can be sold (bound ones are left out), with its listing, its worth, what a vendor pays, and a plain verdict: above its usual price (sell), below (hold), a vendor pays as much (vendor it), nobody lists it. "Usual" is the median of the kept price history over 30 days, once there are three scan days.
+- **`gold`, view `crafts`**: the character's learned recipes ranked by profit per craft at current listings, with the return on the materials and how many can be made from the bags. Recipes where the result or a material has no price are counted, not guessed.
+- Both come as table cards.
+
+Limits: the route is as of the last logout and knows the next step of a quest only where the game points to it; it is nearest-first, not the shortest walk. Gold figures are listings before the auction house's cut, the bank is not known, and nothing here knows what actually sold.
+
+Not built, and the natural next steps: **experience per hour** and time to the next level (the addon would note each session), and **what really sold and for how much** (from the auction house's mail), which would turn "listed for" into "sold for".
+
 ## The item graph — built 2026-11-10
 
 Denis: "build a graph of items, what is used for what, for the LLM to navigate; bind recipes, items, quests".

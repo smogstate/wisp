@@ -316,6 +316,7 @@ local function bags()
           out[#out + 1] = line
         end
         line.count = line.count + (item.stackCount or 1)
+        if item.isBound then line.bound = true end   -- cannot be sold at auction
       end
     end
   end
@@ -742,6 +743,9 @@ local function buildSnapshot()
     character = {
       xp = UnitXP and UnitXP("player") or nil, xpMax = UnitXPMax and UnitXPMax("player") or nil, money = GetMoney(),
       class = classFile, race = (UnitRace("player")), level = UnitLevel("player"),
+      -- how many levels below the character a quest stays green before it turns grey: the game's own number
+      greenRange = (GetQuestGreenRange and GetQuestGreenRange())
+                   or (UnitQuestTrivialLevelRange and UnitQuestTrivialLevelRange("player")) or nil,
       faction = (UnitFactionGroup("player")), gold = math.floor(GetMoney() / 10000),
       map = map, zone = mapName(map), subzone = GetSubZoneText(),
       x = x and round1(x * 100), y = y and round1(y * 100),

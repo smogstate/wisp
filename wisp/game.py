@@ -103,6 +103,19 @@ class Game:
         taken = self.snapshot.get("takenAt")
         return max(0, int((time.time() - taken) / 60)) if isinstance(taken, (int, float)) else None
 
+    def colour(self, level) -> str | None:
+        """How hard a quest of this level is for the character, as the quest log colours it:
+        red, orange, yellow, green, or grey for one that gives almost nothing any more."""
+        me = self.snapshot.get("character") or {}
+        mine = me.get("level")
+        if not isinstance(level, int) or not isinstance(mine, int) or level <= 0:
+            return None
+        green = me.get("greenRange")
+        if not isinstance(green, int):   # the game's own table, for when it did not say
+            green = 4 if mine <= 5 else mine // 10 + 5 if mine <= 39 else mine // 5 + 1 if mine <= 59 else 9
+        diff = level - mine
+        return "red" if diff >= 5 else "orange" if diff >= 3 else "yellow" if diff >= -2 else "green" if -diff <= green else "grey"
+
     def _place(self, ref: str, place: dict, title: str) -> dict | None:
         """Register a location under a ref. The model only ever handles refs, so
         a coordinate can never be invented or mistyped on its way to the game."""
@@ -132,7 +145,8 @@ class Game:
         qid = q.get("id")
         title = _clean(q.get("title"), 80)
         out = {
-            "id": qid, "title": title, "level": q.get("level"), "complete": bool(q.get("complete")),
+            "id": qid, "title": title, "level": q.get("level"), "colour": self.colour(q.get("level")),
+            "complete": bool(q.get("complete")),
             "objectives": [{"text": _clean(o.get("text"), 160), "done": bool(o.get("done"))}
                            for o in _as_list(q.get("objectives")) if isinstance(o, dict)],
             "starts": self._who(f"q{qid}.start", q.get("starts"), "quest giver"),
@@ -155,6 +169,7 @@ class Game:
         title = _clean(q.get("title"), 80)
         starts = self._who(f"a{qid}.start", q.get("starts"), "quest giver")
         return {"id": qid, "title": title, "level": q.get("level") if isinstance(q.get("level"), int) else None,
+                "colour": self.colour(q.get("level")),
                 "requires_level": q.get("requiredLevel") if isinstance(q.get("requiredLevel"), int) else None,
                 "kind": q.get("kind") if q.get("kind") in ("elite", "dungeon", "raid", "pvp") else "normal",
                 "starts": starts, "zones": list(dict.fromkeys(w["zone"] for s in starts for w in s["where"] if w["zone"])),
@@ -263,7 +278,10 @@ class Game:
         note = ("Quests Questie has down as open to this character at the last logout: level, class, race and earlier quests "
                 "allow them, and they are not yet picked up. It follows Questie's own settings, so quests far below the "
                 "character's level are left out unless Questie is set to show them. 'elite' is the game's tag for a quest "
-                "meant for a group. Every quest giver's place has a ref for the waypoint tool.")
+                "meant for a group. colour is how the quest log would colour it for this character: grey gives almost no "
+                "experience, green and yellow are comfortable, orange is hard, red is out of reach; worth_doing counts green, "
+                "yellow and orange. Every quest giver's place has a ref for the waypoint tool. For what to do in a zone and "
+                "in which order, call questing_route.")
         if isinstance(zone, str) and zone.strip():
             wanted = _clean(zone, 60).lower()
             if wanted in ("here", "this zone", "my zone"):
@@ -289,17 +307,184 @@ class Game:
             zones = {}
             for q in found:
                 for z in q["zones"] or ["(no place known)"]:
-                    counts = zones.setdefault(z, {"zone": z, "open_quests": 0})
+                    counts = zones.setdefault(z, {"zone": z, "open_quests": 0, "worth_doing": 0, "levels": []})
                     counts["open_quests"] += 1
+                    if q["colour"] in ("green", "yellow", "orange"):   # not grey, and not out of reach
+                        counts["worth_doing"] += 1
+                    if q["level"]:
+                        counts["levels"].append(q["level"])
                     if q["kind"] != "normal":
                         counts[q["kind"]] = counts.get(q["kind"], 0) + 1
-            return {"open_quests": len(found), "by_zone": sorted(zones.values(), key=lambda z: (-z["open_quests"], z["zone"]))[:60],
+            for counts in zones.values():
+                levels = counts.pop("levels")
+                if levels:
+                    counts["quest_levels"] = f"{min(levels)}-{max(levels)}" if min(levels) != max(levels) else str(levels[0])
+            return {"open_quests": len(found), "by_zone": sorted(zones.values(), key=lambda z: (-z["worth_doing"], -z["open_quests"], z["zone"]))[:60],
                     "character_zone": me.get("zone"), "character_level": me.get("level"),
                     "note": note + " Ask with a zone (or zone 'here') or a kind for the quests themselves."}
         found.sort(key=lambda q: (q["level"] or 0, q["title"]))
         return {"kind": kind, "open_quests": len(found), "character_level": me.get("level"),
                 "quests": [{k: v for k, v in q.items() if v not in ([], None)} for q in found[:limit]],
                 **({"left_out": len(found) - limit} if len(found) > limit else {}), "note": note}
+
+    def tool_questing_route(self, args: dict) -> dict:
+        """What to do in a zone, in an order to walk it: hand in what is done, pick up what is
+        open and worth doing, then go on with what is under way. Laid out and ordered in code."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        me = self.snapshot.get("character") or {}
+        zone = _clean(args.get("zone"), 60) if isinstance(args.get("zone"), str) else ""
+        if not zone or zone.lower() in ("here", "this zone", "my zone"):
+            zone = str(me.get("zone") or "")
+        known = sorted({p["zone"] for p in self.places.values() if p["zone"]})
+        match = [z for z in known if z.lower() == zone.lower()] or [z for z in known if zone and zone.lower() in z.lower()]
+        if len(match) != 1:
+            return {"error": (f"no single zone with quests is named like '{zone}'" if zone else "the character's zone is not known"),
+                    "zones_with_quests": known[:60]}
+        zone = match[0]
+        hubs, fields, counts = {}, [], {"hand_in": 0, "pick_up": 0, "go_on": 0}
+
+        def first_in_zone(people):
+            return next(((who["name"], w) for who in people for w in who["where"] if w["zone"] == zone), None)
+
+        def hub(found, action, key):
+            name, w = found
+            stop = hubs.setdefault((round(w["x"]), round(w["y"])), {"who": name, "x": w["x"], "y": w["y"], "ref": w["ref"], "actions": []})
+            stop["actions"].append(action)
+            counts[key] += 1
+        for q in self.quests:
+            if q["complete"]:
+                found = first_in_zone(q["ends"])
+                if found:
+                    hub(found, f"Hand in: {q['title']}", "hand_in")
+            elif isinstance(q.get("game_pointer"), dict) and q["game_pointer"]["zone"] == zone:
+                todo = next((o["text"] for o in q["objectives"] if not o["done"]), "")
+                w = q["game_pointer"]
+                fields.append({"who": q["title"], "x": w["x"], "y": w["y"], "ref": w["ref"], "actions": ["Go on: " + (todo or q["title"])]})
+                counts["go_on"] += 1
+        skipped = {"grey": 0, "red": 0}
+        for q in self.available:
+            found = first_in_zone(q["starts"]) if zone in q["zones"] else None
+            if not found:
+                continue
+            if q["colour"] in skipped:   # nothing to gain, or not yet possible
+                skipped[q["colour"]] += 1
+                continue
+            kind = "" if q["kind"] == "normal" else f", {q['kind']}"
+            hub(found, f"Pick up: {q['title']} (level {q['level']}{kind})", "pick_up")
+        if not hubs and not fields:
+            return {"zone": zone, "nothing_to_do": "No quest in the log leads here and none worth doing is open here.",
+                    "left_out": skipped, "try": "available_quests with no arguments shows which zones have quests worth doing."}
+        here = me.get("zone") == zone and isinstance(me.get("x"), (int, float)) and isinstance(me.get("y"), (int, float))
+
+        def walk(stops, start):   # each time the nearest one left
+            ordered, at = [], start
+            stops = list(stops)
+            while stops:
+                nxt = min(stops, key=lambda s: ((s["x"] - at[0]) ** 2 + (s["y"] - at[1]) ** 2, s["who"]))
+                stops.remove(nxt)
+                ordered.append(nxt)
+                at = (nxt["x"], nxt["y"])
+            return ordered, at
+        start = (me["x"], me["y"]) if here else next(((s["x"], s["y"]) for s in list(hubs.values()) + fields), (50, 50))
+        givers, last = walk(sorted(hubs.values(), key=lambda s: -len(s["actions"]))[:14], start)
+        outings, _ = walk(fields[:10], last)
+        stops = givers + outings
+        steps = [{"text": s["who"], "detail": " · ".join(s["actions"]), "where": f"{s['x']}, {s['y']}"} for s in stops]
+        said = [f"{n} to hand in" * bool(n) for n in (counts["hand_in"],)] + [f"{counts['pick_up']} to pick up"] * bool(counts["pick_up"]) \
+            + [f"{counts['go_on']} to go on with"] * bool(counts["go_on"])
+        places = [self.places[s["ref"]] for s in stops]
+        self.cards.append({
+            "id": f"card{len(self.cards) + 1}", "lines": [],
+            "route": {"title": f"Questing in {zone}", "sub": f"level {me.get('level', '?')} · " + ", ".join(p for p in said if p),
+                      "steps": steps,
+                      "notes": ["As of your last logout. Quest givers first, then the quests under way, each time the nearest."
+                                + (f" Left out: {skipped['grey']} grey" + (f" and {skipped['red']} red" if skipped["red"] else "") + "."
+                                   if skipped["grey"] or skipped["red"] else "")]},
+            "hint": "Waypoints for TomTom: Copy, then in the game Ctrl+V twice",
+            "wisp": encode_wisp1([{"do": "tomtom.waypoint", "map": p["map"], "x": s["x"], "y": s["y"],
+                                   "title": f"{i + 1}. {_clean(s['who'], 50)}"} for i, (s, p) in enumerate(zip(stops, places))]),
+        })
+        return {"zone": zone, "shown": "the route, as a card with its numbered stops and a Copy button for the waypoints",
+                "stops": [{"stop": i + 1, **s} for i, s in enumerate(steps)], "left_out": skipped,
+                "starts": "from where the character stands" if here else "at the first quest giver",
+                "note": "The player now sees the route. Do not repeat its stops: say in a sentence or two what it achieves or what "
+                        "to watch for (an elite quest, a quest that is orange). Nothing has happened in the game yet."}
+
+    def tool_gold(self, args: dict) -> dict:
+        """What the character's own things would fetch: bags to sell, recipes to craft for profit."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        view, craft = args.get("view"), self.crafting
+        if view not in ("bags", "crafts"):
+            return {"error": "view must be bags or crafts"}
+        if not craft.prices:
+            return self.tool_auction_prices({"items": ["x"]})   # says why there are no prices
+        caveat = ("Lowest listings from the player's own Auctionator scans: what things are listed for, before the auction "
+                  "house's cut, and not a promise that they sell. Selling many at once pushes a price down.")
+
+        def usual(item):
+            past = self.market.series(self.snapshot, item, 30) if self.market else []
+            return statistics.median(low for _, low, _, _ in past) if len(past) >= 3 else None
+        if view == "bags":
+            rows, bound, unpriced = [], 0, 0
+            for item, count in craft.bags.items():
+                price, vendor = craft.prices.get(item, (0,))[0], self.farming.vendor.get(item, 0)
+                if item in craft.bound:
+                    bound += 1
+                    continue
+                if not price and not vendor:
+                    unpriced += 1
+                    continue
+                level = usual(item) if price else None
+                if not price:
+                    advice = "nobody lists it: sell to a vendor"
+                elif vendor >= price:
+                    advice = "a vendor pays as much or more: sell to a vendor"
+                elif level and price >= level * 1.15:
+                    advice = f"{(price - level) / level:+.0%} against its usual price: a good time to sell"
+                elif level and price <= level * 0.85:
+                    advice = f"{(price - level) / level:+.0%} against its usual price: hold if you can"
+                else:
+                    advice = "at its usual price" if level else "no price history yet"
+                rows.append({"item": craft.name(item), "have": count, "each": coins(price) if price else "–",
+                             "worth": coins(max(price, vendor) * count), "vendor_pays": coins(vendor * count) if vendor else "–",
+                             "advice": advice, "_worth": max(price, vendor) * count})
+            rows.sort(key=lambda r: (-r["_worth"], r["item"]))
+            total = sum(r["_worth"] for r in rows)
+            out = {"view": "bags", "sellable_worth": coins(total), "items": [{k: v for k, v in r.items() if k[0] != "_"} for r in rows[:40]],
+                   "left_out": {"bound_to_the_character": bound, "no_price_known": unpriced},
+                   "note": caveat + " Bank contents are not known."}
+            table = {"title": "What your bags would fetch", "sub": f"about {coins(total)} in all, at auction or from a vendor",
+                     "columns": ["Item", "Have", "Each", "Worth"], "rows": [[r["item"], r["have"], r["each"], r["worth"]] for r in rows[:15]],
+                     "notes": ["Lowest listings from your own scans, or what a vendor pays. Listed worth, not sales."]}
+        else:
+            rows, unknown = [], 0
+            for recipe in craft.recipes.values():
+                sells = craft.prices.get(recipe["makes"], (0,))[0] * recipe["makes_count"] if recipe["makes"] else 0
+                costs = [craft.prices.get(item, (0,))[0] * count for item, count in recipe["reagents"]]
+                if not recipe["learned"] or not sells or not costs or not all(costs):
+                    unknown += recipe["learned"]
+                    continue
+                profit = sells - sum(costs)
+                rows.append({"recipe_id": recipe["id"], "recipe": recipe["name"], "profession": recipe["profession"],
+                             "materials": coins(sum(costs)), "sells_for": coins(sells),
+                             "profit": ("-" if profit < 0 else "") + coins(abs(profit)), "return": f"{profit / sum(costs):+.0%}",
+                             "can_make_from_bags": min(craft.bags.get(item, 0) // count for item, count in recipe["reagents"]),
+                             "_profit": profit})
+            rows.sort(key=lambda r: (-r["_profit"], r["recipe"]))
+            out = {"view": "crafts", "recipes": [{k: v for k, v in r.items() if k[0] != "_"} for r in rows[:30]],
+                   "recipes_without_full_prices": unknown,
+                   "note": caveat + " Profit is the result's listing minus every material bought at auction, per craft. Only the "
+                           "character's own learned recipes, and only those where the result and every material have a price."}
+            table = {"title": "Crafting for profit", "sub": "your recipes, at your auction prices",
+                     "columns": ["Recipe", "Materials", "Sells for", "Profit"],
+                     "rows": [[r["recipe"], r["materials"], r["sells_for"], r["profit"]] for r in rows[:15]],
+                     "notes": ["Per craft, materials bought at auction. Listed prices, before the auction house's cut."]}
+        if args.get("show") is True and table["rows"]:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "table": table})
+            out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
+        return out
 
     def tool_quest_done(self, args: dict) -> dict:
         ids = args.get("quest_ids")
@@ -896,6 +1081,31 @@ TOOLS = [
         },
     },
     {
+        "name": "questing_route",
+        "description": "Show the player what to do in a zone, as a route card: the quests to hand in, the open quests "
+                       "worth picking up (not grey, not red), and the quests under way, with the stops ordered to "
+                       "walk them and a Copy button that sets a waypoint for each. Leave zone out for the zone the "
+                       "character is in. Use it for 'what should I do now', 'what next here', 'give me a route'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"zone": {"type": "string", "description": "A zone name. Leave out for where the character stands."}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "gold",
+        "description": "What the character's own things would fetch at auction. bags: every item carried that can be "
+                       "sold, with its listing, its worth, what a vendor pays, and whether it is above or below its "
+                       "usual price. crafts: the character's recipes ranked by profit per craft at current listings. "
+                       "Use it for 'what should I sell', 'what is my stuff worth', 'what can I craft for money'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"view": {"type": "string", "enum": ["bags", "crafts"]},
+                           "show": {"type": "boolean", "description": "true to also show the player the result as a table card."}},
+            "required": ["view"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "quest_done",
         "description": "Whether the player has completed given quests, by quest id.",
         "input_schema": {
@@ -1161,7 +1371,13 @@ Quest locations come from the Questie addon and everything about dungeons from t
 them was not installed, the tool says so, and you tell the player which addon would help.
 
 Quests the character has not picked up come from available_quests: what is open to them, by zone and by kind (elite \
-group quests, dungeon, raid, PvP), nearest first. Use it for what to do next and where.
+group quests, dungeon, raid, PvP), nearest first, each with the colour the quest log would give it. For what to do \
+now, call questing_route: it lays the zone's hand-ins, pick-ups and quests under way out as a route card. For where to \
+level next, compare zones by their quests worth doing and their quest levels against the character's level.
+
+For earning gold at the auction house, start from the player's own things: gold shows what their bags would fetch \
+and which of their recipes turn a profit; market_scan and price_history show what is cheap or dear against its usual \
+price. Say plainly that a listing is not a sale.
 
 Never state a quest id, an NPC, a location or coordinates from memory. WoW Forever differs from every earlier version \
 of the game, so what you remember is unreliable. If the tools do not have something, say that plainly.

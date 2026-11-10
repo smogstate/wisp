@@ -165,6 +165,7 @@ function GetLocale() return "ruRU" end
 function UnitClass() return "Маг", "MAGE" end
 function UnitRace() return "Человек", "Human" end
 function UnitLevel() return 12 end
+function GetQuestGreenRange() return 6 end   -- at level 12, a quest of level 6 is still green and one of level 5 is grey
 function UnitName() return "Тестер" end
 function GetRealmName() return "Test Realm" end
 function UnitXP() return 4200 end
@@ -220,6 +221,7 @@ local quests = {
             ObjectiveData = { { Type = "item", Id = 1931, Text = "Huge Gnoll Claw" } } },
   [314] = { name = "Protecting the Herd", level = 12, requiredLevel = 5, Starts = { NPC = { 1265 } }, Finisher = { NPC = { 1265 } } },
   [386] = { name = "What Comes Around", level = 25, requiredLevel = 22, Starts = { NPC = { 240 } }, Finisher = { NPC = { 240 } } },
+  [84] = { name = "Back to Billy", level = 5, requiredLevel = 1, Starts = { NPC = { 196 } }, Finisher = { NPC = { 196 } } },   -- grey by now
 }
 local npcs = {
   [196] = { name = "Eagan |cffff0000Peltskinner", spawns = { [12] = { { 48.94, 40.16 } } } },
@@ -261,7 +263,7 @@ QuestieDB.IsRaidQuest = function() return false end
 QuestieDB.IsPvPQuest = function() return false end
 local ZoneDB = { GetUiMapIdByAreaId = function(_, area) return ({ [12] = 1429, [1519] = 1453, [1] = 1426 })[area] end }
 -- what it draws its map icons from: quest id -> true; 34 follows a quest in the log, 9999 is one it has no record of
-local AvailableQuests = { __availableQuests = { [34] = true, [40] = true, [176] = true, [314] = true, [386] = true, [9999] = true } }
+local AvailableQuests = { __availableQuests = { [34] = true, [40] = true, [84] = true, [176] = true, [314] = true, [386] = true, [9999] = true } }
 if flags:find("oldquestie") then AvailableQuests = {} end
 if not flags:find("noquestie") then
   local modules = { QuestieDB = QuestieDB, ZoneDB = ZoneDB, AvailableQuests = AvailableQuests }
@@ -343,7 +345,7 @@ C_TradeSkillUI = {
   GetRecipeSchematic = function(id) return recipes[id].plan end,
 }
 local bagSlots = { [0] = { { itemID = 4306, stackCount = 20, itemName = "Silk Cloth" }, { itemID = 4306, stackCount = 12, itemName = "Silk Cloth" },
-                           false, { itemID = 6948, stackCount = 1, itemName = "Hearthstone" } },
+                           false, { itemID = 6948, stackCount = 1, itemName = "Hearthstone", isBound = true } },
                    [1] = { { itemID = 2321, stackCount = 3 }, { itemID = 2770, stackCount = 4, itemName = "Copper Ore" } } }
 C_Container = {
   GetContainerNumSlots = function(bag) return bagSlots[bag] and #bagSlots[bag] or 0 end,
