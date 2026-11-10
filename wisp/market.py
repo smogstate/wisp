@@ -189,6 +189,35 @@ class Market:
                 "last_day": date_of(last) if last is not None else None,
                 "days_covered": last - first + 1 if first is not None else 0}
 
+    def query(self, snapshot: dict, sql: str, limit: int = 200) -> dict:
+        """Run one read-only SELECT the model wrote. The file is opened read-only,
+        an authorizer refuses everything but reading, and a query that runs long
+        is stopped. `p` is this realm and faction's prices with names and dates."""
+        self._open().close()   # make sure the file and its tables exist
+        db = sqlite3.connect(f"file:{self.file.as_posix()}?mode=ro", uri=True, timeout=5)
+        try:
+            db.create_function("coins", 1, lambda copper: coins(copper) if isinstance(copper, (int, float)) else None)
+            today, market = self.today(snapshot), market_key(snapshot).replace("'", "''")
+            db.execute(f"CREATE TEMP VIEW p AS SELECT price.item, item.name, date(price.day * 86400, 'unixepoch') AS date, "
+                       f"{today} - price.day AS days_ago, price.low, price.high, price.listed "
+                       f"FROM price JOIN item ON item.id = price.item WHERE price.market = '{market}'")
+            allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
+            db.set_authorizer(lambda action, *_: sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY)
+            steps = [0]
+
+            def tick():   # called every 100000 steps of the query: about two seconds' worth, then stop
+                steps[0] += 1
+                return steps[0] > 200
+            db.set_progress_handler(tick, 100000)
+            cursor = db.execute(sql)
+            rows = cursor.fetchmany(limit + 1)
+            return {"columns": [c[0] for c in cursor.description or []], "rows": [list(r) for r in rows[:limit]],
+                    **({"cut_off_at": limit} if len(rows) > limit else {})}
+        except sqlite3.Error as e:
+            return {"error": f"the query failed: {str(e)[:200]}"}
+        finally:
+            db.close()
+
     def history(self, snapshot: dict, item: int, name: str, days: int) -> dict:
         """One item over time, ready for the model: the series, what it shows, a forecast."""
         rows, today = self.series(snapshot, item, days), self.today(snapshot)

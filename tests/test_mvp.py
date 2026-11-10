@@ -378,6 +378,20 @@ def test_crafting(wow: Path, tmp: Path):
     assert [i["item"] for i in busy] == ["Weekly Herb", "Steady Ore"], "junk worth under a silver is never listed"
     assert run_tool(far, "market_scan", {"find": "most_listed", "name_contains": "gem"})["items"][0]["item"] == "Rising Gem"
     assert run_tool(far, "market_scan", {"find": "most_listed", "among": "my_bags"})["items"] == []
+    # anything else, asked in SQL: read-only, this market only, stopped if it runs long
+    asked = run_tool(far, "market_query", {"sql": "SELECT name, coins(low) AS now, listed FROM p WHERE days_ago = 0 AND low >= 100 ORDER BY low DESC"})
+    assert asked["columns"] == ["name", "now", "listed"] and asked["rows"] == [["Rising Gem", "34s 50c", 5], ["Weekly Herb", "9s", 300], ["Steady Ore", "7s", 50]]
+    assert run_tool(far, "market_query", {"sql": "SELECT count(*), min(date), max(days_ago) FROM p"})["rows"] == [[120, "2024-09-05", 29]]
+    assert run_tool(far, "market_query", {"sql": "SELECT count(*) FROM price"})["rows"] == [[127]], "the raw table can be read too"
+    for refused in ("DELETE FROM price", "UPDATE item SET name = 'x'", "DROP TABLE price", "ATTACH DATABASE 'x.db' AS x",
+                    "PRAGMA journal_mode = DELETE", "INSERT INTO item VALUES (9, 'x')", "SELECT 1; DELETE FROM price", "not sql", ""):
+        assert "error" in run_tool(far, "market_query", {"sql": refused}), refused
+    slow = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n"
+    assert "failed" in run_tool(far, "market_query", {"sql": slow})["error"], "a query that never ends is stopped"
+    many = run_tool(far, "market_query", {"sql": "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 500) SELECT i FROM n"})
+    assert len(many["rows"]) == 200 and many["cut_off_at"] == 200
+    assert market.size(far.snapshot)["rows"] == 120, "nothing was changed"
+
     # shown to the player as cards on request: a chart for one item, a table for a ranking
     before = len(far.cards)
     assert "shown" in run_tool(far, "price_history", {"item": "Steady Ore", "show": True})

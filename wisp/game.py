@@ -412,6 +412,19 @@ class Game:
                        "statistical estimate: give it as a range, with its confidence, never as a promise.")
         return out
 
+    def tool_market_query(self, args: dict) -> dict:
+        problem = self._no_market()
+        if problem:
+            return problem
+        sql = args.get("sql")
+        if not isinstance(sql, str) or not sql.strip() or len(sql) > 4000:
+            return {"error": "sql must be one SELECT statement of at most 4000 characters"}
+        out = self.market.query(self.snapshot, sql)
+        if "error" not in out:
+            out["note"] = ("Prices are in copper unless you used coins(). Lowest listings on the player's scan days: a "
+                           "listing is not a sale. State results as they are; do not do further arithmetic on them yourself.")
+        return out
+
     def tool_market_scan(self, args: dict) -> dict:
         problem = self._no_market()
         if problem:
@@ -655,6 +668,24 @@ TOOLS = [
         },
     },
     {
+        "name": "market_query",
+        "description": "Ask the kept price history anything, with one read-only SQL SELECT (SQLite). One table, p, "
+                       "for the player's realm and faction: item (id), name, date ('2026-11-03'), days_ago (0 = the "
+                       "last scan day known), low and high (the day's lowest and highest listing, in copper), listed "
+                       "(how many were listed; may be null). One row per item and day scanned; days without a scan "
+                       "have no row. coins(copper) writes money as '2g 16s'. Use it when market_scan and "
+                       "price_history do not fit: price bands, listings thresholds, comparing dates, weekdays "
+                       "(strftime('%w', date)), counts, anything aggregated. Do the arithmetic in the SQL, not in "
+                       "your head. At most 200 rows come back, so aggregate and LIMIT.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"sql": {"type": "string", "description": "One SELECT, e.g. SELECT name, coins(low) AS now, listed "
+                                                                    "FROM p WHERE days_ago = 0 AND low BETWEEN 10000 AND 50000 "
+                                                                    "ORDER BY listed DESC LIMIT 20"}},
+            "required": ["sql"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "craft_plan",
         "description": "The arithmetic of a crafting plan, done in code: for each recipe and how many times to craft "
                        "it, the total materials, what the plan's own crafts supply (a bolt made in one step and used "
@@ -725,8 +756,8 @@ order or what is uncertain; never repeat its steps or numbers. Prices are the pl
 scans and skill is as of the last logout, so say how old they are when it matters. Wisp only knows the recipes the \
 character's profession window listed; for a path beyond those, say what is missing rather than fill it in from memory.
 
-The price of anything at the auction house comes only from auction_prices, price_history and market_scan, never from \
-memory. Prices are the lowest the player's Auctionator addon saw listed on the days it scanned: a listing, not a sale, \
+The price of anything at the auction house comes only from auction_prices, price_history, market_scan and \
+market_query, never from memory. Prices are the lowest the player's Auctionator addon saw listed on the days it scanned: a listing, not a sale, \
 and before the auction house's cut. Wisp keeps every scan day, so for questions about earning gold, good prices or \
 where a price is heading, look there first; say how many scan days an answer rests on, and give any estimate of a \
 future price as a range with its confidence, never as a certainty. When your answer rests on a price_history or \
