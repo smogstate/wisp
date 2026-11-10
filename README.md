@@ -27,6 +27,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 4. In Settings press **Check setup**. Every line should say `ok`; a line that says `FAIL` tells you what to do.
 5. **Ask**, for example: *where do I hand in my wolf quest, and what comes next?*
 
+**Spending limit.** Wisp stops asking once a day's use has cost $5; change the amount, or set 0 for no limit, in Settings. The line above the input shows what today has cost. A long research run is stopped between two requests when it crosses the limit. Kimi's prices are not known, so Kimi's use is not counted.
+
 **Updates.** Wisp keeps itself current: when a newer build is published it downloads it, checks it, and starts as the new one the next time you open it (or right away if you press *Restart*). Settings has a switch to turn this off. The addon is updated along with it; restart the game to load a new addon.
 
 **Professions.** Open your profession window once in the game (Wisp says in chat that it read the recipes), then log out. Now ask *what should I craft to level tailoring, and what do I need to buy?* Wisp counts the materials, takes off what is in your bags, prices the rest from your own **Auctionator** scans, and gives you a card that creates the shopping list in Auctionator. It knows the recipes your character has; the bank is not counted.

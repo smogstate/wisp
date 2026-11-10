@@ -562,6 +562,10 @@ def answer(chat, game: Game, question: str, should_stop=lambda: False, research:
     said = ""
     hops = RESEARCH_HOPS if research else MAX_HOPS
     for hop in range(hops):
+        if hop and should_stop():   # between two requests: nothing more is sent, so nothing more is spent
+            chat.stopped(said)
+            yield {"type": "done", "reason": "stopped"}
+            return
         calls, reason = [], None
         for event in chat.stream(should_stop):
             if event["type"] == "text":

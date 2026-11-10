@@ -267,6 +267,9 @@
   <label>API keys</label>
   <div id="keys"></div>
   <div class="hint">Kept in this PC's credential store. Each key is sent only to its own provider.</div>
+  <label for="cap">Spending limit per day, in dollars</label>
+  <div class="row"><input id="cap" type="number" min="0" max="1000" step="0.5" inputmode="decimal" style="max-width:110px"></div>
+  <div class="hint" id="cap-hint"></div>
   <label for="theme">Appearance</label>
   <div class="row">
     <select id="theme" aria-label="Theme">
@@ -400,8 +403,13 @@ function showMeter() {
   meter.hidden = !usage || !usage.requests;
   if (meter.hidden) return;
   const tokens = usage.input + usage.output + usage.cache_read + usage.cache_write;
-  meter.textContent = tokens.toLocaleString("en-US") + " tokens · " + money(usage) + " this conversation";
+  meter.textContent = tokens.toLocaleString("en-US") + " tokens · " + money(usage) + " this conversation" + today();
 }
+
+// What today has cost across every conversation, against the day's limit when there is one.
+let spend = null;
+const dollars = v => v < 0.005 ? "$0" : "$" + v.toFixed(2);
+const today = () => !spend || (!spend.today && !spend.cap) ? "" : " · " + dollars(spend.today) + (spend.cap ? " of $" + spend.cap.toFixed(2) : "") + " today";
 
 function money(u) {
   if (!u.priced) return "cost unknown";
@@ -442,6 +450,7 @@ async function refresh() {
   document.body.classList.toggle("fade", fade);
   applyLook(s.theme, s.opacity);
   document.getElementById("quit").hidden = !s.window.own;
+  spend = s.spend; showMeter();
   $("update").hidden = !(s.update && s.update.state === "ready") || running;   // never offered in the middle of an answer
   document.getElementById("collapse").title = "Collapse" + (s.window.hotkey ? " (" + s.window.hotkey + ")" : " (Esc)");
   if (!running) { usage = s.usage; showMeter(); }
@@ -744,7 +753,8 @@ const traceText = t => (t.ok ? "looked up: " : "lookup failed: ") + t.name + (t.
 async function ask(text, research = false) {
   log.querySelector(".hello")?.remove();
   add("div", "msg user", text);
-  if (research) add("div", "trace", "Research run: your game data first, then the web where the provider has it. Up to 24 rounds of lookups, 8 web searches (1 cent each) and 6 pages. Stop any time.");
+  if (research) add("div", "trace", "Research run: your game data first, then the web where the provider has it. Up to 24 rounds of lookups, 8 web searches (1 cent each) and 6 pages. Stop any time."
+    + (spend && spend.cap ? " Today so far: " + dollars(spend.today) + " of your $" + spend.cap.toFixed(2) + " limit." : ""));
   let bubble = add("div", "msg wisp"), planEl = null;
   setRunning(true);
   if (collapsed) orb.dataset.state = "thinking";
@@ -780,6 +790,7 @@ async function ask(text, research = false) {
     if (view.turns.length > turnCount) { turnCount = view.turns.length; forkButton(turnCount - 1); }
   } catch {}
   if (planEl) planEl.scrollIntoView({ block: "start" });   // a plan is read from its first step, not from its last line
+  refresh();   // what today has cost, and anything else that moved while it answered
   input.focus();
 }
 
@@ -793,10 +804,16 @@ async function newChat() {
 
 function showCost() {
   log.querySelector(".hello")?.remove();
-  if (!usage || !usage.requests) { add("div", "trace", "Nothing spent yet in this conversation."); return; }
+  if (!usage || !usage.requests) {
+    add("div", "trace", "Nothing spent yet in this conversation." + (spend && spend.today ? " Today, across every conversation: " + dollars(spend.today)
+      + (spend.cap ? " of a limit of $" + spend.cap.toFixed(2) + "." : ".") : ""));
+    return;
+  }
   add("div", "trace", `This conversation: ${usage.requests} model requests · ${usage.input.toLocaleString("en-US")} tokens in · ${usage.output.toLocaleString("en-US")} out${usage.searches ? ` · ${usage.searches} web search${usage.searches === 1 ? "" : "es"}` : ""} · ${money(usage)}`);
   add("div", "trace", usage.priced ? "Worked out from the provider's list prices. Your bill from the provider is the final word."
     : "Wisp has no price list for this model, so only tokens are shown.");
+  if (spend) add("div", "trace", "Today, across every conversation: " + dollars(spend.today)
+    + (spend.cap ? " of a limit of $" + spend.cap.toFixed(2) + "." : ". There is no daily limit; Settings has one."));
 }
 
 function showRecap() {
@@ -956,6 +973,9 @@ function showSettings(s) {
     : "Transparency needs Wisp's own window.";
   $("plain").checked = s.plain_window;
   $("auto-update").checked = s.auto_update;
+  $("cap").value = s.spend.cap;
+  $("cap-hint").textContent = "Spent today: " + dollars(s.spend.today) + ". Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. "
+    + "It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.";
   const up = s.update || {};
   $("version").textContent = !up.version ? "This copy runs from source and does not update itself."
     : "This is version " + up.version + (up.built ? " of " + up.built.slice(0, 10) : "") + ". "
@@ -1022,7 +1042,8 @@ $("gear").onclick = openSettings;
 $("provider").onchange = () => showModels($("provider").value);
 $("close").onclick = () => dialog.close();
 const lookNow = () => ({ theme: $("theme").value, opacity: parseInt($("opacity").value, 10), plain_window: $("plain").checked,
-                         auto_update: $("auto-update").checked });
+                         auto_update: $("auto-update").checked,
+                         ...(Number.isFinite(parseFloat($("cap").value)) ? { daily_cap: parseFloat($("cap").value) } : {}) });
 $("theme").onchange = $("opacity").oninput = () => applyLook($("theme").value, parseInt($("opacity").value, 10));   // see it before saving
 $("save").onclick = async () => {
   const saved = await post("/api/settings", { wow_dir: $("folder").value, ...modelNow(), ...lookNow() });

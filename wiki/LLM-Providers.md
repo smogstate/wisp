@@ -14,6 +14,8 @@
 > - **The `openai` package** is used for the OpenAI-shaped wire.
 > - One key and one remembered model per provider, in the Windows credential store; the model list comes from the provider's own catalogue.
 >
+> - **A daily spending limit, on from the first day** (built 2026-11-10; Denis's rule: hard caps, fail closed). Every model response's cost is added to a ledger for the day, across all conversations (`%APPDATA%\Wisp\spend.json`, two months kept). The limit is $5 a day unless changed in Settings; 0 is "no limit" and has to be chosen. Once it is reached, a question is refused before anything is sent. A run that crosses it is stopped **between two requests**, so it can overshoot by at most the one response that crossed it. The meter shows today's spend against the limit. **It counts only what Wisp can price**: Kimi has no known price and is not counted; OpenRouter's reported cost and web searches are.
+>
 > Tested with the real `openai` SDK against local stand-ins for both APIs. **Not yet run against Kimi or OpenRouter themselves.**
 >
 > Status of the text below: draft 2026-11-09. Requirement from Denis: **BYOK**, several providers supported — **Anthropic, Kimi, OpenRouter** — abstracted the way kintale does it. Nothing here is built; the code block has not been run.

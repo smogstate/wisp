@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -556,6 +557,51 @@ def test_farming(wow: Path, tmp: Path):
     assert run_tool(quiet, "farming", {"view": "gathering"})["worth"][0]["node"] == "Peacebloom", "without loot, a herb is priced by its own name"
 
 
+def test_spending_cap(wow: Path):
+    """A limit on what a day may cost, across every conversation: on from the first day, and it fails closed."""
+    app = App(wow, fake=True)
+    assert app.spend() == {"today": 0.0, "cap": 5.0}, "a limit without being asked for one"
+    app.new_chat()
+    events = list(app.ask("where do I hand in the wolf quest?"))
+    assert events[-1] == {"type": "done", "reason": "end"}
+    cost = app.chat.usage["cost"]
+    assert cost > 0 and abs(app.spent_today() - cost) < 1e-9, "every model response is added to the day"
+
+    # a limit the next answer will cross: it stops between two requests, says why, and sends nothing more
+    assert app.save_settings({"daily_cap": round(cost + 0.01, 2)})["spend"]["cap"] == round(cost + 0.01, 2)
+    before = app.chat.usage["requests"]
+    events = list(app.ask("and again?"))
+    assert events[-1] == {"type": "done", "reason": "stopped"}, events[-1]
+    assert [e["message"] for e in events if e["type"] == "error"][0].startswith("Stopped here: today's spending limit of $")
+    assert app.chat.usage["requests"] == before + 2 and app.spent_today() >= app.prefs["daily_cap"], "it had three to make"
+    assert app.chat.messages[-1]["role"] == "assistant", "the conversation is left in a state it can continue from"
+
+    # reached: not one request more, in this conversation or a new one
+    spent, asked = app.spent_today(), app.chat.usage["requests"]
+    refused = list(app.ask("one more?"))
+    assert refused[0]["type"] == "error" and "is reached" in refused[0]["message"] and refused[-1] == {"type": "done", "reason": "error"}
+    assert app.chat.usage["requests"] == asked and app.spent_today() == spent and len(app.session["turns"]) == 2
+    app.new_chat()
+    assert list(app.ask("in a new conversation?"))[0]["type"] == "error"
+
+    # raised, or switched off by choice, it answers again; nonsense is ignored
+    app.save_settings({"daily_cap": 0})
+    assert list(app.ask("now?"))[-1] == {"type": "done", "reason": "end"} and app.spend()["cap"] == 0
+    for nonsense in (-1, 5000, "5", True, None):
+        app.save_settings({"daily_cap": nonsense})
+    assert app.prefs["daily_cap"] == 0
+
+    # another day starts from nothing; old days are kept two months
+    ledger = {f"2026-{m:02d}-{d:02d}": 1.0 for m in (1, 2, 3) for d in range(1, 29)}
+    app.spend_file.write_text(json.dumps(ledger))
+    assert app.spent_today() == 0.0
+    app.add_spend(0.25)
+    kept = json.loads(app.spend_file.read_text())
+    assert len(kept) == 60 and kept[time.strftime("%Y-%m-%d")] == 0.25 and "2026-01-01" not in kept
+    app.spend_file.write_text("not json")
+    assert app.spent_today() == 0.0, "a damaged file is an empty one"
+
+
 def test_update(tmp: Path):
     """Wisp.exe keeping itself current: what is published, the download, its checks, the swap."""
     import hashlib
@@ -912,6 +958,7 @@ if __name__ == "__main__":
         test_without_questie(Path(b))
         test_bad_files(Path(c))
         test_server(wow)
+        test_spending_cap(wow)
         test_settings_api(wow)
         with tempfile.TemporaryDirectory() as e:
             test_sessions(wow, Path(e))

@@ -37,6 +37,7 @@ UI = Path(__file__).with_name("ui.html")
 SIZE = (430, 680)   # the open window
 ORB = 64            # the collapsed one: a small square holding the wisp
 THEMES = ("auto", "dark", "light")
+DAILY_CAP = 5.0   # dollars a day unless the player sets another limit: a cap from the first day
 NO_FOLDER = ("That folder has no Interface\\AddOns inside. Choose the World of Warcraft folder "
              "or its _forever_ folder.")
 
@@ -171,7 +172,11 @@ class App:
         self.prefs = {"theme": saved.get("theme") if saved.get("theme") in THEMES else "auto",
                       "opacity": saved.get("opacity") if isinstance(saved.get("opacity"), int) else 85,
                       "plain_window": bool(saved.get("plain_window")),
-                      "auto_update": saved.get("auto_update") is not False}
+                      "auto_update": saved.get("auto_update") is not False,
+                      # dollars a day across every conversation; 0 is "no limit", which the player must choose
+                      "daily_cap": saved["daily_cap"] if isinstance(saved.get("daily_cap"), (int, float))
+                                   and not isinstance(saved.get("daily_cap"), bool) and 0 <= saved["daily_cap"] <= 1000 else DAILY_CAP}
+        self.spend_file = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-spend-"))) / "spend.json"
         # this copy's own version, and where the newer one stands: off (run from source, or switched off),
         # current, downloading, ready (downloaded and checked: a restart away), failed
         mine = update.current()
@@ -232,6 +237,39 @@ class App:
             return {"error": f"Could not update: {e.strerror or e}. Wisp will try again when it next starts."}
         threading.Timer(0.3, self.close_window).start()   # after this answer has gone out
         return {"restarting": True}
+
+    # -- what today has cost ----------------------------------------------------
+    # One number per day, in dollars, across every conversation: {"2026-11-10": 0.42}.
+    # It counts what Wisp can price. A model with no known price is not counted.
+
+    def _spend(self) -> dict:
+        try:
+            ledger = json.loads(self.spend_file.read_text(encoding="utf-8"))
+            return ledger if isinstance(ledger, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def spent_today(self) -> float:
+        value = self._spend().get(time.strftime("%Y-%m-%d"))
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+
+    def add_spend(self, dollars: float):
+        if dollars <= 0:
+            return
+        ledger, today = self._spend(), time.strftime("%Y-%m-%d")
+        ledger[today] = round(self.spent_today() + dollars, 6)
+        for day in sorted(ledger)[:-60]:   # two months is plenty
+            del ledger[day]
+        try:
+            self.spend_file.parent.mkdir(parents=True, exist_ok=True)
+            partial = self.spend_file.with_suffix(".part")
+            partial.write_text(json.dumps(ledger), encoding="utf-8")
+            os.replace(partial, self.spend_file)
+        except OSError:
+            pass
+
+    def spend(self) -> dict:
+        return {"today": round(self.spent_today(), 4), "cap": self.prefs["daily_cap"]}
 
     def ensure_addon(self):
         """One package: Wisp carries its addon and keeps the game's copy current,
@@ -318,6 +356,7 @@ class App:
                        "fade": self.frameless and os.name == "nt", "collapsed": self.collapsed, "hotkey": self.hotkey},
             "usage": dict(self.chat.usage) if self.chat is not None else None,
             "update": dict(self.update),
+            "spend": self.spend(),
         }
 
     def settings(self) -> dict:
@@ -337,6 +376,7 @@ class App:
             "plain_window": self.prefs["plain_window"],
             "auto_update": self.prefs["auto_update"],
             "update": dict(self.update),
+            "spend": self.spend(),
             "glass": self.frameless,   # either way of being see-through: the slider applies
         }
 
@@ -358,6 +398,9 @@ class App:
             self.prefs["plain_window"] = body["plain_window"]
         if isinstance(body.get("auto_update"), bool):
             self.prefs["auto_update"] = body["auto_update"]
+        cap = body.get("daily_cap")
+        if isinstance(cap, (int, float)) and not isinstance(cap, bool) and 0 <= cap <= 1000:
+            self.prefs["daily_cap"] = round(float(cap), 2)
         if self.persist:
             local.save_config({**local.load_config(), **self.prefs})
         self.apply_alpha()
@@ -507,15 +550,31 @@ class App:
             yield {"type": "error", "message": self.problem}
             yield {"type": "done", "reason": "error"}
             return
+        cap = self.prefs["daily_cap"]
+        if cap and self.spent_today() >= cap:   # fail closed: not one more request once the day's limit is reached
+            yield {"type": "error", "message": f"Today's spending limit of ${cap:.2f} is reached (${self.spent_today():.2f} spent). "
+                                               "It starts again tomorrow; the limit is in Settings."}
+            yield {"type": "done", "reason": "error"}
+            return
         self.stop.clear()
         game = self.load_game()   # re-read: you may have logged out since the last question
         session, chat = self.session, self.chat
+        counted, over = chat.usage["cost"], [False]
         turn = {"items": [{"type": "user", "text": question}], "end": 0}
         session["turns"].append(turn)
         session["title"] = session["title"] or question[:60]
         session["provider"], session["model"] = chat.provider, chat.model
         try:
-            for event in answer(chat, game, question, self.stop.is_set, research=research):
+            for event in answer(chat, game, question, lambda: self.stop.is_set() or over[0], research=research):
+                if event["type"] == "usage":   # after every model response: add what it cost to the day
+                    self.add_spend(event["usage"]["cost"] - counted)
+                    counted = event["usage"]["cost"]
+                    over[0] = bool(cap) and self.spent_today() >= cap
+                if event["type"] == "done" and event["reason"] == "stopped" and over[0] and not self.stop.is_set():
+                    said = {"type": "error", "message": f"Stopped here: today's spending limit of ${cap:.2f} is reached. "
+                                                        "It starts again tomorrow; the limit is in Settings."}
+                    record(turn, said)
+                    yield said
                 record(turn, event)
                 yield event
         finally:   # also when the window went away mid-answer
