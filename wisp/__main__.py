@@ -343,12 +343,12 @@ def smoke(window, result: dict):
         result["engine"] = js("navigator.userAgent")
         js("document.getElementById('input').value = 'where do I hand in the wolf quest?'; "
            "document.getElementById('form').requestSubmit(); true")
-        result["answered"] = wait("!!document.querySelector('.card') && document.getElementById('send').textContent === 'Send'")
+        result["answered"] = wait("!!document.querySelector('.card') && document.getElementById('send').dataset.state === 'send'")
         result["card"] = js("document.querySelector('.card li') ? document.querySelector('.card li').textContent : null")
         result["answer"] = js("[...document.querySelectorAll('.msg.wisp')].map(e => e.textContent).filter(Boolean).join(' | ')")
         js("document.querySelector('.card button') && document.querySelector('.card button').click(); true")
-        wait("document.querySelector('.card button') && document.querySelector('.card button').textContent !== 'Copy'", 10)
-        result["copy_button"] = js("document.querySelector('.card button') ? document.querySelector('.card button').textContent : null")
+        wait("document.querySelector('.card button') && !!document.querySelector('.card button').dataset.state", 10)
+        result["copy_button"] = js("document.querySelector('.card button') ? document.querySelector('.card button').dataset.state : null")
         result["key_store"] = local.key_store_problem() or "works"
         # saving the key is part of the first run on Windows; elsewhere the environment variable does
         key_store_ok = result["key_store"] == "works" or os.name != "nt"
