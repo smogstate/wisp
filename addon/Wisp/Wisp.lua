@@ -701,6 +701,39 @@ local function xpRecord()
   return { rested = GetXPExhaustion and GetXPExhaustion() or nil, days = days }
 end
 
+-------------------------------------------------------------- own auctions ----
+-- What the character has up for sale, as the auction house lists it whenever its Auctions tab
+-- is looked at. Wisp asks the auction house nothing itself: it only reads what is already shown.
+--   WispData.auctions[character] = { seenAt, list = { { item, name, quantity, buyout, bid, sold, secondsLeft, bidder } } }
+
+local function ownAuctionsSeen()
+  local A = C_AuctionHouse
+  local list = A and A.GetOwnedAuctions and A.GetOwnedAuctions()
+  if type(list) ~= "table" then return end
+  local out = {}
+  for _, auction in ipairs(list) do
+    local id = type(auction.itemKey) == "table" and auction.itemKey.itemID
+    if type(id) == "number" and #out < 300 then
+      out[#out + 1] = { item = id, name = knownName(id), quantity = auction.quantity, buyout = auction.buyoutAmount,
+                        bid = auction.bidAmount, sold = auction.status == 1 or nil, secondsLeft = auction.timeLeftSeconds,
+                        bidder = auction.bidder and true or nil }
+    end
+  end
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.auctions = WispData.auctions or {}
+  WispData.auctions[myKey()] = { seenAt = time(), list = out }
+end
+
+local function ownAuctions(wanted)
+  local mine = type(WispData) == "table" and type(WispData.auctions) == "table" and WispData.auctions[myKey()]
+  if type(mine) ~= "table" or type(mine.list) ~= "table" then return nil end
+  for _, auction in ipairs(mine.list) do
+    wanted[auction.item] = true
+    auction.name = knownName(auction.item) or auction.name
+  end
+  return mine
+end
+
 ------------------------------------------------------- auction house mail ----
 -- What was really bought and sold: every auction ends in a mail with an invoice (who paid what,
 -- the deposit, the house's cut). The addon notes each one when the mailbox is open, once, and
@@ -876,6 +909,8 @@ local function buildSnapshot()
       for _, need in ipairs(quest.items or {}) do wanted[need.id] = true end
     end
   end
+  local okO, listed = pcall(ownAuctions, wanted)
+  if not okO then listed = nil end
   local okL, looted = pcall(lootRecord, wanted, DB)
   if not okL then looted = {} end
   local okS, sources = pcall(itemSources, wanted, DB, ZoneDB)   -- before every priced item joins the list
@@ -920,6 +955,7 @@ local function buildSnapshot()
     gather = nodes,
     loot = looted,
     auctionMail = deals,
+    ownAuctions = listed,
     xp = progress,
     vendor = vendor,
     quests = log,
@@ -1070,6 +1106,7 @@ frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:RegisterEvent("PLAYER_XP_UPDATE")
 frame:RegisterEvent("QUEST_TURNED_IN")
+frame:RegisterEvent("OWNED_AUCTIONS_UPDATED")
 frame:RegisterEvent("MAIL_SHOW")
 frame:RegisterEvent("MAIL_INBOX_UPDATE")
 frame:RegisterEvent("LOOT_OPENED")
@@ -1089,6 +1126,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
     pcall(xpChanged)
   elseif event == "QUEST_TURNED_IN" then
     pcall(questHandedIn, ...)
+  elseif event == "OWNED_AUCTIONS_UPDATED" then
+    pcall(ownAuctionsSeen)
   elseif event == "MAIL_SHOW" or event == "MAIL_INBOX_UPDATE" then
     pcall(scanMail)
   elseif event == "LOOT_OPENED" then

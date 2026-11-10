@@ -121,6 +121,12 @@ For Denis's interest in leveling. Two things the route and the zone comparison l
 
 Limits: time is "time between gains", so a rate is a little generous and says nothing about travel. Quest experience is Questie's figure, not the game's; where Questie has none, the quest simply shows none. Not yet run in the game.
 
+## Your own auctions — built 2026-11-10
+
+- **Read, never asked for.** Forever uses the modern auction house interface (`C_AuctionHouse`). When the player looks at the Auctions tab, the game fires `OWNED_AUCTIONS_UPDATED`, and the addon copies what `GetOwnedAuctions` then holds: item, quantity, the price for one, time left, whether it sold, whether it has a bid. Wisp sends the auction house no query of its own, so it cannot get in the way of the game's limit on queries or of Auctionator's scans. The bidder's name is not kept.
+- **`my_auctions`** sets each auction against the lowest listing from the player's Auctionator scans: still the lowest, or undercut and by how much; time left counted down to the logout; what sold and waits in the mail. As a table card on request.
+- Limits: it is as fresh as the last look at the Auctions tab, and the lowest listing may be older or newer than that look. The lowest listing includes the player's own. Taken on trust from the modern interface: the price is for one.
+
 ## Auction house mail: what really sold — built 2026-11-10
 
 Denis: "read buys and sells from auction house mail". Until now every gold figure in Wisp was a listing. The auction house's mail is the one place the game states what really happened.

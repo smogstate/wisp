@@ -490,6 +490,13 @@ local function goLeveling(boot)
   gain(boot, 800, 4200)   -- after a long break: that break is not time spent gaining
   if flags:find("levelup") then gain(boot, 30, 500, 11000) end   -- the bar fills and starts again
 end
+-- The character's own auctions, as the auction house's Auctions tab lists them.
+C_AuctionHouse = { GetOwnedAuctions = function() return {
+  { auctionID = 1, itemKey = { itemID = 4306 }, status = 0, quantity = 40, buyoutAmount = 500, timeLeftSeconds = 30000 },    -- dearer than the lowest
+  { auctionID = 2, itemKey = { itemID = 4305 }, status = 0, quantity = 5, buyoutAmount = 2000, timeLeftSeconds = 7200, bidder = "Someone" },
+  { auctionID = 3, itemKey = { itemID = 7048 }, status = 1, quantity = 1, buyoutAmount = 12000 },                             -- sold, money waiting
+  { auctionID = 4, itemKey = { itemID = 2321 }, status = 0, quantity = 10, buyoutAmount = 50, timeLeftSeconds = 100 },        -- nothing known to compare with
+} end }
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end
@@ -508,6 +515,7 @@ if mode == "snapshot" then
   end
   if not flags:find("noloot") then goLooting(boot) end
   if not flags:find("nomail") then openMailbox(boot) end
+  if not flags:find("noauctions") then boot.scripts.OnEvent(boot, "OWNED_AUCTIONS_UPDATED") end
   if not flags:find("noprofession") then
     boot.scripts.OnEvent(boot, "TRADE_SKILL_SHOW")
     boot.scripts.OnEvent(boot, "TRADE_SKILL_LIST_UPDATE")   -- it comes again and again: said in chat once

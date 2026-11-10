@@ -537,6 +537,60 @@ class Game:
     def _signed(copper) -> str:
         return ("-" if copper < -0.5 else "+" if copper > 0.5 else "") + coins(abs(copper))
 
+    def tool_my_auctions(self, args: dict) -> dict:
+        """What the character has up for sale, set against the lowest listing Auctionator saw."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        record = self.snapshot.get("ownAuctions")
+        if not isinstance(record, dict) or not isinstance(record.get("list"), list):
+            return {"error": "Wisp has not seen the character's auctions yet. It reads them whenever the Auctions tab of the "
+                             "auction house is open: the player opens that tab once, then logs out."}
+        seen, taken = record.get("seenAt"), self.snapshot.get("takenAt")
+        since = max(0, taken - seen) if isinstance(seen, (int, float)) and isinstance(taken, (int, float)) else 0
+        craft, rows, listed, waiting, undercut = self.crafting, [], 0, 0, 0
+        for a in record["list"]:
+            if not isinstance(a, dict) or not isinstance(a.get("item"), int) or not isinstance(a.get("buyout"), (int, float)) or a["buyout"] <= 0:
+                continue
+            qty = a["quantity"] if isinstance(a.get("quantity"), int) and a["quantity"] > 0 else 1
+            each, name = int(a["buyout"]), _clean(a.get("name"), 80) or craft.name(a["item"])
+            entry = {"item": name, "quantity": qty, "each": coins(each), "total": coins(each * qty), "_total": each * qty}
+            lowest = craft.prices.get(a["item"], (None,))[0]
+            if a.get("sold"):
+                entry["status"] = "sold: the money is in the mail"
+                waiting += each * qty
+            else:
+                left = (a["secondsLeft"] - since) if isinstance(a.get("secondsLeft"), (int, float)) else None
+                entry["status"] = ("time left unknown" if left is None else "has run out by now" if left <= 0
+                                   else f"about {max(1, round(left / 3600))}h left" if left >= 3600 else "under an hour left")
+                if a.get("bidder"):
+                    entry["status"] += ", has a bid"
+                listed += each * qty
+                if not lowest:
+                    entry["against_the_market"] = "no listing seen to compare with"
+                elif each <= lowest:
+                    entry["against_the_market"] = "the lowest, or level with it"
+                else:
+                    entry.update(lowest_seen=coins(lowest), against_the_market=f"undercut: {(each - lowest) / each:.0%} dearer than the lowest")
+                    undercut += 1
+            rows.append(entry)
+        rows.sort(key=lambda r: (-r["_total"], r["item"]))
+        out = {"auctions": [{k: v for k, v in r.items() if k[0] != "_"} for r in rows[:60]], "listed_for": coins(listed),
+               "sold_and_waiting_in_the_mail": coins(waiting), "undercut": undercut,
+               "seen": f"{round(since / 3600, 1)} hours before the last logout" if since >= 1800 else "just before the last logout",
+               "note": "The character's own auctions as the Auctions tab last showed them, and the lowest listing from the player's "
+                       "own Auctionator scans, which may be older or newer than that look and includes the player's own listing. "
+                       "The price is for one. An auction may have sold, been bid on or run out since."}
+        if args.get("show") is True and rows:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Your auctions", "table": {
+                "title": f"{len(rows)} auction{'s' if len(rows) != 1 else ''} up", "sub": f"listed for {out['listed_for']}"
+                + (f" · {undercut} undercut" if undercut else "") + (f" · {out['sold_and_waiting_in_the_mail']} sold, in the mail" if waiting else ""),
+                "columns": ["Item", "Qty", "Each", "Lowest", "Status"],
+                "rows": [[r["item"], r["quantity"], r["each"], r.get("lowest_seen", "you" if r.get("against_the_market", "").startswith("the lowest") else "–"),
+                          r["status"].split(":")[0].replace("about ", "")] for r in rows[:20]],
+                "notes": ["As your Auctions tab last showed them. Lowest is from your own scans and may be older."]}})
+            out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
+        return out
+
     def _deal(self, d: dict) -> dict:
         """One auction mail in figures. A sale brings its price less the house's cut; the deposit
         is the player's own money coming back, so it is no part of what was made."""
@@ -1470,6 +1524,18 @@ TOOLS = [
                                                                 "and the price are then taken from the mail, and nothing else is needed."},
                 "show": {"type": "boolean", "description": "true to also show the player a card: the table, or with an item its chart."},
             },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "my_auctions",
+        "description": "What the character has up for sale at the auction house right now: each auction's quantity, "
+                       "price for one, time left, whether it has a bid or has sold, and whether it is still the lowest "
+                       "or has been undercut, against the lowest listing Auctionator saw. Use it for 'what do I have "
+                       "listed', 'have I been undercut', 'should I repost'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"show": {"type": "boolean", "description": "true to also show the player a table card."}},
             "additionalProperties": False,
         },
     },

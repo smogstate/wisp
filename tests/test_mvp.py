@@ -740,6 +740,29 @@ def test_auction_mail(wow: Path, tmp: Path):
     assert run_tool(quiet, "auction_ledger", {})["deals"] == []
 
 
+def test_my_auctions(wow: Path, tmp: Path):
+    """What the character has up for sale, and whether it is still the lowest."""
+    game = Game.load(wow)
+    out = run_tool(game, "my_auctions", {"show": True})
+    by_item = {a["item"]: a for a in out["auctions"]}
+    assert by_item["Silk Cloth"] == {"item": "Silk Cloth", "quantity": 40, "each": "5s", "total": "2g", "status": "about 8h left",
+                                     "lowest_seen": "4s 50c", "against_the_market": "undercut: 10% dearer than the lowest"}
+    assert by_item["Bolt of Silk Cloth"]["against_the_market"] == "the lowest, or level with it" and "has a bid" in by_item["Bolt of Silk Cloth"]["status"]
+    assert by_item["Azure Silk Hood"]["status"].startswith("sold") and "against_the_market" not in by_item["Azure Silk Hood"]
+    assert by_item["Fine Thread"]["against_the_market"] == "no listing seen to compare with"
+    assert (out["listed_for"], out["sold_and_waiting_in_the_mail"], out["undercut"]) == ("3g 5s", "1g 20s", 1)
+    table = game.cards[-1]["table"]
+    assert table["sub"] == "listed for 3g 5s · 1 undercut · 1g 20s sold, in the mail" and table["rows"][0] == ["Silk Cloth", 40, "5s", "4s 50c", "8h left"]
+    assert "Someone" not in json.dumps(game.snapshot["ownAuctions"]), "who bid stays in the game"
+    # seen long before the logout: the time left is counted down, and what has run out says so
+    later = Game(dict(game.snapshot, takenAt=game.snapshot["takenAt"] + 3 * 3600))
+    gone = {a["item"]: a["status"] for a in run_tool(later, "my_auctions", {})["auctions"]}
+    assert gone["Bolt of Silk Cloth"] == "has run out by now, has a bid" and gone["Silk Cloth"] == "about 5h left"
+    assert run_tool(later, "my_auctions", {})["seen"].startswith("3.") and "hours before the last logout" in run_tool(later, "my_auctions", {})["seen"]
+    unseen = Game.load(make_wow_dir(tmp, flags="noauctions"))
+    assert "Auctions tab" in run_tool(unseen, "my_auctions", {})["error"]
+
+
 def test_gathering(wow: Path, tmp: Path):
     """GatherMate2's nodes: which zones have the most, a route through one, and the way in from an item."""
     game = Game.load(wow)
@@ -1301,6 +1324,8 @@ if __name__ == "__main__":
             test_investments(wow, Path(v))
         with tempfile.TemporaryDirectory() as m:
             test_auction_mail(wow, Path(m))
+        with tempfile.TemporaryDirectory() as o:
+            test_my_auctions(wow, Path(o))
         with tempfile.TemporaryDirectory() as r:
             test_gold(wow, Path(r))
         with tempfile.TemporaryDirectory() as k:
