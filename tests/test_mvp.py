@@ -264,7 +264,7 @@ def test_crafting(wow: Path, tmp: Path):
         {"item": "Blue Dye", "needed": 20, "made_in_this_plan": 0, "from_bags": 0, "to_buy": 20},
         {"item": "Fine Thread", "needed": 10, "made_in_this_plan": 0, "from_bags": 3, "to_buy": 7}], plan["materials"]
     assert plan["to_buy_cost"].startswith("2g 16s plus") and plan["no_auction_price_for"] == ["Blue Dye", "Fine Thread"]
-    assert "seen today" in plan["prices"] and "_buy" not in plan
+    assert "seen today" in plan["prices"] and "_buy" not in plan and "_card" not in plan
     late = run_tool(game, "craft_plan", {"crafts": [{"recipe_id": 3839, "times": 25}, {"recipe_id": 3813, "times": 1}]})
     assert "at most the first 20 crafts" in late["steps"][0]["warning"] and "grey" in late["steps"][1]["warning"]
     for bad in ([], [{"recipe_id": 1, "times": 1}], [{"recipe_id": 3839, "times": 0}], [{"recipe_id": 3839, "times": 1.5}], "x"):
@@ -273,19 +273,34 @@ def test_crafting(wow: Path, tmp: Path):
     made = run_tool(game, "shopping_list", {"name": "Tailoring 150-170", "crafts": crafts})
     assert made["list"] == ["48 × Silk Cloth", "20 × Blue Dye", "7 × Fine Thread"] and "warning" not in made
     card = game.cards[-1]
-    assert card["lines"][0] == {"addon": "Auctionator", "text": "Shopping list: Tailoring 150-170",
-                                "detail": "3 items · about 2g 16s · 2 without a price"}
-    assert card["lines"][1] == {"text": "48 × Silk Cloth", "detail": "4s 50c each"} and card["lines"][2]["detail"] == ""
+    assert card["lines"] == [] and "Auctionator" in card["hint"]
+    # the plan itself is laid out on the card, not left to the model's prose
+    laid = card["plan"]
+    assert (laid["title"], laid["sub"]) == ("Tailoring 150-170", "Tailoring, skill 150")
+    assert laid["steps"] == [
+        {"text": "20 × Bolt of Silk Cloth", "colour": "yellow", "each": "4 Silk Cloth", "warning": ""},
+        {"text": "10 × Azure Silk Hood", "colour": "orange", "each": "2 Bolt of Silk Cloth, 2 Blue Dye, 1 Fine Thread", "warning": ""}]
+    assert laid["materials"] == [
+        {"item": "Silk Cloth", "need": 80, "bags": 32, "buy": 48, "cost": "2g 16s", "unpriced": False},
+        {"item": "Blue Dye", "need": 20, "bags": 0, "buy": 20, "cost": "", "unpriced": True},
+        {"item": "Fine Thread", "need": 10, "bags": 3, "buy": 7, "cost": "", "unpriced": True}], "bolts the plan makes for itself are a step, not a material"
+    assert laid["total"] == "To buy: about 2g 16s · 2 without an auction price" and "Only orange" in laid["notes"][0]
+    assert "Do not repeat" in made["note"]
     pasted = stub("paste", card["wisp"])
     assert 'LIST Tailoring 150-170 = "Silk Cloth";48 + "Blue Dye";20 + "Fine Thread";7' in pasted, pasted
     assert any("shopping list \"Tailoring 150-170\" with 3 items" in l for l in pasted)
 
     named = run_tool(game, "shopping_list", {"name": "x", "items": [{"name": "silk cloth", "quantity": 5}, {"name": "Mystery; Dust|", "quantity": 2}]})
     assert named["list"] == ["5 × Silk Cloth", "2 × Mystery Dust"] and named["names_wisp_could_not_check"] == ["Mystery Dust"]
+    assert "plan" not in game.cards[-1] and game.cards[-1]["lines"] == [
+        {"addon": "Auctionator", "text": "Shopping list: x", "detail": "2 items · about 22s 50c · 1 without a price"},
+        {"text": "5 × Silk Cloth", "detail": "4s 50c each"}, {"text": "2 × Mystery Dust", "detail": ""}]
     assert "error" in run_tool(game, "shopping_list", {"name": "x"})
     assert "error" in run_tool(game, "shopping_list", {"name": "x", "crafts": crafts, "items": [{"name": "a", "quantity": 1}]})
     assert "error" in run_tool(game, "shopping_list", {"name": "x", "items": [{"name": "a", "quantity": True}]})
-    assert "nothing to buy" in run_tool(game, "shopping_list", {"name": "x", "crafts": [{"recipe_id": 3839, "times": 8}]})["error"]
+    covered = run_tool(game, "shopping_list", {"name": "x", "crafts": [{"recipe_id": 3839, "times": 8}]})
+    assert covered["list"] == [] and "no Copy button" in covered["note"]
+    assert "wisp" not in game.cards[-1] and game.cards[-1]["lines"] == [] and game.cards[-1]["plan"]["total"] == "Nothing to buy"
 
     # the addon checks a pasted list as strictly as a waypoint
     def paste(cmd, flags=""):

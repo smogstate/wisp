@@ -339,6 +339,7 @@ class Game:
             return {"error": self.problem}
         plan = self.crafting.plan(args.get("crafts"))
         plan.pop("_buy", None)
+        plan.pop("_card", None)
         return plan
 
     def tool_shopping_list(self, args: dict) -> dict:
@@ -347,14 +348,12 @@ class Game:
         crafts, items = args.get("crafts"), args.get("items")
         if (crafts is None) == (items is None):
             return {"error": "give either crafts (to buy what a plan lacks) or items, not both"}
-        craft, unchecked = self.crafting, []
+        craft, unchecked, plan = self.crafting, [], None
         if crafts is not None:
             plan = craft.plan(crafts)
             if "error" in plan:
                 return plan
             buy = [(item, craft.name(item), count) for item, count in plan["_buy"]]
-            if not buy:
-                return {"error": "nothing to buy: the bags and the plan's own crafts cover every material"}
         else:
             if not isinstance(items, list) or not 1 <= len(items) <= 60:
                 return {"error": "items must be a list of 1 to 60 {name, quantity}"}
@@ -373,21 +372,30 @@ class Game:
         total = sum(craft.prices[item][0] * count for item, _, count in buy if item in craft.prices)
         priced = sum(1 for item, _, _ in buy if item in craft.prices)
         about = (f"about {coins(total)}" + ("" if priced == len(buy) else f" · {len(buy) - priced} without a price")) if priced else "prices unknown"
-        card = {
-            "id": f"card{len(self.cards) + 1}",
-            "lines": [{"addon": "Auctionator", "text": f"Shopping list: {title}",
-                       "detail": f"{len(buy)} item{'s' if len(buy) != 1 else ''} · {about}"}]
-                     + [{"text": f"{count} × {name}",
-                         "detail": f"{coins(craft.prices[item][0])} each" if item in craft.prices else ""}
-                        for item, name, count in buy],
-            "wisp": encode_wisp1([{"do": "auctionator.shopping_list", "name": title,
-                                   "items": [{"name": name, "quantity": count, **({"id": item} if item else {})}
-                                             for item, name, count in buy]}]),
-        }
+        header = {"addon": "Auctionator", "text": f"Shopping list: {title}",
+                  "detail": f"{len(buy)} item{'s' if len(buy) != 1 else ''} · {about}"}
+        card = {"id": f"card{len(self.cards) + 1}", "lines": []}
+        if plan:   # the whole plan, laid out: the steps, a table of materials, the total
+            card["plan"] = {"title": title, **plan["_card"]}
+            card["hint"] = "Shopping list for Auctionator: Copy, then in the game Ctrl+V twice"
+        else:
+            card["lines"] = [header] + [{"text": f"{count} × {name}",
+                                         "detail": f"{coins(craft.prices[item][0])} each" if item in craft.prices else ""}
+                                        for item, name, count in buy]
+        if buy:
+            card["wisp"] = encode_wisp1([{"do": "auctionator.shopping_list", "name": title,
+                                          "items": [{"name": name, "quantity": count, **({"id": item} if item else {})}
+                                                    for item, name, count in buy]}])
         self.cards.append(card)
-        out = {"shown": len(buy), "list": [f"{count} × {name}" for _, name, count in buy],
+        if not buy:
+            return {"shown": "the plan, as a card with its steps and materials", "list": [],
+                    "note": "Nothing needs buying: the bags and the plan's own crafts cover every material, so the card "
+                            "has no Copy button. Do not repeat the card's steps and numbers in your text."}
+        out = {"shown": "the plan as a card: steps, a materials table, the cost, and a Copy button" if plan else len(buy),
+               "list": [f"{count} × {name}" for _, name, count in buy],
                "note": "A card with a Copy button is now shown to the player. Nothing has happened in the game yet: the "
-                       "player copies it, pastes it into the game, and the list appears in Auctionator's Shopping tab."}
+                       "player copies it, pastes it into the game, and the list appears in Auctionator's Shopping tab."
+                       + (" Do not repeat the card's steps and numbers in your text." if plan else "")}
         if unchecked:
             out["names_wisp_could_not_check"] = unchecked
         if not craft.has_auctionator:
@@ -485,10 +493,12 @@ TOOLS = [
     },
     {
         "name": "shopping_list",
-        "description": "Show the player a card that creates a shopping list in the Auctionator addon, with a quantity "
-                       "for each item. Give crafts (the same as for craft_plan) to list exactly what that plan still "
-                       "needs bought, or items to list things by name. The list is created only when the player "
-                       "pastes the card into the game.",
+        "description": "Show the player a card. With crafts (the same as for craft_plan) it is the whole crafting "
+                       "plan laid out: the steps in the order given, a table of materials with what the bags cover "
+                       "and what to buy, the cost, and a Copy button that creates the shopping list for exactly the "
+                       "remainder in the Auctionator addon. Put the crafts in the order the player should do them. "
+                       "With items it is a plain shopping list by name. The list is created in the game only when "
+                       "the player pastes the card.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -530,15 +540,19 @@ Never state a quest id, an NPC, a location or coordinates from memory. WoW Forev
 of the game, so what you remember is unreliable. If the tools do not have something, say that plainly.
 
 For professions, recipes and their materials come only from the recipes tool, and every quantity and cost from \
-craft_plan: choose what to craft and how many times, and let it do the sums. Prices are the player's own last auction \
+craft_plan: choose what to craft and how many times, and let it do the sums. Once you have chosen, always call \
+shopping_list with those crafts: it shows the player the plan as a card with the steps, the materials, what the bags \
+cover, what to buy and the cost. Your text then adds at most two short sentences the card cannot say, such as why this \
+order or what is uncertain; never repeat its steps or numbers. Prices are the player's own last auction \
 scans and skill is as of the last logout, so say how old they are when it matters. Wisp only knows the recipes the \
 character's profession window listed; for a path beyond those, say what is missing rather than fill it in from memory.
 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
 into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.
 
-Answer in the player's language. Be brief: this is read in a narrow window between fights. Plain text, no markdown, no \
-tables."""
+Answer in the player's language. Be brief: this is read in a narrow window between fights. Never a wall of text: when \
+there are steps or several items, put each on its own short line, numbered when the order matters. Plain text only: no \
+markdown symbols and no tables."""
 
 
 def run_tool(game: Game, name: str, args) -> dict:

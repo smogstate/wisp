@@ -109,6 +109,27 @@
   .card li.sub { display: flex; justify-content: space-between; gap: 10px; padding-left: 12px; margin-top: -3px; }
   .card .detail { color: var(--muted); font-size: 12px; }
   .card .detail:empty { display: none; }
+  .card .plan-title { font-weight: 650; }
+  .card .plan-sub, .card .notes { color: var(--muted); font-size: 12px; }
+  .card h3 { margin: 12px 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+  .card ol.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; counter-reset: step; }
+  .card ol.steps li { display: grid; grid-template-columns: 20px 1fr; column-gap: 8px; counter-increment: step; }
+  .card ol.steps li::before { content: counter(step); grid-row: span 3; width: 20px; height: 20px; border-radius: 50%; font-size: 11px;
+    font-weight: 650; display: grid; place-items: center; background: var(--line); margin-top: 1px; }
+  .card ol.steps li > * { grid-column: 2; }
+  .card .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+  .card .dot.orange { background: #ff8040; } .card .dot.yellow { background: #e6c200; } .card .dot.green { background: #40bf40; }
+  .card .warning { color: var(--danger); font-size: 12px; }
+  .card table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .card th { font-weight: 500; font-size: 11px; color: var(--muted); text-align: right; padding: 0 0 4px 8px; }
+  .card td { text-align: right; padding: 4px 0 4px 8px; border-top: 1px solid var(--line); white-space: nowrap; }
+  .card th:first-child, .card td:first-child { text-align: left; padding-left: 0; white-space: normal; overflow-wrap: anywhere; }
+  .card td.none { color: var(--muted); }
+  .card td.buy { font-weight: 650; }
+  .card .total { margin-top: 8px; font-weight: 650; }
+  .card .notes { margin-top: 6px; }
+  .card { scroll-margin-top: 8px; }
+  .card ul:empty { display: none; }
   .card footer { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
   .card footer span { flex: 1; color: var(--muted); font-size: 12px; }
   .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
@@ -419,11 +440,48 @@ async function copy(text) {
   return ok;
 }
 
+// A crafting plan on a card: the steps in order, a table of materials, the total. Every number is the calculator's.
+function planBlock(plan) {
+  const make = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const block = make("div", "plan");
+  block.append(make("div", "plan-title", plan.title), make("div", "plan-sub", plan.sub));
+  block.append(make("h3", "", "Craft, in this order"));
+  const steps = make("ol", "steps");
+  for (const step of plan.steps) {
+    const li = make("li"), head = make("span");
+    const dot = make("span", "dot " + (step.colour || ""));
+    dot.title = step.colour ? step.colour + " recipe" : "";
+    head.append(dot, step.text);
+    li.append(head);
+    if (step.each) li.append(make("span", "detail", (step.colour ? step.colour + " · " : "") + "each: " + step.each));
+    if (step.warning) li.append(make("span", "warning", step.warning));
+    steps.append(li);
+  }
+  block.append(steps);
+  if (plan.materials.length) {
+    block.append(make("h3", "", "Materials"));
+    const table = make("table"), head = make("tr");
+    for (const name of ["Item", "Need", "In bags", "Buy", "Cost"]) head.append(make("th", "", name));
+    table.append(head);
+    for (const row of plan.materials) {
+      const tr = make("tr");
+      tr.append(make("td", "", row.item), make("td", "", row.need), make("td", row.bags ? "" : "none", row.bags || "–"),
+                make("td", row.buy ? "buy" : "none", row.buy || "–"),
+                make("td", row.cost ? "" : "none", row.cost || (row.unpriced ? "no price" : "–")));
+      table.append(tr);
+    }
+    block.append(table);
+  }
+  block.append(make("div", "total", plan.total));
+  for (const note of plan.notes || []) block.append(make("div", "notes", note));
+  return block;
+}
+
 function showCard(card, into = log) {
-  if (into === log) lastCard = card;
+  if (into === log && card.wisp) lastCard = card;
   const el = add("section", "card", undefined, into);
   const h = document.createElement("h2");
-  h.textContent = "For the game";
+  h.textContent = card.plan ? "Crafting plan" : "For the game";
   const list = document.createElement("ul");
   for (const line of card.lines) {
     const li = document.createElement("li");
@@ -436,7 +494,7 @@ function showCard(card, into = log) {
   }
   const foot = document.createElement("footer");
   const hint = document.createElement("span");
-  hint.textContent = "Copy, then in the game: Ctrl+V twice";
+  hint.textContent = card.hint || "Copy, then in the game: Ctrl+V twice";
   const button = document.createElement("button");
   button.type = "button"; button.className = "primary icon";
   setIcon(button, "copy", "Copy for the game");
@@ -447,8 +505,9 @@ function showCard(card, into = log) {
     hint.textContent = ok ? "Copied. Now in the game: Ctrl+V twice" : "Could not reach the clipboard";
   };
   foot.append(hint, button);
-  el.append(h, list, foot);
+  el.append(h, ...(card.plan ? [planBlock(card.plan)] : []), list, ...(card.wisp ? [foot] : []));
   into.scrollTop = into.scrollHeight;
+  return el;
 }
 
 // ---- a saved conversation, drawn again ----
@@ -502,7 +561,7 @@ function setRunning(on) {
 async function ask(text) {
   log.querySelector(".hello")?.remove();
   add("div", "msg user", text);
-  let bubble = add("div", "msg wisp");
+  let bubble = add("div", "msg wisp"), planEl = null;
   setRunning(true);
   if (collapsed) orb.dataset.state = "thinking";
   try {
@@ -522,7 +581,7 @@ async function ask(text) {
         if (collapsed && event.type === "done" && orb.dataset.state !== "card") orb.dataset.state = "ready";
         if (event.type === "text") { bubble.textContent += event.text; log.scrollTop = log.scrollHeight; }
         else if (event.type === "tool") { add("div", "trace", (event.ok ? "looked up: " : "lookup failed: ") + event.name); bubble = add("div", "msg wisp"); }
-        else if (event.type === "card") { showCard(event.card); bubble = add("div", "msg wisp"); }
+        else if (event.type === "card") { const el = showCard(event.card); if (event.card.plan) planEl = el; bubble = add("div", "msg wisp"); }
         else if (event.type === "usage") { usage = event.usage; showMeter(); }
         else if (event.type === "error") add("div", "msg error", event.message);
         else if (event.type === "done" && event.reason === "stopped") add("div", "note", "stopped");
@@ -536,6 +595,7 @@ async function ask(text) {
     const view = await (await api("/api/session")).json();
     if (view.turns.length > turnCount) { turnCount = view.turns.length; forkButton(turnCount - 1); }
   } catch {}
+  if (planEl) planEl.scrollIntoView({ block: "start" });   // a plan is read from its first step, not from its last line
   input.focus();
 }
 

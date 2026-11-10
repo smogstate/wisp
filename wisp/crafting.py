@@ -131,7 +131,7 @@ class Crafting:
         the plan itself makes along the way, what the bags cover, what to buy."""
         if not isinstance(crafts, list) or not 1 <= len(crafts) <= 30:
             return {"error": "crafts must be a list of 1 to 30 {recipe_id, times}"}
-        steps, need, made = [], {}, {}
+        steps, need, made, shown, professions = [], {}, {}, [], {}
         for craft in crafts:
             recipe = self.recipes.get(craft.get("recipe_id")) if isinstance(craft, dict) else None
             times = _int(craft.get("times"), 1, 5000) if isinstance(craft, dict) else None
@@ -152,7 +152,12 @@ class Crafting:
             for item, count in recipe["reagents"]:
                 need[item] = need.get(item, 0) + times * count
             steps.append(step)
-        materials, total, unpriced, oldest, buy = [], 0, [], 0, []
+            professions[recipe["profession"]] = skill
+            # the same step as the player sees it on the plan card
+            shown.append({"text": f"{times} × {recipe['name']}", "colour": recipe["colour"],
+                          "each": ", ".join(f"{count} {self.name(item)}" for item, count in recipe["reagents"]),
+                          "warning": step.get("warning") or ("not learned yet" if not recipe["learned"] else "")})
+        materials, total, unpriced, oldest, buy, rows = [], 0, [], 0, [], []
         for item, wanted in need.items():
             from_plan = min(made.get(item, 0), wanted)
             from_bags = min(self.bags.get(item, 0), wanted - from_plan)
@@ -168,7 +173,18 @@ class Crafting:
                 else:
                     unpriced.append(self.name(item))
             materials.append(line)
-        out = {"steps": steps, "materials": materials, "to_buy_cost": coins(total), "_buy": buy,
+            if wanted > from_plan:   # what the plan makes for itself is a step, not something to gather
+                rows.append({"item": self.name(item), "need": wanted - from_plan, "bags": from_bags, "buy": to_buy,
+                             "cost": line.get("cost", ""), "unpriced": bool(to_buy) and "cost" not in line})
+        card = {"sub": " · ".join(f"{name}, skill {skill}" if skill is not None else name for name, skill in professions.items()),
+                "steps": shown, "materials": rows,
+                "total": ("Nothing to buy" if not buy else
+                          (f"To buy: about {coins(total)}" if total else "To buy")
+                          + (f" · {len(unpriced)} without an auction price" if unpriced else "")),
+                "notes": ["As of your last logout; the bank is not counted."
+                          + (" Only orange gives a point on every craft: the rest may take more."
+                             if any(step["colour"] != "orange" for step in shown) else "")]}
+        out = {"steps": steps, "materials": materials, "to_buy_cost": coins(total), "_buy": buy, "_card": card,
                "note": "Counted in code from the recipes and the bags as of the last logout; the bank is not counted. "
                        "Only orange recipes give a skill point on every craft, so for yellow and green ones the number "
                        "of crafts needed is an estimate: say so."}
