@@ -15,9 +15,11 @@ import json
 import os
 import secrets
 import sys
+import tempfile
 import threading
 import time
 import traceback
+import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,6 +27,7 @@ from pathlib import Path
 from . import local
 from .game import Game, find_saved_file
 from .llm import MODEL, AnthropicChat, FakeChat, answer
+from .sessions import Sessions, record
 
 UI = Path(__file__).with_name("ui.html")
 NO_FOLDER = ("That folder has no Interface\\AddOns inside. Choose the World of Warcraft folder "
@@ -107,6 +110,9 @@ class App:
         self.chat = None
         self.problem = None                      # why the model cannot be used, in words
         self.window = None                       # the pywebview window, when there is one
+        # conversations are files on this PC; a throwaway folder when nothing real may be touched
+        self.sessions = Sessions(local.APP_DIR / "sessions" if persist else Path(tempfile.mkdtemp(prefix="wisp-sessions-")))
+        self.session = self.sessions.new()
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
 
     def ensure_addon(self):
@@ -125,17 +131,20 @@ class App:
         else:
             self.addon_note = "Wisp updated its addon in the game. Restart the game so the new version loads."
 
-    def new_chat(self):
+    def new_chat(self, session: dict | None = None):
+        """Start a fresh conversation, or continue a saved one."""
+        self.session = session or self.sessions.new()
+        history = {"messages": self.session["messages"], "usage": self.session["usage"]}
         self.chat, self.problem = None, None
         if self.fake:
-            self.chat = FakeChat()
+            self.chat = FakeChat(**history)
             return
         key, _ = local.get_key()
         if key is None:
             self.problem = "No API key yet. Open Settings and paste your Anthropic key."
             return
         try:
-            self.chat = AnthropicChat(key)
+            self.chat = AnthropicChat(key, **history)
         except ImportError:
             self.problem = "The anthropic package is not installed: pip install anthropic"
         except Exception as e:
@@ -211,7 +220,39 @@ class App:
             return
         self.stop.clear()
         game = Game.load(self.wow_dir)   # re-read: you may have logged out since the last question
-        yield from answer(self.chat, game, question, self.stop.is_set)
+        session, chat = self.session, self.chat
+        turn = {"items": [{"type": "user", "text": question}], "end": 0}
+        session["turns"].append(turn)
+        session["title"] = session["title"] or question[:60]
+        try:
+            for event in answer(chat, game, question, self.stop.is_set):
+                record(turn, event)
+                yield event
+        finally:   # also when the window went away mid-answer
+            turn["end"] = len(chat.messages)
+            session["messages"], session["usage"] = chat.messages, dict(chat.usage)
+            self.sessions.save(session)
+
+    def view(self, session: dict | None = None) -> dict:
+        """A session as the window needs it: what was shown, never the provider's history."""
+        session = session or self.session
+        return {"id": session["id"], "title": session["title"], "forked": bool(session.get("forked_from")),
+                "turns": [turn["items"] for turn in session["turns"]],
+                "usage": session["usage"] if session is not self.session or self.chat is None else dict(self.chat.usage)}
+
+    def open_session(self, session_id) -> dict:
+        session = self.sessions.load(session_id)
+        if session is None:
+            return {"error": "That conversation could not be opened."}
+        self.new_chat(session)
+        return self.view()
+
+    def fork(self, turn) -> dict:
+        fork = self.sessions.fork(self.session, turn)
+        if fork is None:
+            return {"error": "There is nothing to fork yet."}
+        self.new_chat(fork)
+        return self.view()
 
 
 def make_handler(app: App, port: int):
@@ -254,6 +295,11 @@ def make_handler(app: App, port: int):
                 self.send_json(200, app.state())
             elif path == "/api/settings" and self.allowed():
                 self.send_json(200, app.settings())
+            elif path == "/api/session" and self.allowed():
+                self.send_json(200, app.view())
+            elif path == "/api/sessions" and self.allowed():
+                search = urllib.parse.parse_qs(query).get("q", [""])[0][:200]
+                self.send_json(200, {"sessions": app.sessions.list(search)})
             else:
                 self.send_json(403, {"error": "forbidden"})
 
@@ -277,12 +323,20 @@ def make_handler(app: App, port: int):
                 # only Wisp's own messages go to the clipboard this way
                 ok = isinstance(text, str) and text.startswith("WISP1:") and len(text) < 100_000 and text.isascii()
                 return self.send_json(200, {"copied": bool(ok and local.copy_to_clipboard(text))})
-            if self.path in ("/api/new", "/api/settings", "/api/install-addon", "/api/browse", "/api/check"):
+            if self.path == "/api/sessions/peek":   # look without switching
+                session = app.sessions.load(body.get("id"))
+                return self.send_json(200, app.view(session) if session else {"error": "That conversation could not be opened."})
+            if self.path in ("/api/new", "/api/settings", "/api/install-addon", "/api/browse", "/api/check",
+                             "/api/sessions/open", "/api/fork"):
                 if app.busy.locked():
                     return self.send_json(409, {"error": "Wait for the answer to finish."})
                 if self.path == "/api/new":
                     app.new_chat()
                     return self.send_json(200, {})
+                if self.path == "/api/sessions/open":
+                    return self.send_json(200, app.open_session(body.get("id")))
+                if self.path == "/api/fork":
+                    return self.send_json(200, app.fork(body.get("turn")))
                 if self.path == "/api/settings":
                     return self.send_json(200, app.save_settings(body))
                 if self.path == "/api/install-addon":

@@ -10,7 +10,9 @@ Typing `/` lists every command that exists, filtered as you type; arrows move, E
 
 | Command | Does |
 |---|---|
-| `/new` | Start a new conversation |
+| `/new` | Start a new conversation; the current one is kept |
+| `/sessions` | Earlier conversations: search by title or by anything said, peek at one read-only, reopen it and continue |
+| `/fork` | Continue in a copy of this conversation. A small branch icon under every answer forks from that point |
 | `/cost` | Tokens and cost of this conversation |
 | `/copy` | Copy the last game instructions again |
 | `/check` | Check that everything is set up |
@@ -18,7 +20,9 @@ Typing `/` lists every command that exists, filtered as you type; arrows move, E
 
 **Tokens and cost** are also shown all the time, in a line above the input: tokens used and dollars spent in this conversation. Tokens come from what the provider reports for each response; the price is Wisp's own table, and a model without a price there is shown in tokens only.
 
-Not built yet: everything below that is not in this table, `/sessions` and `/fork` included.
+**Sessions** (built 2026-11-10): every conversation is a JSON file in `%APPDATA%\Wisp\sessions`, saved after each answer and titled from its first question. A file holds what the window showed, and the conversation in the provider's own format so it can be continued exactly, thinking blocks included. A fork copies the history up to the chosen turn into a new file and leaves the original alone; its token count starts again from zero. The window is given only what was shown, never the provider's history.
+
+Not built yet: everything below that is not in this table.
 
 ## How commands behave
 

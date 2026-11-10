@@ -36,14 +36,15 @@ def add_usage(total: dict, model: str, input_tokens=0, output_tokens=0, cache_re
 
 
 class AnthropicChat:
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, messages: list | None = None, usage: dict | None = None):
         import anthropic   # imported here so everything else works without the SDK
 
         self.sdk = anthropic
-        self.usage = new_usage()   # tokens and cost of this conversation so far
+        self.usage = usage or new_usage()   # tokens and cost of this conversation so far
         # without a key given, the SDK looks in ANTHROPIC_API_KEY
         self.client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
-        self.messages = []
+        # Plain JSON throughout, so a conversation can be saved, reopened and forked.
+        self.messages = list(messages or [])
         # eager_input_streaming: tool inputs stream as they are generated; the
         # server then no longer validates them, which run_tool does instead
         self.tools = [{**t, "eager_input_streaming": True} for t in TOOLS]
@@ -107,7 +108,10 @@ class AnthropicChat:
         used = message.usage
         add_usage(self.usage, message.model, used.input_tokens, used.output_tokens,
                   getattr(used, "cache_read_input_tokens", 0), getattr(used, "cache_creation_input_tokens", 0))
-        self.messages.append({"role": "assistant", "content": message.content})
+        # The assistant turn goes back whole and unchanged, thinking blocks included.
+        # exclude_unset gives exactly what the SDK itself would send for these blocks.
+        self.messages.append({"role": "assistant",
+                              "content": [b.model_dump(exclude_unset=True, mode="json") for b in message.content]})
         calls = [{"id": b.id, "name": b.name, "input": b.input} for b in message.content if b.type == "tool_use"]
         reason = message.stop_reason
         if reason == "max_tokens" and calls:
@@ -119,16 +123,19 @@ class FakeChat:
     """Scripted stand-in for tests and for looking at the UI without a key.
     It asks for the quest log, then for a waypoint to the first location it saw."""
 
-    def __init__(self):
+    def __init__(self, api_key=None, messages: list | None = None, usage: dict | None = None):
         self.turn = 0
         self.first_ref = None
-        self.usage = new_usage()
+        self.usage = usage or new_usage()
+        self.messages = list(messages or [])   # same shape of bookkeeping as a real provider
 
     def user(self, text):
         self.turn = 0
         self.question = text
+        self.messages.append({"role": "user", "content": text})
 
     def tool_results(self, results):
+        self.messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": r["id"]} for r in results]})
         for r in results:
             data = json.loads(r["content"])
             for quest in data.get("quests", []):
@@ -139,9 +146,15 @@ class FakeChat:
             self.last = data
 
     def stopped(self, partial):
-        pass
+        self.messages.append({"role": "assistant", "content": partial or "(stopped)"})
 
     def stream(self, should_stop):
+        for event in self._script(should_stop):
+            if event["type"] == "end" and event["reason"] != "stopped":
+                self.messages.append({"role": "assistant", "content": event["reason"]})
+            yield event
+
+    def _script(self, should_stop):
         self.turn += 1
         add_usage(self.usage, MODEL, input_tokens=900 + 400 * self.turn, output_tokens=120)   # made-up numbers
         if self.turn == 1:

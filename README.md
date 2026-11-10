@@ -31,7 +31,9 @@ To see the interface with a sample character, no key and no game: `Wisp.exe --fa
 
 ### Commands and cost
 
-Type `/` to see the commands: `/new`, `/cost`, `/copy`, `/check`, `/settings`. The line above the input shows the tokens and dollars this conversation has used so far; `/cost` gives the breakdown. The price is Wisp's estimate from Anthropic's list prices, and your Anthropic bill is the final word.
+Type `/` to see the commands: `/new`, `/sessions`, `/fork`, `/cost`, `/copy`, `/check`, `/settings`.
+
+Every conversation is kept on your PC (`%APPDATA%\Wisp\sessions`). The clock icon, or `/sessions`, lists them: search, look at one without opening it, or open it and carry on. `/fork` continues in a copy, and the small branch icon under any answer forks from that point, so you can try another direction without losing the original. The line above the input shows the tokens and dollars this conversation has used so far; `/cost` gives the breakdown. The price is Wisp's estimate from Anthropic's list prices, and your Anthropic bill is the final word.
 
 ### Things to know
 

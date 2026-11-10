@@ -145,6 +145,39 @@ def main():
         events = list(answer(chat, game, "and again?"))
         assert events[-1]["type"] == "done" and len(REQUESTS[-1]["body"]["messages"]) > 5
 
+        # the assistant turn is kept as plain JSON, exactly the blocks the API sent
+        assert chat.messages[1] == {"role": "assistant", "content": [
+            {"type": "text", "text": "Let me look at your quests. "},
+            {"type": "tool_use", "id": "toolu_1", "name": "quests", "input": {}}]}, chat.messages[1]
+
+        # saved to disk, reopened and continued: the model receives the same history
+        from wisp.sessions import Sessions
+        store = Sessions(Path(tmp) / "sessions")
+        session = store.new()
+        session["turns"] = [{"items": [{"type": "user", "text": "q1"}], "end": 6},
+                            {"items": [{"type": "user", "text": "q2"}], "end": len(chat.messages)}]
+        session["messages"], session["usage"] = chat.messages, dict(chat.usage)
+        store.save(session)
+        loaded = store.load(session["id"])
+        assert loaded["messages"] == json.loads(json.dumps(chat.messages)), "the history survives the disk unchanged"
+        requests_so_far = loaded["usage"]["requests"]
+        resumed = AnthropicChat(messages=loaded["messages"], usage=loaded["usage"])
+        before = len(REQUESTS)
+        events = list(answer(resumed, game, "and after reopening?"))
+        assert events[-1]["type"] == "done" and events[-1]["reason"] != "error", events[-1]
+        sent = REQUESTS[before]["body"]["messages"]
+        assert sent[:len(loaded["messages"])] == loaded["messages"] and sent[-1]["content"] == "and after reopening?"
+        assert resumed.usage["requests"] > requests_so_far, "the token count carries on"
+
+        # a fork after the first question sends only that much history
+        loaded = store.load(session["id"])
+        fork = store.fork(loaded, 0)
+        forked = AnthropicChat(messages=fork["messages"], usage=fork["usage"])
+        before = len(REQUESTS)
+        list(answer(forked, game, "a different direction"))
+        sent = REQUESTS[before]["body"]["messages"]
+        assert len(sent) == 7 and sent[:6] == loaded["messages"][:6] and sent[6]["content"] == "a different direction"
+
         os.environ["ANTHROPIC_API_KEY"] = "bad-key"
         events = list(answer(AnthropicChat(), game, "hello"))
         assert events[0]["type"] == "error" and "key was rejected" in events[0]["message"], events

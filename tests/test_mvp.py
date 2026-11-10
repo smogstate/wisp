@@ -277,6 +277,83 @@ def test_settings_api(wow: Path):
         server.shutdown()
 
 
+def test_sessions(wow: Path, tmp: Path):
+    """Conversations are saved, listed, searched, reopened and forked."""
+    from wisp.sessions import Sessions
+
+    def ask(app, question):
+        return list(app.ask(question))
+
+    app = App(wow, fake=True)
+    app.sessions = Sessions(tmp / "sessions")
+    app.new_chat()
+    assert app.fork(None) == {"error": "There is nothing to fork yet."}
+    ask(app, "where do I hand in the wolf quest?")
+    ask(app, "and the mine?")
+    original = app.session["id"]
+    assert (tmp / "sessions" / f"{original}.json").is_file()
+    view = app.view()
+    assert view["title"] == "where do I hand in the wolf quest?" and len(view["turns"]) == 2
+    kinds = [item["type"] for item in view["turns"][0]]
+    assert kinds == ["user", "wisp", "trace", "trace", "card", "wisp"], kinds
+    assert view["turns"][0][1]["text"].startswith("Let me look at your quest log.")
+    assert "messages" not in view, "the provider's history never goes to the window"
+    assert view["usage"]["requests"] == 6
+
+    listed = app.sessions.list()
+    assert [s["id"] for s in listed] == [original] and listed[0]["questions"] == 2 and not listed[0]["forked"]
+    assert len(app.sessions.list("WAYPOINT")) == 1, "search covers what was said, in any case"
+    assert app.sessions.list("dragons") == []
+
+    # fork after the first question: a copy of that much, and the original is untouched
+    first_end = app.session["turns"][0]["end"]
+    forked = app.fork(0)
+    assert forked["id"] != original and forked["forked"] and len(forked["turns"]) == 1
+    assert forked["title"].endswith("(fork)") and forked["usage"]["requests"] == 0
+    assert len(app.chat.messages) == first_end, "the fork carries the history up to that turn only"
+    ask(app, "what about the next quest?")
+    assert len(app.view()["turns"]) == 2 and len(app.sessions.load(original)["turns"]) == 2
+    assert len(app.sessions.list()) == 2 and app.sessions.list()[0]["id"] == forked["id"], "newest first"
+    assert app.fork(5) == {"error": "There is nothing to fork yet."}
+    assert app.fork(True) == {"error": "There is nothing to fork yet."}
+
+    # a different run of the program finds them and can continue one
+    later = App(wow, fake=True)
+    later.sessions = Sessions(tmp / "sessions")
+    reopened = later.open_session(original)
+    assert len(reopened["turns"]) == 2 and len(later.chat.messages) == later.session["turns"][1]["end"]
+    ask(later, "one more")
+    assert len(later.sessions.load(original)["turns"]) == 3
+    assert "error" in later.open_session("../../etc/passwd") and "error" in later.open_session(None)
+    assert later.sessions.load("20261110-000000-zzzzzz") is None
+
+    # a fresh conversation with nothing in it leaves no file behind
+    later.new_chat()
+    later.sessions.save(later.session)
+    assert len(list((tmp / "sessions").glob("*.json"))) == 2
+
+    server, url = serve(later)
+    base, token = url.split("/?t=")
+
+    def call(path, body=None):
+        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
+                                     headers={"X-Wisp-Token": token, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read())
+
+    try:
+        assert call("/api/session")["turns"] == []
+        assert len(call("/api/sessions")["sessions"]) == 2 and len(call("/api/sessions?q=one%20more")["sessions"]) == 1
+        assert len(call("/api/sessions/peek", {"id": original})["turns"]) == 3
+        assert call("/api/session")["turns"] == [], "peeking does not switch"
+        assert "error" in call("/api/sessions/peek", {"id": "nope"})
+        assert len(call("/api/sessions/open", {"id": original})["turns"]) == 3
+        assert len(call("/api/fork", {"turn": 1})["turns"]) == 2
+        assert len(call("/api/fork", {})["turns"]) == 2, "no turn given: fork all of it"
+    finally:
+        server.shutdown()
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -287,6 +364,8 @@ if __name__ == "__main__":
         test_bad_files(Path(c))
         test_server(wow)
         test_settings_api(wow)
+        with tempfile.TemporaryDirectory() as e:
+            test_sessions(wow, Path(e))
     with tempfile.TemporaryDirectory() as d:
         test_this_pc(Path(d))
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))
