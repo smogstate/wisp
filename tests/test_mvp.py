@@ -143,7 +143,7 @@ def test_dungeons(wow: Path, tmp: Path):
     assert thanes["quests"][0]["status"] == "available" and thanes["quests"][0]["pickup_where"] is None
 
     assert "No dungeon is called that" in run_tool(game, "dungeon", {"name": "Karazhan"})["error"]
-    assert run_tool(game, "dungeon", {"name": "the"})["error"] == "More than one dungeon matches. Ask for one of: Hall of Thanes, The Deadmines"
+    assert run_tool(game, "dungeon", {"name": "es"})["error"] == "More than one dungeon matches. Ask for one of: Hall of Thanes, The Deadmines"
     assert "error" in run_tool(game, "dungeon", {"name": ""}) and "error" in run_tool(game, "dungeon", {})
 
     # a waypoint to the entrance and to the next quest step, pasted into the game
