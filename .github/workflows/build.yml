@@ -49,20 +49,19 @@ jobs:
         shell: pwsh
         run: if (Test-Path smoke-source.json) { Get-Content smoke-source.json } else { "no result file" }
 
-      # The exe knows which commit it is, so that it can tell when a newer one is published.
+      # The code knows which commit it is and which exe it needs, so that a running Wisp can tell
+      # when something newer is published and whether the code alone will do.
       - name: Stamp the version
+        run: python tools/build_meta.py stamp
+
+      # Wisp.exe is a launcher: Python, the libraries, and a copy of Wisp's code as plain files.
+      - name: Build Wisp.exe
         shell: pwsh
         run: |
-          @{ commit = $env:GITHUB_SHA; built = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") } |
-            ConvertTo-Json | Set-Content -Encoding utf8 wisp\version.json
-          Get-Content wisp\version.json
-
-      - name: Build Wisp.exe
-        run: >
-          pyinstaller --noconfirm --onefile --windowed --name Wisp
-          --exclude-module PIL
-          --add-data "wisp/ui.html;wisp" --add-data "wisp/version.json;wisp" --add-data "addon/Wisp;addon/Wisp"
-          wisp_app.py
+          Get-ChildItem -Recurse -Directory -Filter __pycache__ wisp, addon | Remove-Item -Recurse -Force
+          pyinstaller --noconfirm --onefile --windowed --name Wisp --exclude-module PIL `
+            --add-data "wisp;code/wisp" --add-data "addon/Wisp;code/addon/Wisp" wisp_app.py
+          python tools/build_meta.py pack dist/Wisp.exe
 
       - name: The window, from the exe
         shell: pwsh
@@ -73,9 +72,44 @@ jobs:
           "exit code: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { exit 1 }
 
-      # The update itself, as it happens on a player's PC: a running Wisp.exe renames itself aside,
-      # puts the new exe in its place and starts it. Here the "new" exe is a copy of the same build.
-      - name: An update, from the exe
+      # The usual update, as it happens on a player's PC: newer code lands in the Wisp folder and
+      # the same, untouched exe runs it. Here the "newer" code is this build's own, relabelled.
+      - name: A code update, from the exe
+        shell: pwsh
+        run: |
+          $newer = "c" * 40
+          $root = "$env:APPDATA\Wisp\code"
+          New-Item -ItemType Directory -Force $root | Out-Null
+          Expand-Archive wisp-code.zip -DestinationPath "$root\$newer"
+          $stamp = Get-Content "$root\$newer\wisp\version.json" | ConvertFrom-Json
+          $stamp.commit = $newer
+          $stamp.built = "2099-01-01T00:00:00Z"
+          $stamp | ConvertTo-Json | Set-Content -Encoding utf8 "$root\$newer\wisp\version.json"
+          $before = (Get-FileHash dist\Wisp.exe).Hash
+
+          $p = Start-Process -FilePath dist\Wisp.exe -ArgumentList "--try-code", "$root\$newer" -Wait -PassThru
+          "the exe tried the code: exit code $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { "the downloaded code does not start in this exe"; exit 1 }
+          New-Item -ItemType Directory -Force "$root\broken\wisp" | Out-Null
+          Set-Content "$root\broken\wisp\__main__.py" "import a_module_that_does_not_exist"
+          $p = Start-Process -FilePath dist\Wisp.exe -ArgumentList "--try-code", "$root\broken" -Wait -PassThru
+          "the exe tried broken code: exit code $($p.ExitCode)"
+          if ($p.ExitCode -eq 0) { "broken code passed the check"; exit 1 }
+          Remove-Item -Recurse -Force "$root\broken"
+
+          Set-Content -Encoding utf8 "$root\current.json" ('{"commit": "' + $newer + '"}')
+          $p = Start-Process -FilePath dist\Wisp.exe -ArgumentList "--smoke", "smoke-code.json" -Wait -PassThru
+          if (Test-Path smoke-code.json) { Get-Content smoke-code.json } else { "no result file" }
+          $result = Get-Content smoke-code.json | ConvertFrom-Json
+          if (-not $result.ok) { "the exe did not come up on the downloaded code"; exit 1 }
+          if ($result.version -ne $newer) { "the exe ran its own code, not the downloaded one: $($result.version)"; exit 1 }
+          if (Test-Path "$root\starting") { "the code never reported that its window came up"; exit 1 }
+          if ((Get-FileHash dist\Wisp.exe).Hash -ne $before) { "the exe file changed"; exit 1 }
+          Remove-Item -Recurse -Force $root
+
+      # The rare update: a build that needs a different exe. A running Wisp.exe moves itself out of
+      # the way, puts the new exe in its place and starts it. Here the "new" exe is a copy of the same build.
+      - name: An exe update, from the exe
         shell: pwsh
         run: |
           New-Item -ItemType Directory upd | Out-Null
@@ -85,13 +119,15 @@ jobs:
           "swap exit code: $($p.ExitCode)"
           for ($i = 0; $i -lt 60 -and -not (Test-Path smoke-updated.json); $i++) { Start-Sleep -Seconds 2 }
           Start-Sleep -Seconds 3
-          Get-ChildItem upd | Format-Table Name, Length
+          Get-ChildItem -Force upd | Format-Table Name, Length
           if (-not (Test-Path smoke-updated.json)) { "the updated exe did not start"; exit 1 }
           Get-Content smoke-updated.json
           $result = Get-Content smoke-updated.json | ConvertFrom-Json
           if (-not $result.ok) { "the updated exe started but its window test failed"; exit 1 }
           if ($result.version -ne $env:GITHUB_SHA) { "the exe does not know its own commit: $($result.version)"; exit 1 }
-          if (-not (Test-Path upd\Wisp.old.exe) -or (Test-Path upd\Wisp.new.exe)) { "the swap did not happen"; exit 1 }
+          $away = (Test-Path "$env:APPDATA\Wisp\update\Wisp.old.exe") -or (Test-Path upd\.Wisp.old.exe)
+          if (-not $away -or (Test-Path upd\Wisp.new.exe)) { "the swap did not happen"; exit 1 }
+          if (Test-Path upd\Wisp.old.exe) { "the old exe was left in plain sight"; exit 1 }
 
       - uses: actions/upload-artifact@v7.0.2
         if: always()
@@ -101,6 +137,8 @@ jobs:
             dist/Wisp.exe
             smoke-*.json
             smoke-*.png
+            wisp-code.zip
+            version.json
 
       - name: Publish as the "mvp" release
         if: github.ref == 'refs/heads/master'
@@ -110,11 +148,7 @@ jobs:
         run: |
           # the addon alone, for installing by hand: unzip into Interface\AddOns
           Compress-Archive -Path addon\Wisp -DestinationPath Wisp-addon.zip -Force
-          # what a running Wisp reads to learn there is a newer one, and to check what it then downloads
-          @{ commit = $env:GITHUB_SHA; built = (Get-Content wisp\version.json | ConvertFrom-Json).built
-             sha256 = (Get-FileHash dist\Wisp.exe -Algorithm SHA256).Hash.ToLower(); size = (Get-Item dist\Wisp.exe).Length } |
-            ConvertTo-Json | Set-Content -Encoding utf8 version.json
           Get-Content version.json
           gh release delete mvp --yes --cleanup-tag 2>$null
           Start-Sleep -Seconds 5
-          gh release create mvp dist/Wisp.exe Wisp-addon.zip version.json --prerelease --target $env:GITHUB_SHA --title "Wisp MVP" --notes "Wisp.exe, built and tested on Windows by this repository's build workflow from commit $env:GITHUB_SHA. No Python needed. The addon is inside the exe (Settings, Install addon); Wisp-addon.zip is the same addon for installing by hand. See README.md for how to use it. The exe is not signed, so Windows SmartScreen will ask before running it."
+          gh release create mvp dist/Wisp.exe Wisp-addon.zip wisp-code.zip version.json --prerelease --target $env:GITHUB_SHA --title "Wisp MVP" --notes "Wisp.exe, built and tested on Windows by this repository's build workflow from commit $env:GITHUB_SHA. No Python needed. The addon is inside the exe (Settings, Install addon); Wisp-addon.zip is the same addon for installing by hand. See README.md for how to use it. The exe is not signed, so Windows SmartScreen will ask before running it."

@@ -184,6 +184,9 @@ class App:
         # current, downloading, ready (downloaded and checked: a restart away), failed
         mine = update.current()
         self.exe = update.exe()
+        self.code_dir = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-code-"))) / "code"      # downloaded code
+        self.stage_dir = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-stage-"))) / "update"  # a downloaded exe
+        self.try_code = lambda folder: update.try_code(self.exe, folder)
         self.update = {"version": mine["commit"][:7] if mine else None, "built": (mine or {}).get("built"),
                        "state": "off" if not mine or self.exe is None else "current", "new": None}
         # conversations are files on this PC; a throwaway folder when nothing real may be touched
@@ -195,7 +198,9 @@ class App:
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
 
     def check_update(self, base: str = update.RELEASE) -> str:
-        """Look for a newer Wisp.exe and fetch it beside this one. Returns the state it left."""
+        """Look for a newer build and fetch it. Returns the state it left.
+        Nearly always that is Wisp's code alone, into Wisp's own folder; the exe is
+        fetched only when the newer build needs a different one."""
         mine, state = update.current(), self.update
         if not mine or self.exe is None or not self.prefs["auto_update"]:
             state["state"] = "off"
@@ -204,15 +209,26 @@ class App:
         if info is None or info["commit"] == mine["commit"]:
             state["state"] = "current"
             return "current"
-        state["new"] = info["commit"][:7]
-        if update.ready(self.exe, info["sha256"]) is None:
-            state["state"] = "downloading"
-            if not update.download(info, self.exe, base):
-                state["state"] = "failed"   # no connection, no room, or a folder Wisp may not write to
-                return "failed"
-        if self.persist:
-            local.save_config({**local.load_config(), "update_sha256": info["sha256"]})
-        self.update_sha256 = info["sha256"]
+        state["new"], state["kind"] = info["commit"][:7], None
+        same_exe = "code_sha256" in info and info.get("runtime") is not None and info.get("runtime") == mine.get("runtime")
+        if same_exe:
+            if update.running(self.code_dir) != info["commit"]:
+                state["state"] = "downloading"
+                if not update.install_code(info, self.code_dir, base, tried=self.try_code):
+                    state["state"] = "failed"
+                    return "failed"
+                update.tidy_code(self.code_dir, {mine["commit"], info["commit"]})
+            state["kind"] = "code"
+        else:
+            if update.ready(self.stage_dir, info["sha256"]) is None:
+                state["state"] = "downloading"
+                if not update.fetch(base + "Wisp.exe", update.pending(self.stage_dir), info["size"], info["sha256"]):
+                    state["state"] = "failed"   # no connection, or no room
+                    return "failed"
+            if self.persist:
+                local.save_config({**local.load_config(), "update_sha256": info["sha256"]})
+            self.update_sha256 = info["sha256"]
+            state["kind"] = "exe"
         state["state"] = "ready"
         return "ready"
 
@@ -229,13 +245,16 @@ class App:
             threading.Thread(target=loop, daemon=True).start()
 
     def restart_updated(self) -> dict:
-        """Swap in the downloaded exe and start it. The window goes with this process."""
-        new = update.ready(self.exe, getattr(self, "update_sha256", None)) if self.exe is not None else None
-        if new is None:
+        """Start again as the new version. The window goes with this process."""
+        if self.exe is None or self.update["state"] != "ready":
             return {"error": "There is no downloaded update to restart into."}
         try:
-            update.swap(self.exe, new)
-            update.relaunch(self.exe, [])
+            if self.update.get("kind") == "exe":
+                new = update.ready(self.stage_dir, getattr(self, "update_sha256", None))
+                if new is None:
+                    return {"error": "The downloaded update is no longer there. Wisp will fetch it again."}
+                update.swap(self.exe, new, self.stage_dir)
+            update.relaunch(self.exe, [])   # the launcher picks the new code up by itself
         except OSError as e:
             return {"error": f"Could not update: {e.strerror or e}. Wisp will try again when it next starts."}
         threading.Timer(0.3, self.close_window).start()   # after this answer has gone out
@@ -456,6 +475,7 @@ class App:
 
     def window_shown(self):
         """Once the window exists: its real size, rounded corners, and its starting opacity."""
+        update.started_fine(local.APP_DIR / "code")   # tells the launcher this copy of the code came up
         if not self.frameless:
             return
         from webview.window import FixPoint
@@ -818,28 +838,52 @@ def smoke(window, result: dict, shots: str | None = None):
 
 
 def update_at_start(args: list[str]):
-    """Before anything else: if a newer exe was downloaded and checked last time, become it."""
+    """Before anything else: if a build that needs a different exe was downloaded and checked
+    last time, become it. (Code alone needs nothing here: the launcher already chose it.)"""
     app = update.exe()
     if app is None:
         return
+    stage = local.APP_DIR / "update"
     if "--apply-update" in args:   # the build's own test of the swap, on a real Windows machine
         at = args.index("--apply-update")
-        update.swap(app, Path(args[at + 1]).resolve())
+        update.swap(app, Path(args[at + 1]).resolve(), stage)
         if "--then" in args:
             update.relaunch(app, args[args.index("--then") + 1:])
         sys.exit(0)
     if "--fake" in args or "--smoke" in args or "--check" in args:
         return
-    update.tidy(app)
+    update.tidy(app, stage)
     config = local.load_config()
-    new = update.ready(app, config.get("update_sha256")) if config.get("auto_update") is not False else None
+    new = update.ready(stage, config.get("update_sha256")) if config.get("auto_update") is not False else None
     if new is not None:
         try:
-            update.swap(app, new)
+            update.swap(app, new, stage)
             update.relaunch(app, args)
         except OSError:
-            return   # a folder Wisp may not write to, or the file is held: carry on as the old one
+            return   # the file is held, or a folder Wisp may not write to: carry on as the old one
         sys.exit(0)
+
+
+def selfcheck() -> bool:
+    """Does this copy of the code load and work with the libraries in this exe? Run in a
+    process of its own before a downloaded copy is trusted."""
+    try:
+        import sqlite3   # noqa: F401
+        import anthropic   # noqa: F401
+        import keyring   # noqa: F401
+        import openai   # noqa: F401
+        import webview   # noqa: F401
+        from .game import TOOLS, run_tool
+        from .llm import CHATS
+        assert UI.read_text(encoding="utf-8").lstrip().startswith("<") and local.ADDON_SOURCE.is_dir()
+        game = Game.load(local.sample_game_folder())
+        assert game.problem is None and "error" not in run_tool(game, "quests", {}) and len(TOOLS) > 5
+        Market(Path(tempfile.mkdtemp(prefix="wisp-check-")) / "m.sqlite").size(game.snapshot)
+        for chat in CHATS.values():
+            chat("selfcheck-not-a-key")   # builds the provider's client: its library is whole
+        return True
+    except Exception:
+        return False
 
 
 def main():

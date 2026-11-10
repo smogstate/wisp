@@ -172,16 +172,20 @@ Worth carrying over from kintale as well (proposed): **one registry** where a to
 - The model never sees whether a command worked, so commands are fire-and-forget and cannot be chained on results.
 - Addons cannot cast, target or move for the player, and on Forever cannot read protected combat data. Wisp is an out-of-combat assistant.
 
-## Updates — built 2026-11-10
+## Updates — built 2026-11-10, reworked the same day
 
-Denis: "can we automatically update the client when a new version is available?" Yes; `wisp/update.py`.
+Denis first: "can we automatically update the client when a new version is available?" Then, having seen the first version at work: "works strange, can we do it internally? In runtime replace old with new without renaming exe?" The first version replaced `Wisp.exe` itself, which on Windows means renaming the running exe aside and leaving files beside it. The second, described here, does not touch the exe.
 
-- **How Wisp knows.** The build stamps the commit into the exe and publishes a small `version.json` beside `Wisp.exe` in the release: commit, size, SHA-256. A running Wisp reads that file at start and every six hours. A different commit means a newer build.
-- **Fetching.** The new exe is downloaded next to the running one as `Wisp.new.exe`. It is kept only if its size and hash are exactly the published ones; anything else is deleted.
-- **Swapping.** A running exe cannot be overwritten on Windows, but it can be renamed. So: `Wisp.exe` becomes `Wisp.old.exe`, `Wisp.new.exe` becomes `Wisp.exe`, the new one is started, the old one leaves. This happens at the next start by itself, or at once when the player presses **Restart** on the bar that appears. Never in the middle of an answer. The leftover old exe is removed at the start after.
-- **The addon follows**, as before: each exe carries its addon and installs it into the game folder when it starts.
+- **Wisp.exe is a launcher** (`wisp_app.py`): Python, the libraries, and a copy of Wisp's own code as plain files. Wisp's code is about a hundred kilobytes; the rest of the 24 MB is Python and libraries, which change rarely.
+- **An update is the code alone.** The build publishes `wisp-code.zip` and a `version.json` naming the commit, the size and SHA-256 of each file, and the **runtime**: a fingerprint of `requirements.txt` and the launcher, that is, which exe the code needs. A running Wisp reads `version.json` at start and every six hours. A newer commit with the same runtime is downloaded into `%APPDATA%\Wisp\code\<commit>`, kept only if it is exactly the published file, unpacked (plain files under `wisp/` and `addon/` only), and **tried once in a process of its own** (`Wisp.exe --try-code`, which loads it and exercises it against the exe's libraries). Only then is it marked as the one to run.
+- **The launcher chooses** at every start: the downloaded copy if it is newer than the copy inside and has the exe's runtime, else the copy inside. So a Wisp.exe downloaded by hand later, being newer, wins over old downloaded code.
+- **The exe file is never renamed, replaced or written to, and nothing appears beside it.**
+- **When it takes effect**: at the next start by itself, or at once with **Restart** on the bar that appears, which simply starts the same exe again. Never in the middle of an answer.
+- **A bad update cannot lock anyone out.** The launcher leaves a marker when it starts downloaded code and Wisp removes it once its window is up. If the marker is still there at the next start, that copy is dropped and the copy inside the exe runs. Code that will not even load falls back within the same start.
+- **The rare case: a build that needs a different exe** (a new library). Then the exe is downloaded into the Wisp folder, checked, and at the next start the running exe moves itself out of the way and the new one takes its place. The old one goes into the Wisp folder when that is on the same drive, else it stays hidden beside the exe until the start after.
+- **The addon follows**: it travels with the code, and Wisp installs it into the game folder when it starts.
 - **Off switch**: Settings, "Keep Wisp up to date by itself". Off means it does not even look.
 - **Where from**: only this project's own release address on GitHub, over HTTPS. Nothing is sent but the request. A copy run from source has no version and never updates.
-- **What protects the player.** Every build is tested on Windows before it is published, including this very swap: the build copies the exe, has it replace itself and restart, and checks the restarted one comes up and knows its commit. If a swap fails (a folder Wisp may not write to), Wisp carries on as the old version. If a new version ever fails to start, `Wisp.old.exe` beside it is the previous one: rename it back.
-- **What it does not protect against.** The exe is not signed. The hash proves the download is the published file, not who published it: someone with control of the GitHub repository could publish anything. That is the same trust as downloading the exe by hand, now exercised automatically; the switch above is for those who prefer to do it by hand.
+- **Tested by the build, on Windows, before anything is published**: the exe runs downloaded code and reports its commit; the exe file is unchanged afterwards; broken code fails the try; and the exe swap still works for the rare case.
+- **What it does not protect against.** Nothing is signed. The hashes prove a download is the published file, not who published it: someone with control of the GitHub repository could publish code that every Wisp would then run. That is the same trust as downloading the exe by hand, now exercised automatically; the switch is for those who prefer to do it by hand.
 

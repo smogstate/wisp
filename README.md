@@ -29,7 +29,7 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **Spending limit.** Wisp stops asking once a day's use has cost $5; change the amount, or set 0 for no limit, in Settings. The line above the input shows what today has cost. A long research run is stopped between two requests when it crosses the limit. Kimi's prices are not known, so Kimi's use is not counted.
 
-**Updates.** Wisp keeps itself current: when a newer build is published it downloads it, checks it, and starts as the new one the next time you open it (or right away if you press *Restart*). Settings has a switch to turn this off. The addon is updated along with it; restart the game to load a new addon.
+**Updates.** Wisp keeps itself current without touching `Wisp.exe`: a newer version of its code (about a hundred kilobytes) is downloaded into its own data folder, checked and tried, and used the next time you open Wisp, or right away if you press *Restart*. Nothing appears next to the exe. Settings has a switch to turn this off. The addon is updated along with it; restart the game to load a new addon.
 
 **Quests around you.** *What quests are open here?*, *what elite quests can I do?*, *where should I quest next?* Wisp reads the list of quests Questie has open for your character, with levels and quest givers, and can put the givers on a waypoint card.
 

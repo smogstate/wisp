@@ -640,19 +640,43 @@ def test_spending_cap(wow: Path):
 
 
 def test_update(tmp: Path):
-    """Wisp.exe keeping itself current: what is published, the download, its checks, the swap."""
+    """Wisp keeping itself current: the code alone into its own folder, the exe untouched;
+    the launcher choosing what to run; and the rare case of a build that needs another exe."""
     import hashlib
+    import importlib.util
     import threading
+    import zipfile
     from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
     from wisp import update
+    from wisp.__main__ import selfcheck
     assert update.current() is None and update.exe() is None, "a copy run from source never updates"
+    try:   # the libraries the exe carries; where they are all installed, the check must pass
+        import anthropic, keyring, openai, webview   # noqa: F401,E401
+        assert selfcheck() is True, "what a downloaded copy is asked before it is trusted"
+    except ImportError:
+        assert selfcheck() is False, "a library missing: exactly what the check is for"
 
-    site, here = tmp / "site", tmp / "install"
+    site, here, root, stage = tmp / "site", tmp / "install", tmp / "appdata" / "code", tmp / "appdata" / "update"
     site.mkdir(), here.mkdir()
-    new_bytes = b"MZ new exe " * 200_000
-    (site / "Wisp.exe").write_bytes(new_bytes)
-    published = {"commit": "b" * 40, "built": "2026-11-10T14:00:00Z", "sha256": hashlib.sha256(new_bytes).hexdigest(), "size": len(new_bytes)}
-    (site / "version.json").write_text(json.dumps(published))
+    old, new = "a" * 40, "b" * 40
+
+    def code_zip(commit, runtime="r1", built="2026-11-11T10:00:00Z", extra=()):
+        with zipfile.ZipFile(site / "wisp-code.zip", "w") as z:
+            z.writestr("wisp/version.json", json.dumps({"commit": commit, "built": built, "runtime": runtime}))
+            z.writestr("wisp/__main__.py", "# the new code")
+            z.writestr("addon/Wisp/Wisp.lua", "-- the new addon")
+            for name in extra:
+                z.writestr(name, "x")
+        data = (site / "wisp-code.zip").read_bytes()
+        return {"code_sha256": hashlib.sha256(data).hexdigest(), "code_size": len(data)}
+    exe_bytes = b"MZ new exe " * 200_000
+    (site / "Wisp.exe").write_bytes(exe_bytes)
+    published = {"commit": new, "built": "2026-11-11T10:00:00Z", "runtime": "r1", "sha256": hashlib.sha256(exe_bytes).hexdigest(),
+                 "size": len(exe_bytes), **code_zip(new)}
+
+    def publish(info):
+        (site / "version.json").write_text(json.dumps(info))
+    publish(published)
     handler = type("Quiet", (SimpleHTTPRequestHandler,), {"log_message": lambda *a: None})
     server = ThreadingHTTPServer(("127.0.0.1", 0), lambda *a: handler(*a, directory=str(site)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -661,45 +685,91 @@ def test_update(tmp: Path):
         assert update.latest(base) == published
         exe = here / "Wisp.exe"
         exe.write_bytes(b"MZ old exe")
-
-        # the app: nothing to do when it is the published commit; otherwise fetch, check, be ready
         app = App(None, fake=True)
-        app.exe, real = exe, update.current
+        app.exe, app.code_dir, app.stage_dir, real = exe, root, stage, update.current
+        tried = []
+        app.try_code = lambda folder: tried.append(folder.name) or True
         try:
-            update.current = lambda: {"commit": "b" * 40}
-            assert app.check_update(base) == "current" and not update.pending(exe).exists()
-            update.current = lambda: {"commit": "a" * 40}
+            update.current = lambda: {"commit": new, "runtime": "r1"}
+            assert app.check_update(base) == "current" and not root.exists()
+            update.current = lambda: {"commit": old, "runtime": "r1"}
             app.prefs["auto_update"] = False
             assert app.check_update(base) == "off", "switched off in Settings: it does not even look"
             app.prefs["auto_update"] = True
-            assert app.check_update(base) == "ready" and app.update["new"] == "bbbbbbb"
-            assert update.pending(exe).read_bytes() == new_bytes and app.settings()["update"]["state"] == "ready"
-            assert app.check_update(base) == "ready", "already fetched: not fetched again"
+
+            # the usual update: the code alone, into Wisp's own folder, tried before it is trusted
+            assert app.check_update(base) == "ready" and app.update["kind"] == "code" and app.update["new"] == "bbbbbbb"
+            assert (root / new / "wisp" / "__main__.py").read_text() == "# the new code" and update.running(root) == new
+            assert tried == [new + ".new"] and exe.read_bytes() == b"MZ old exe" and sorted(p.name for p in here.iterdir()) == ["Wisp.exe"], \
+                "the exe is not touched and nothing appears beside it"
+            assert not (root / "code.zip").exists() and not stage.exists()
+            assert app.check_update(base) == "ready" and tried == [new + ".new"], "already there: not fetched again"
+
+            # a copy that does not start in this exe is not kept, and neither is one that is not what was announced
+            update.current = lambda: {"commit": "c" * 40, "runtime": "r1"}
+            app.try_code = lambda folder: False
+            (root / "current.json").unlink()
+            assert app.check_update(base) == "failed" and update.running(root) is None and not (root / (new + ".new")).exists()
+            app.try_code = lambda folder: True
+            publish({**published, **code_zip("d" * 40)})
+            assert app.check_update(base) == "failed", "the zip holds another commit than the one announced"
+            for sneaky in ("../outside.py", "wisp/../../outside.py", "elsewhere/x.py", "wisp/a:b.py"):
+                publish({**published, **code_zip(new, extra=[sneaky])})
+                assert app.check_update(base) == "failed" and not (tmp / "appdata" / "outside.py").exists(), sneaky
+            publish({**published, **code_zip(new), "code_size": 5})
+            assert update.latest(base) is None, "a size that cannot be right: the whole announcement is ignored"
+
+            # a build that needs a different exe: the exe is fetched into Wisp's folder, not beside the running one
+            publish({**published, **code_zip(new, runtime="r2"), "runtime": "r2"})
+            assert app.check_update(base) == "ready" and app.update["kind"] == "exe"
+            assert update.pending(stage).read_bytes() == exe_bytes and sorted(p.name for p in here.iterdir()) == ["Wisp.exe"]
+            assert update.ready(stage, "f" * 64) is None and update.ready(stage, None) is None
+            update.swap(exe, update.ready(stage, published["sha256"]), stage)
+            assert exe.read_bytes() == exe_bytes and (stage / "Wisp.old.exe").read_bytes() == b"MZ old exe"
+            assert sorted(p.name for p in here.iterdir()) == ["Wisp.exe"], "the old exe is put away out of sight"
+            update.tidy(exe, stage)
+            assert not (stage / "Wisp.old.exe").exists() and exe.exists()
+            try:
+                update.swap(exe, stage / "missing.exe", stage)
+                raise AssertionError("a swap with nothing to swap in must fail")
+            except OSError:
+                assert exe.read_bytes() == exe_bytes, "and the exe that was there is back in its place"
+            for wrong in ({"sha256": "0" * 64}, {"size": len(exe_bytes) - 1}, {"size": len(exe_bytes) + 1}):
+                info = {**published, **wrong}
+                assert update.fetch(base + "Wisp.exe", update.pending(stage), info["size"], info["sha256"]) is False
+                assert not update.pending(stage).exists() and not (stage / "Wisp.new.exe.part").exists(), wrong
         finally:
             update.current = real
-
-        # only exactly the published file is ever kept or used
-        for wrong in ({"sha256": "0" * 64}, {"size": len(new_bytes) - 1}, {"size": len(new_bytes) + 1}):
-            update.pending(exe).unlink(missing_ok=True)
-            assert update.download({**published, **wrong}, exe, base) is False and not update.pending(exe).exists(), wrong
-            assert not (here / "Wisp.part").exists(), "nothing half-fetched is left behind"
-        (site / "version.json").write_text(json.dumps({**published, "commit": "not a commit"}))
-        assert update.latest(base) is None and update.latest(base + "nowhere/") is None
-        assert update.download(published, exe, base) is True
-        assert update.ready(exe, "f" * 64) is None and update.ready(exe, None) is None, "a file that is not the one that was checked"
-
-        # the swap: the old one steps aside, the new one takes its name; then the leftovers go
-        update.swap(exe, update.ready(exe, published["sha256"]))
-        assert exe.read_bytes() == new_bytes and (here / "Wisp.old.exe").read_bytes() == b"MZ old exe" and not update.pending(exe).exists()
-        update.tidy(exe)
-        assert not (here / "Wisp.old.exe").exists() and exe.exists()
-        try:
-            update.swap(exe, here / "missing.exe")
-            raise AssertionError("a swap with nothing to swap in must fail")
-        except OSError:
-            assert exe.read_bytes() == new_bytes, "and the exe that was there is back in its place"
     finally:
         server.shutdown()
+
+    # the launcher: which copy of the code the exe runs
+    spec = importlib.util.spec_from_file_location("wisp_app", ROOT / "wisp_app.py")
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+    own, home = tmp / "inside", tmp / "home"
+
+    def put(folder, commit, built, runtime="r1"):
+        (folder / "wisp").mkdir(parents=True, exist_ok=True)
+        (folder / "wisp" / "__main__.py").write_text("")
+        (folder / "wisp" / "version.json").write_text(json.dumps({"commit": commit, "built": built, "runtime": runtime}))
+    put(own, old, "2026-11-10T10:00:00Z")
+    assert launcher.choose(own, home) == own, "nothing downloaded: the copy inside the exe"
+    put(home / new, new, "2026-11-11T10:00:00Z")
+    (home / "current.json").write_text(json.dumps({"commit": new}))
+    assert launcher.choose(own, home) == home / new and (home / "starting").read_text() == new
+    update.started_fine(home)   # its window came up
+    assert launcher.choose(own, home) == home / new
+    assert launcher.choose(own, home) == own and not (home / "current.json").exists(), \
+        "it never said its window came up: dropped, and the copy inside takes over"
+    (home / "current.json").write_text(json.dumps({"commit": new}))
+    put(own, "e" * 40, "2026-11-12T10:00:00Z")
+    assert launcher.choose(own, home) == own, "a newer exe was installed by hand: its own code wins"
+    put(own, old, "2026-11-10T10:00:00Z", runtime="r2")
+    assert launcher.choose(own, home) == own, "code made for another exe is never run"
+    for nonsense in ('{"commit": "../../x"}', "not json", '{"commit": "' + "f" * 40 + '"}'):
+        (home / "current.json").write_text(nonsense)
+        assert launcher.choose(own, home) == own
 
 
 def test_inbox_is_strict():
