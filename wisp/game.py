@@ -64,6 +64,8 @@ class Game:
         self.problem = problem            # why there is no snapshot, in words
         self.places: dict[str, dict] = {}  # ref -> {map, zone, x, y, title}
         self.quests = [self._quest(q) for q in _as_list(self.snapshot.get("quests")) if isinstance(q, dict)]
+        self.dungeons = [self._dungeon(i, d) for i, d in enumerate(_as_list(self.snapshot.get("dungeons")))
+                         if isinstance(d, dict)]
         self.cards: list[dict] = []        # action cards made during the current answer
 
     @classmethod
@@ -130,6 +132,66 @@ class Game:
             }
         return out
 
+    # -- dungeons, from the DungeonJournal addon --------------------------------
+
+    def _journal_place(self, ref: str, place, title: str) -> dict | None:
+        if not isinstance(place, dict):
+            return None
+        seen = self._place(ref, place, title)
+        return {**seen, "at": _clean(place.get("label"), 80)} if seen else None
+
+    def _dungeon_quest(self, q: dict) -> dict:
+        qid, name = q.get("id"), _clean(q.get("name"), 80)
+        level = (self.snapshot.get("character") or {}).get("level")
+        needs = []
+        for step in (n for n in _as_list(q.get("needs")) if isinstance(n, dict)):
+            step_name = _clean(step.get("name"), 80)
+            needs.append({
+                "id": step.get("id"), "name": step_name, "done": step.get("state") == "done",
+                "in_log": step.get("state") == "log", "pickup": _clean(step.get("pickup"), 160) or None,
+                "where": self._journal_place(f"dq{step.get('id')}.start", step.get("start"), f"{step_name} (quest start)"),
+            })
+        missing = [n for n in needs if not n["done"]]
+        requires = q.get("requires")
+        if q.get("state") == "done":
+            status = "done"
+        elif q.get("state") == "log":
+            status = "in your quest log"
+        elif missing:
+            status = "locked: an earlier quest is not done"
+        elif isinstance(requires, int) and isinstance(level, int) and level < requires:
+            status = f"needs level {requires}"
+        else:
+            status = "available"
+        out = {
+            "id": qid, "name": name, "status": status, "level": q.get("level"), "requires_level": requires,
+            "objective": _clean(q.get("objective"), 240), "pickup": _clean(q.get("pickup"), 200),
+            "turn_in": _clean(q.get("turnin"), 200), "rewards": _clean(str(q.get("rewards") or "").replace("\n", "; "), 240),
+            "pickup_where": self._journal_place(f"dq{qid}.start", q.get("start"), f"{name} (quest start)"),
+        }
+        if q.get("class"):
+            out["class_only"] = _clean(q.get("class"), 40)
+        if needs:
+            out["needs_first"] = needs
+            if missing:   # the place to go next is the first step not done, not the start of the chain
+                out["next_step"] = missing[0]
+        return out
+
+    def _dungeon(self, index: int, d: dict) -> dict:
+        name = _clean(d.get("name"), 80)
+        bosses = []
+        for b in (b for b in _as_list(d.get("bosses")) if isinstance(b, dict)):
+            loot = [{"item": _clean(i[1], 80), "slot": _clean(i[2], 40), "quality": QUALITY.get(i[3], "?")}
+                    for i in _as_list(b.get("loot")) if isinstance(i, list) and len(i) >= 4]
+            bosses.append({"name": _clean(b.get("name"), 80), "rare": bool(b.get("rare")), "loot": loot})
+        return {
+            "name": name, "level": _clean(d.get("level"), 20), "location": _clean(d.get("location"), 120),
+            "entrance": self._journal_place(f"d{index + 1}.entrance", d.get("entrance"), f"{name} entrance"),
+            "entrance_hint": _clean(d.get("entranceHint"), 300) or None,
+            "quests": [self._dungeon_quest(q) for q in _as_list(d.get("quests")) if isinstance(q, dict)],
+            "bosses": bosses,
+        }
+
     # -- tools ---------------------------------------------------------------
 
     def tool_character(self, _args: dict) -> dict:
@@ -161,13 +223,52 @@ class Game:
         completed = set(_as_list(self.snapshot.get("completed")))
         return {"completed": {str(i): i in completed for i in ids}}
 
+    def _no_journal(self) -> dict | None:
+        if not self.snapshot:
+            return {"error": self.problem}
+        if not self.dungeons:
+            return {"error": "There is no dungeon data: the DungeonJournal addon was not found when the snapshot was "
+                             "taken. With it installed, Wisp knows every dungeon's quests, what they need first, and the loot."}
+        return None
+
+    def tool_dungeons(self, _args: dict) -> dict:
+        missing = self._no_journal()
+        if missing:
+            return missing
+        rows = []
+        for d in self.dungeons:
+            statuses = [q["status"] for q in d["quests"]]
+            rows.append({"name": d["name"], "level": d["level"], "location": d["location"], "quests": len(statuses),
+                         "done": statuses.count("done"), "in_log": statuses.count("in your quest log"),
+                         "available_now": statuses.count("available"), "bosses": len(d["bosses"])})
+        return {"dungeons": rows, "snapshot_age_minutes": self.age_minutes(),
+                "note": "Quest counts are for this character's faction. Use the dungeon tool with a name for the details."}
+
+    def tool_dungeon(self, args: dict) -> dict:
+        missing = self._no_journal()
+        if missing:
+            return missing
+        wanted = args.get("name")
+        if not isinstance(wanted, str) or not wanted.strip():
+            return {"error": "name must be a dungeon's name"}
+        key = wanted.strip().casefold()
+        found = [d for d in self.dungeons if d["name"].casefold() == key] or \
+                [d for d in self.dungeons if key in d["name"].casefold() or d["name"].casefold().removeprefix("the ") in key]
+        if len(found) > 1:
+            return {"error": "More than one dungeon matches. Ask for one of: " + ", ".join(d["name"] for d in found)}
+        if not found:
+            return {"error": "No dungeon is called that. The dungeons are: " + ", ".join(d["name"] for d in self.dungeons)}
+        return {"dungeon": found[0], "snapshot_age_minutes": self.age_minutes(),
+                "note": "From the DungeonJournal addon. Quest status is as of the player's last logout. "
+                        "Every 'ref' can go to the waypoint tool."}
+
     def tool_waypoint(self, args: dict) -> dict:
         refs = args.get("refs")
         if not isinstance(refs, list) or not refs or len(refs) > 20 or not all(isinstance(r, str) for r in refs):
-            return {"error": "refs must be a list of 1 to 20 location refs from the quests tool"}
+            return {"error": "refs must be a list of 1 to 20 location refs from the quests or dungeon tools"}
         unknown = [r for r in refs if r not in self.places]
         if unknown:
-            return {"error": f"unknown refs: {', '.join(unknown[:5])}. Use refs exactly as the quests tool returned them."}
+            return {"error": f"unknown refs: {', '.join(unknown[:5])}. Use refs exactly as a tool returned them."}
         lines = [self.places[r] for r in dict.fromkeys(refs)]
         card = {
             "id": f"card{len(self.cards) + 1}",
@@ -180,6 +281,8 @@ class Game:
         return {"shown": len(lines), "note": "A card with a Copy button is now shown to the player. Nothing has happened "
                 "in the game yet: the player must copy it and paste it into the game, and you cannot see whether they did."}
 
+
+QUALITY = {0: "poor", 1: "common", 2: "uncommon", 3: "rare", 4: "epic", 5: "legendary"}
 
 TOOLS = [
     {
@@ -208,8 +311,26 @@ TOOLS = [
         },
     },
     {
+        "name": "dungeons",
+        "description": "Every dungeon in the game with its level range, where it is, and how many of its quests this "
+                       "character has done, has in the log, or can pick up now. Use it to choose or compare dungeons.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "dungeon",
+        "description": "One dungeon in full: its entrance, each of its quests with this character's status (done, in "
+                       "the log, available, locked behind an earlier quest, or needing a level), who gives it and where, "
+                       "the quests that must be done first and the next step to take, the rewards, and every boss with "
+                       "its loot. This is the source for 'what am I missing for this dungeon' and 'what drops there'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "The dungeon's name, or part of it"}},
+            "required": ["name"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "waypoint",
-        "description": "Offer the player waypoints for the game. Pass location refs from the quests tool. This shows "
+        "description": "Offer the player waypoints for the game. Pass location refs from the quests or dungeon tools. This shows "
                        "a card the player can copy and paste into the game, where TomTom sets the waypoints. It does "
                        "not act in the game by itself. Use it when the player asks where something is or wants to go "
                        "there.",
@@ -224,7 +345,9 @@ TOOLS = [
 SYSTEM = """You are Wisp, an assistant for a World of Warcraft: Forever player. You run in a small window beside the game.
 
 What you know about the game comes only from your tools. They read a snapshot the player's addon saved at their last \
-logout, so it can be out of date: say so when it matters, and if the player tells you something changed, believe them.
+logout, so it can be out of date: say so when it matters, and if the player tells you something changed, believe them. \
+Quest locations come from the Questie addon and everything about dungeons from the DungeonJournal addon; when one of \
+them was not installed, the tool says so, and you tell the player which addon would help.
 
 Never state a quest id, an NPC, a location or coordinates from memory. WoW Forever differs from every earlier version \
 of the game, so what you remember is unreliable. If the tools do not have something, say that plainly.

@@ -101,6 +101,72 @@ local function questLog(DB, ZoneDB)
   return quests
 end
 
+----------------------------------------------------------- dungeons ----
+-- From the DungeonJournal addon, when it is installed: every dungeon with its
+-- entrance, its quests and what each needs first, its bosses and their loot.
+-- Wisp reads the journal's own tables as they are loaded in the game; it does
+-- not carry a copy of them.
+
+local function journalPlace(m)   -- the journal keeps positions as 0-1 on a map id
+  if type(m) ~= "table" or type(m.mapID) ~= "number" or type(m.x) ~= "number" or type(m.y) ~= "number" then return nil end
+  return { map = m.mapID, zone = mapName(m.mapID), x = round1(m.x * 100), y = round1(m.y * 100), label = m.targetName or m.label }
+end
+
+local function questState(id)
+  if C_QuestLog.IsQuestFlaggedCompleted and C_QuestLog.IsQuestFlaggedCompleted(id) then return "done" end
+  if C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(id) then return "log" end
+  return nil
+end
+
+local function dungeons()
+  local J = _G.ForeverDungeonJournal_NS
+  if type(J) ~= "table" or type(J.DB) ~= "table" then return nil end
+  local faction = UnitFactionGroup("player")
+  local chains, details, starts = J.QUEST_PREREQ_CHAINS or {}, J.QUEST_PREREQ_DETAILS or {}, J.QUEST_START_MAPS or {}
+  local names = J.ORDER
+  if type(names) ~= "table" then
+    names = {}
+    for name in pairs(J.DB) do names[#names + 1] = name end
+    table.sort(names)
+  end
+  local out = {}
+  for _, name in ipairs(names) do
+    local d = J.DB[name]
+    if type(d) == "table" then
+      local dungeon = { name = name, level = d.level, location = d.location, quests = {}, bosses = {},
+                        entrance = journalPlace(d.entrance), entranceHint = type(d.entrance) == "table" and d.entrance.detail or nil }
+      for _, q in ipairs(d.quests or {}) do
+        local mine = q.faction == nil or q.faction == "Both" or q.faction == faction
+        if type(q.id) == "number" and mine and not q.hideFromMainList then
+          local quest = { id = q.id, name = q.name, level = q.level, requires = q.requires, class = q.classOnly,
+                          objective = q.objective, pickup = q.pickup, turnin = q.turnin,
+                          rewards = q.rewards or q.rewardSummary, state = questState(q.id),
+                          start = journalPlace(q.startMap or starts[q.id]), needs = {} }
+          for _, step in ipairs(chains[q.id] or {}) do
+            if type(step) == "table" and type(step.id) == "number" then
+              local detail = details[step.id] or {}
+              quest.needs[#quest.needs + 1] = { id = step.id, name = step.name, state = questState(step.id),
+                                                pickup = detail.pickup, start = journalPlace(detail.map or starts[step.id]) }
+            end
+          end
+          dungeon.quests[#dungeon.quests + 1] = quest
+        end
+      end
+      for _, b in ipairs(d.bosses or {}) do
+        local boss = { name = b.name, rare = b.rare and true or nil, loot = {} }
+        for _, item in ipairs(b.loot or {}) do
+          if type(item) == "table" and type(item[1]) == "number" then
+            boss.loot[#boss.loot + 1] = { item[1], item[2], item[3], item[4] }   -- id, name, slot, quality
+          end
+        end
+        dungeon.bosses[#dungeon.bosses + 1] = boss
+      end
+      out[#out + 1] = dungeon
+    end
+  end
+  return out
+end
+
 local function buildSnapshot()
   local version, _, _, interface = GetBuildInfo()
   local map = C_Map.GetBestMapForUnit("player")
@@ -110,6 +176,8 @@ local function buildSnapshot()
   local DB, ZoneDB = questieModule("QuestieDB"), questieModule("ZoneDB")
   if DB and type(DB.GetQuest) ~= "function" then DB = nil end   -- Questie still starting up
   local _, classFile = UnitClass("player")
+  local okD, journal = pcall(dungeons)   -- one addon's surprise must not cost the whole snapshot
+  if not okD then journal = nil end
   return {
     v = 1,
     takenAt = time(),
@@ -120,7 +188,9 @@ local function buildSnapshot()
       map = map, zone = mapName(map), subzone = GetSubZoneText(),
       x = x and round1(x * 100), y = y and round1(y * 100),
     },
-    addons = { questie = DB ~= nil, tomtom = type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function" },
+    addons = { questie = DB ~= nil, tomtom = type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function",
+               dungeonjournal = journal ~= nil },
+    dungeons = journal,
     quests = questLog(DB, ZoneDB),
     completed = C_QuestLog.GetAllCompletedQuestIDs(),
   }
@@ -248,8 +318,9 @@ SlashCmdList.WISP = function(msg)
   if msg:match("save") then
     local snapshot, why = save()
     if snapshot then
-      say(("snapshot built: %d quests, Questie %s. It is written to disk when you log out.")
-        :format(#snapshot.quests, snapshot.addons.questie and "found" or "not found"))
+      say(("snapshot built: %d quests, Questie %s, DungeonJournal %s. It is written to disk when you log out.")
+        :format(#snapshot.quests, snapshot.addons.questie and "found" or "not found",
+                snapshot.dungeons and (#snapshot.dungeons .. " dungeons") or "not found"))
     else
       say("|cffff6060could not build the snapshot:|r " .. tostring(why))
     end

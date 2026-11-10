@@ -53,6 +53,8 @@ def check(wow_dir: Path | None, call_model: bool = True) -> list[tuple[str, str,
             "an older version is installed: press Install addon")
         add("Questie installed", (addons / "Questie").is_dir(), bad="without it Wisp knows almost no locations")
         add("TomTom installed", (addons / "TomTom").is_dir(), bad="without it the built-in map pin is used", optional=True)
+        add("DungeonJournal installed", (addons / "ForeverDungeonJournal").is_dir(),
+            bad="without it Wisp knows nothing about dungeons: their quests, what those need first, the loot", optional=True)
         saved = find_saved_file(wow_dir)
         if saved is None:
             # say which step is missing, from what the game has written so far
@@ -76,7 +78,10 @@ def check(wow_dir: Path | None, call_model: bool = True) -> list[tuple[str, str,
             add("Snapshot readable", True, f"{len(game.quests)} quests, saved {game.age_minutes()} minutes ago")
             add("Questie data in the snapshot", (game.snapshot.get("addons") or {}).get("questie"),
                 bad="Questie was not ready at logout; play a little, then log out again")
-            places = sum(1 for ref in game.places if ".start." in ref or ".end." in ref)
+            if (addons / "ForeverDungeonJournal").is_dir():
+                add("Dungeon data in the snapshot", bool(game.dungeons), f"{len(game.dungeons)} dungeons",
+                    "not yet: log in and out once more with the new Wisp addon")
+            places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
     return _key_checks(out, add, call_model)
 

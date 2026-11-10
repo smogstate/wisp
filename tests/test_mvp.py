@@ -56,7 +56,7 @@ def test_snapshot_and_tools(wow: Path):
     snap = game.snapshot
     assert snap["character"]["class"] == "MAGE" and snap["character"]["level"] == 12
     assert snap["character"]["gold"] == 15 and snap["character"]["x"] == 42.1
-    assert snap["addons"] == {"questie": True, "tomtom": True}
+    assert snap["addons"] == {"questie": True, "tomtom": True, "dungeonjournal": True}
     assert [q["id"] for q in game.quests] == [33, 76], "header and hidden entries are skipped"
 
     wolves, mine = game.quests
@@ -109,6 +109,55 @@ def test_question_to_waypoint(wow: Path):
     assert "WAY tomtom 1429 0.489 0.402 Eagan Peltskinner (turn in)" in lines, lines
     assert "CHAT Wisp waypoint: Eagan Peltskinner (turn in)" in lines, lines
     assert "BOX []" in lines, "the inbox closes itself after a paste"
+
+
+def test_dungeons(wow: Path, tmp: Path):
+    """DungeonJournal's data, as this character sees it: an Alliance mage, level 12."""
+    game = Game.load(wow)
+    listed = run_tool(game, "dungeons", {})["dungeons"]
+    assert [d["name"] for d in listed] == ["Hall of Thanes", "The Deadmines"]
+    assert listed[0]["quests"] == 1, "the other faction's quest and the hidden step are left out"
+    assert listed[1] == {"name": "The Deadmines", "level": "17-26", "location": "Moonbrook, Westfall", "quests": 4,
+                         "done": 1, "in_log": 1, "available_now": 0, "bosses": 2}
+
+    mines = run_tool(game, "dungeon", {"name": "deadmines"})["dungeon"]
+    assert mines["entrance"] == {"ref": "d2.entrance", "zone": "Westfall", "x": 42.5, "y": 71.7, "at": "The Deadmines Entrance"}
+    assert mines["entrance_hint"] == "Dungeon entrance in Moonbrook"
+    by_name = {q["name"]: q for q in mines["quests"]}
+    bandanas = by_name["Red Silk Bandanas"]
+    assert bandanas["status"] == "locked: an earlier quest is not done"
+    assert [(n["id"], n["done"]) for n in bandanas["needs_first"]] == [(65, True), (132, True), (155, False)]
+    assert bandanas["next_step"]["id"] == 155, "the next step is the first one not done, not the start of the chain"
+    assert bandanas["next_step"]["pickup"] == "Defias Traitor, Sentinel Hill"
+    assert bandanas["next_step"]["where"] == {"ref": "dq155.start", "zone": "Westfall", "x": 55.7, "y": 47.5, "at": "Defias Traitor"}
+    assert bandanas["pickup_where"]["ref"] == "dq214.start" and bandanas["rewards"] == "7s"
+    assert by_name["Collecting Memories"]["status"] == "needs level 14" and by_name["Collecting Memories"]["class_only"] == "Warrior"
+    assert by_name["Collecting Memories"]["pickup_where"]["zone"] == "Stormwind City"
+    assert by_name["The Jasperlode Mine"]["status"] == "in your quest log" and by_name["Already Done"]["status"] == "done"
+    assert mines["bosses"][0] == {"name": "Rhahk'Zor", "rare": False, "loot": [
+        {"item": "Rockslicer", "slot": "Two-Hand, Axe", "quality": "rare"},
+        {"item": "Rhahk'Zor's Hammer", "slot": "Two-Hand, Mace", "quality": "rare"}]}
+    assert mines["bosses"][1]["rare"] is True
+    thanes = run_tool(game, "dungeon", {"name": "Hall of Thanes"})["dungeon"]
+    assert thanes["bosses"][0]["loot"] == [{"item": "Catacomb Cloak", "slot": "Back", "quality": "rare"}], "a note entry is not loot"
+    assert thanes["quests"][0]["status"] == "available" and thanes["quests"][0]["pickup_where"] is None
+
+    assert "No dungeon is called that" in run_tool(game, "dungeon", {"name": "Karazhan"})["error"]
+    assert run_tool(game, "dungeon", {"name": "the"})["error"] == "More than one dungeon matches. Ask for one of: Hall of Thanes, The Deadmines"
+    assert "error" in run_tool(game, "dungeon", {"name": ""}) and "error" in run_tool(game, "dungeon", {})
+
+    # a waypoint to the entrance and to the next quest step, pasted into the game
+    result = run_tool(game, "waypoint", {"refs": ["d2.entrance", "dq155.start"]})
+    assert result["shown"] == 2
+    lines = stub("paste", game.cards[-1]["wisp"])
+    assert "WAY tomtom 1436 0.425 0.717 The Deadmines entrance" in lines, lines
+    assert "WAY tomtom 1436 0.557 0.475 The Defias Brotherhood (quest start)" in lines, lines
+
+    # without the DungeonJournal addon the tools say so, and the rest still works
+    plain = Game.load(make_wow_dir(tmp, flags="nojournal"))
+    assert plain.snapshot["addons"]["dungeonjournal"] is False and len(plain.quests) == 2
+    assert "DungeonJournal addon was not found" in run_tool(plain, "dungeons", {})["error"]
+    assert "DungeonJournal addon was not found" in run_tool(plain, "dungeon", {"name": "x"})["error"]
 
 
 def test_inbox_is_strict():
@@ -380,6 +429,8 @@ if __name__ == "__main__":
         wow = make_wow_dir(Path(a))
         test_snapshot_and_tools(wow)
         test_question_to_waypoint(wow)
+        with tempfile.TemporaryDirectory() as f:
+            test_dungeons(wow, Path(f))
         test_inbox_is_strict()
         test_without_questie(Path(b))
         test_bad_files(Path(c))

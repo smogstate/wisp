@@ -11,6 +11,7 @@ The model calls them, Python runs them, the model reads the result and can call 
 | Tool | Returns | Page |
 |---|---|---|
 | `wowhead_search`, `wowhead_get`, … | Items, spells, quests, NPCs with coordinates, as validated structures | [Wowhead](Wowhead.md) |
+| `dungeons`, `dungeon` | **Built.** Every dungeon, and one in full: quests with this character's status and next step, bosses, loot, entrance | [Integrations](Integrations.md) |
 | `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state. With a date, the snapshot from then | [Architecture](Architecture.md) |
 | `changes` | What changed between two snapshots, computed in code: levels, gold, quests, skill, gear, talents, bags | [Architecture](Architecture.md) |
 | `screenshot` | What is on screen right now (proposed) | [Architecture](Architecture.md) |

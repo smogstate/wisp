@@ -15,7 +15,7 @@ Wisp never sends input to the game and never reads its memory. See [Red Lines](w
 
 ## Run it
 
-You need the game on Windows, an Anthropic API key, and the Questie addon. TomTom is recommended; without it Wisp uses the built-in map pin. **No Python is needed.**
+You need the game on Windows, an Anthropic API key, and the Questie addon. TomTom is recommended; without it Wisp uses the built-in map pin. With the **DungeonJournal** addon installed, Wisp also knows every dungeon: ask *what am I missing for the Deadmines?* or *what drops in Scholomance?* **No Python is needed.**
 
 1. **Download [Wisp.exe](https://github.com/smogstate/wisp/releases/download/mvp/Wisp.exe)** and run it. It is not signed, so Windows SmartScreen will warn: choose *More info*, then *Run anyway*. An antivirus may also ask, as it can with any small unsigned program.
 2. **Settings** opens by itself the first time.

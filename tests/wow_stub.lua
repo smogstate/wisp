@@ -66,6 +66,8 @@ local function number(v)   -- 12 not 12.0, 48.9 as is, on every Lua version
   if v == math.floor(v) then return string.format("%d", v) end
   return tostring(v)
 end
+local jsonEscapes = { ['"'] = '\\"', ["\\"] = "\\\\", ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
+local jsonUnescapes = { n = "\n", r = "\r", t = "\t" }
 local function enc(v)
   local t = type(v)
   if t == "table" then
@@ -77,7 +79,9 @@ local function enc(v)
     for k, x in pairs(v) do parts[#parts + 1] = '"' .. tostring(k) .. '":' .. enc(x) end
     return "{" .. table.concat(parts, ",") .. "}"
   elseif t == "string" then
-    return '"' .. v:gsub('[\\"]', "\\%0") .. '"'
+    return '"' .. v:gsub('[%c"\\]', function(c)
+      return jsonEscapes[c] or string.format("\\u%04x", c:byte())
+    end) .. '"'
   elseif t == "number" then
     return number(v)
   end
@@ -93,7 +97,11 @@ local function dec(s)
       local c = s:sub(j, j)
       if c == "" then error("bad json") end
       if c == '"' then break end
-      if c == "\\" then j = j + 1; c = s:sub(j, j) end
+      if c == "\\" then
+        j = j + 1
+        c = s:sub(j, j)
+        if c == "u" then c = string.char(tonumber(s:sub(j + 1, j + 4), 16) % 256); j = j + 4 else c = jsonUnescapes[c] or c end
+      end
       o[#o + 1] = c
       j = j + 1
     end
@@ -149,7 +157,7 @@ function UnitLevel() return 12 end
 function UnitFactionGroup() return "Alliance", "Альянс" end
 function GetMoney() return 153422 end
 function GetSubZoneText() return "Златоземье" end
-local maps = { [1429] = "Elwynn Forest", [1453] = "Stormwind City", [1436] = "Westfall" }
+local maps = { [1429] = "Elwynn Forest", [1453] = "Stormwind City", [1436] = "Westfall", [1455] = "Ironforge" }
 C_Map = {
   GetBestMapForUnit = function() return 1429 end,
   GetPlayerMapPosition = function() return { GetXY = function() return 0.4212, 0.6588 end } end,
@@ -200,6 +208,50 @@ local QuestieDB = {
 local ZoneDB = { GetUiMapIdByAreaId = function(_, area) return ({ [12] = 1429, [1519] = 1453 })[area] end }
 if not flags:find("noquestie") then
   QuestieLoader = { ImportModule = function(_, name) return name == "QuestieDB" and QuestieDB or ZoneDB end }
+end
+-- DungeonJournal, in the shape of its own tables (made-up entries, not its data)
+local completedIds = { [65] = true, [132] = true }
+C_QuestLog.IsQuestFlaggedCompleted = function(id) return completedIds[id] == true end
+C_QuestLog.GetLogIndexForQuestID = function(id) if id == 33 or id == 76 then return 2 end end
+if not flags:find("nojournal") then
+  ForeverDungeonJournal_NS = {
+    ORDER = { "Hall of Thanes", "The Deadmines" },
+    DB = {
+      ["Hall of Thanes"] = {
+        level = "13-20", location = "Beneath Ironforge, Dun Morogh", description = "x",
+        entrance = { mapID = 1455, x = 0.5, y = 0.25, label = "Hall of Thanes Entrance", detail = "Behind the forge", markerType = "dungeon" },
+        quests = {
+          { id = 96395, name = "An Ancient Grudge", faction = "Both", level = 15, requires = 10, objective = "Put the spirit to rest.",
+            pickup = "Ghostly Attendant, inside", turnin = "Ghostly Attendant", rewards = "Choose: Cloak or Trousers", startsInDungeon = true },
+          { id = 96400, name = "For the Horde Only", faction = "Horde", level = 15, requires = 10, objective = "x", pickup = "x", turnin = "x" },
+          { id = 96401, name = "Hidden Step", faction = "Both", level = 15, requires = 10, hideFromMainList = true, objective = "x", pickup = "x", turnin = "x" },
+        },
+        bosses = { { name = "Faldrim Anvilmar", npcID = 1, loot = { { 279899, "Catacomb Cloak", "Back", 3 }, { tip = {} } } } },
+      },
+      ["The Deadmines"] = {
+        level = "17-26", location = "Moonbrook, Westfall", description = "x",
+        entrance = { mapID = 1436, x = 0.425, y = 0.717, label = "The Deadmines Entrance", detail = "Dungeon entrance in Moonbrook" },
+        quests = {
+          { id = 214, name = "Red Silk Bandanas", faction = "Alliance", level = 17, requires = 14, objective = "Collect 10 bandanas.",
+            pickup = "Scout Riell, Sentinel Hill tower", turnin = "Scout Riell", rewardSummary = "7s" },
+          { id = 168, name = "Collecting Memories", faction = "Alliance", level = 18, requires = 14, objective = "Collect 4 cards.",
+            pickup = "Wilder Thistlenettle, Stormwind", turnin = "Wilder Thistlenettle", classOnly = "Warrior",
+            startMap = { mapID = 1453, x = 0.655, y = 0.212, label = "Wilder Thistlenettle — Stormwind", targetName = "Wilder Thistlenettle" } },
+          { id = 76, name = "The Jasperlode Mine", faction = "Both", level = 10, requires = 7, objective = "x", pickup = "x", turnin = "x" },
+          { id = 132, name = "Already Done", faction = "Both", level = 20, requires = 30, objective = "x", pickup = "x", turnin = "x" },
+        },
+        bosses = {
+          { name = "Rhahk'Zor", npcID = 644, loot = { { 872, "Rockslicer", "Two-Hand, Axe", 3 }, { 5187, "Rhahk'Zor's Hammer", "Two-Hand, Mace", 3 } } },
+          { name = "Miner Johnson", npcID = 3586, rare = true, loot = {} },
+        },
+      },
+    },
+    QUEST_PREREQ_CHAINS = { [214] = { { id = 65, name = "The Defias Brotherhood" }, { id = 132, name = "The Defias Brotherhood" },
+                                      { id = 155, name = "The Defias Brotherhood" } } },
+    QUEST_PREREQ_DETAILS = { [155] = { pickup = "Defias Traitor, Sentinel Hill", level = 18, requires = 14,
+                                       map = { mapID = 1436, x = 0.557, y = 0.475, label = "Defias Traitor — Westfall", targetName = "Defias Traitor" } } },
+    QUEST_START_MAPS = { [214] = { mapID = 1436, x = 0.566, y = 0.473, label = "Scout Riell — Westfall", targetName = "Scout Riell" } },
+  }
 end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }

@@ -9,13 +9,29 @@ Each integration is one Lua file registered through [Protocol](Protocol.md). Com
 | Integration | Commands | Reads | Requires | Verified |
 |---|---|---|---|---|
 | Built-in map | pin on the world map | — | nothing | no |
-| TomTom | waypoint, route of waypoints | current waypoints | TomTom | no |
+| TomTom | waypoint | — | TomTom | **works in the game** (Denis, 2026-11-10) |
+| Questie | — | quests, chains, NPC positions | Questie | **works in the game** |
+| DungeonJournal | — | dungeons, their quests and prerequisites, bosses, loot, entrances | DungeonJournal | export tested against its real data files; not yet run in the game |
 | Auctionator | create a shopping list **with quantities** | prices, price age, vendor price | Auctionator | API read in source (v343), not run in a client |
 | WeakAuras | open the import dialog with a string | — | WeakAuras | no |
 | Talents | show or mark a build in game (how is open) | current talents | nothing | no |
 | Macros | create or update a macro, **checked before it is offered** | existing macros, known spells | nothing | no |
 
 TomTom is first. The rest are **open**: Denis decides which follow. **Auctionator is second** (Denis, 2026-11-10): shopping lists for crafting plans.
+
+## DungeonJournal — built 2026-11-10
+
+Denis pointed at it: "we can get a lot of data". It is Exehn's dungeon journal for Forever, and its tables are the curated, Forever-specific data nothing else has, the new dungeons included.
+
+Measured by running Wisp's export against the journal's data files outside the game: **35 dungeons, 204 quests for one faction, 283 bosses, 1201 loot entries**; every dungeon has an entrance with a map position; 130 quests have a pickup position; 64 have prerequisites. The export adds about 250 KB to the saved snapshot.
+
+- **Read in the game, not copied.** The journal keeps its tables in a shared namespace (`ForeverDungeonJournal_NS`). At logout the Wisp addon reads them there and adds, for this character, whether each quest and each prerequisite is done or in the log. Nothing of the journal is in Wisp's files or repository; the tests use a small made-up stand-in in the same shape.
+- **Two tools** ([Tools](Tools.md)): `dungeons` lists every dungeon with level, place and quest counts for this character; `dungeon` gives one in full — entrance, each quest's status (done, in the log, available, locked behind an earlier quest, needing a level), who gives it and where, what must be done first and **the next step to take**, rewards, and every boss with its loot.
+- Every position carries a ref, so the entrance and the next quest giver can go straight to a waypoint card.
+- The worked example "what am I missing for the Deadmines?" is now answered from this, with Questie for the older quests' NPC positions.
+- Without the journal the tools say so and name the addon.
+
+Not used yet: its dungeon routes, in-dungeon quest pins, and its run log. Its licence was not found stated; Wisp only reads what the installed addon exposes in the game.
 
 ## Auctionator — what its API offers
 
