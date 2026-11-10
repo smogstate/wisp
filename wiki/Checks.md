@@ -100,6 +100,20 @@ The talent import string is documented in the source: a base64 bit stream holdin
 - OpenRouter's public catalogue lists ten Kimi models; all declare tool calling. Images are accepted from `kimi-k2.5` up. **`kimi-k2-0905`, kintale's default, is text only** — no screenshots on it.
 - That documentation page does not mention a built-in web search.
 
+## Settled by the first real run (2026-11-10)
+
+Denis ran the MVP in the Forever client on Windows. Its working end to end confirms, in the real game:
+
+- An addon with interface `16001` loads.
+- The client's JSON and base64 functions work, in both directions: the snapshot was written with them and a pasted message was decoded with them.
+- The quest log and completed-quest functions return data.
+- **Another addon can read Questie**: quests, the NPCs that start and end them, their positions, and the zone-to-map conversion. Check setup reported Questie data and quest locations in the snapshot.
+- **A paste arrives in an addon's input box**, and Ctrl+V can be the addon's key (a short, one-command message; a long one has not been tried in the game).
+- A waypoint set from a pasted command appears in the game.
+- Claude answers with a real key, calls the tools and produces the card.
+
+Not learned from this run: which of TomTom or the built-in pin drew the waypoint, and everything `WispCheck` asks beyond the above (the dungeon journal, quest lines, flight points, recipes, macros, Auctionator, long pastes).
+
 ## Still to run for real
 
 The in-client part is packaged as a throwaway addon, **`checks/WispCheck`**, with instructions in `checks/README.md`. Written 2026-11-10 and dry-run only in a Lua interpreter against a faked game; it waits for Denis to run it in Forever and send back the saved report. It also lists the installed addons and tries to read a quest and its starting NPC from Questie's database.

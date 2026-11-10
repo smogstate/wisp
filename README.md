@@ -51,4 +51,4 @@ Tested without the game:
 - The interface in headless Chrome, every state, light and dark, at three sizes.
 - The game functions and Questie record fields the addon uses, checked against Blizzard's Forever interface source and Questie's source.
 
-**Not tested: the addon inside the real game, and what the real model answers.** Both need a player's PC and key. `checks/WispCheck` exists to test what the game actually provides; see [`checks/README.md`](checks/README.md).
+**In the real game:** the whole loop was run once on a player's PC in the Forever client with a real key (2026-11-10): the addon saved its snapshot with Questie's data, Claude answered a question about a quest, and the pasted card set the waypoint. That is one character on one PC, so expect rough edges. `checks/WispCheck` exists to test what the game actually provides; see [`checks/README.md`](checks/README.md).

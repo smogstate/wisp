@@ -2,7 +2,9 @@
 
 > Status: order proposed 2026-11-10; nothing is built. Decided by Denis so far: **snapshot history comes first among the feature ideas**, so it is part of the base, not an extra. Each milestone ends with a review before the next starts.
 
-## MVP — built 2026-11-10, ahead of the order below
+## MVP — built 2026-11-10, ahead of the order below, and **confirmed working by Denis the same day**
+
+On his Windows PC, in the real Forever client, with his own key: Check setup all ok, a question about a quest answered, the card copied, Ctrl+V twice in the game, and the waypoint appeared. The whole loop works for real.
 
 Denis asked for a first working slice once it was clear he has Questie. It cuts across milestones 1, 2 and 4:
 
@@ -15,7 +17,7 @@ Denis asked for a first working slice once it was clear he has Questie. It cuts 
 
 Left out on purpose: themes beyond following the system, transparency, collapsing, sessions and slash commands, snapshot history, other providers, every other tool and integration.
 
-**Tested** only without the game and without a model key: the addon in a Lua interpreter against a faked game and Questie, the whole loop with a scripted model, the interface in headless Chrome, and the real Anthropic SDK against a local stand-in for the API. The game functions the addon calls were checked against Blizzard's Forever interface source. The real pywebview window was opened on Linux and driven through a question and a Copy; Questie's record fields were checked in its source. `python -m wisp --check <game folder>` tests a real setup step by step, including one real model call. **Not tested:** the addon in Forever and what the real model answers.
+**Tested** only without the game and without a model key: the addon in a Lua interpreter against a faked game and Questie, the whole loop with a scripted model, the interface in headless Chrome, and the real Anthropic SDK against a local stand-in for the API. The game functions the addon calls were checked against Blizzard's Forever interface source. The real pywebview window was opened on Linux and driven through a question and a Copy; Questie's record fields were checked in its source. `python -m wisp --check <game folder>` tests a real setup step by step, including one real model call. What had been untested — the addon in Forever, and what the real model answers — was settled by Denis's run (above). His first attempt stopped at a missing snapshot, which was only the game not having logged out yet; Check setup now says which step is missing.
 
 **It ships as `Wisp.exe`** (2026-11-10): Denis has no Python on the game PC. Everything the command line did moved into a Settings panel — game folder, one-button addon install, the key in the Windows credential store, Check setup. `.github/workflows/build.yml` builds the exe on a Windows machine, runs the tests there, opens the exe's own window and drives it through a question, a card, a Copy and a credential-store write, and publishes it as the `mvp` release. That build passed, so the window on Windows is no longer an unknown. Those are the next things to learn, and `checks/WispCheck` covers the game side.
 
