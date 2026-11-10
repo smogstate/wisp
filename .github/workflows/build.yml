@@ -49,6 +49,7 @@ jobs:
       - name: Build Wisp.exe
         run: >
           pyinstaller --noconfirm --onefile --windowed --name Wisp
+          --exclude-module PIL
           --add-data "wisp/ui.html;wisp" --add-data "addon/Wisp;addon/Wisp"
           wisp_app.py
 
