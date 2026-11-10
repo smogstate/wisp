@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 from wisp import local  # noqa: E402
 from wisp.__main__ import App, check, serve  # noqa: E402
 from wisp.game import Game, encode_wisp1, read_snapshot, run_tool  # noqa: E402
-from wisp.history import History  # noqa: E402
+from wisp.market import Market  # noqa: E402
 from wisp.llm import FakeChat, answer  # noqa: E402
 
 
@@ -318,19 +318,69 @@ def test_crafting(wow: Path, tmp: Path):
     assert run_tool(learned, "auction_prices", {"items": ["Bolt of Linen Cloth"]})["prices"][0]["found"][0]["lowest_price"] == "3s", \
         "its name is learned after a visit to the auction house, and kept"
 
-    # prices over time: one point per change, dated by when the price was seen
-    history = History(tmp / "prices")
-    day = 86400
-    first = dict(game.snapshot, takenAt=1000 * day, prices=[[4306, 400, 1, "Silk Cloth"], [2589, 120, 0, "Linen Cloth"], [31, 77, -1, "Old Thing"]])
-    same = dict(game.snapshot, takenAt=1003 * day, prices=[[4306, 400, 0, "Silk Cloth"], [2589, 120, 3, "Linen Cloth"]])
-    later = dict(game.snapshot, takenAt=1010 * day, prices=[[4306, 450, 0, "Silk Cloth"], [2589, 150, 2, "Linen Cloth"]])
-    for snapshot in (first, same, later, later):
-        history.ingest(snapshot)
-    assert history._prices(later) == {"4306": [[999, 400], [1010, 450]], "2589": [[1000, 120], [1008, 150]]}, history._prices(later)
-    then = Game(later)
-    then.history = history
-    silk = run_tool(then, "auction_prices", {"items": ["Silk Cloth"]})["prices"][0]["found"][0]
-    assert silk["earlier"] == [{"days_ago": 11, "price": "4s"}] and silk["lowest_price"] == "4s 50c"
+    # prices over time: every scan day Auctionator hands over is kept in one SQLite file
+    market = Market(tmp / "market.sqlite")
+    assert "no price history yet" in run_tool(game, "price_history", {"item": "Silk Cloth"})["error"]
+    assert market.ingest(game.snapshot) == 7 and market.ingest(game.snapshot) == 0, "the same logout is filed once"
+    game.market = market
+    assert market.size(game.snapshot)["items"] == 5 and market.size(game.snapshot)["days_covered"] == 6
+    silk = run_tool(game, "price_history", {"item": "silk cloth"})
+    assert [(p["low"], p.get("high"), p["listed"]) for p in silk["series"]] == [("3s 80c", "4s", 200), ("4s 30c", None, 80), ("4s 50c", "4s 70c", 120)]
+    assert (silk["now"], silk["usual_price"], silk["now_against_usual"], silk["usually_listed"], silk["in_bags"]) == ("4s 50c", "4s 30c", "+5%", 120, 32)
+    assert "next_week_estimate" not in silk, "three scan days are not enough to estimate from"
+    assert run_tool(game, "price_history", {"item": "silk"})["several_items_match"] == ["Silk Cloth", "Azure Silk Hood", "Bolt of Silk Cloth"]
+    assert "error" in run_tool(game, "price_history", {"item": "no such thing"})
+    priced = run_tool(game, "auction_prices", {"items": ["Silk Cloth"]})["prices"][0]["found"][0]
+    assert (priced["usual_price_30_days"], priced["days_with_a_scan"]) == ("4s 30c", 3)
+    def handed(flags):
+        lines = stub("snapshot", flags=flags)
+        snap = json.loads(base64.b64decode(next(l for l in lines if l.startswith("SNAPSHOT ")).split()[1]))
+        return [d["day"] - snap["market"]["today"] for d in snap["market"]["days"]], next(l for l in lines if l.startswith("SENT "))
+    assert handed("") == ([-5, -3, -2, -1, 0], "SENT Test Realm-Alliance 5"), "the first time: everything Auctionator holds"
+    assert handed("handedover")[0] == [-5, -3, -2, -1, 0], "then the days since, two for overlap, and older days not yet handed over"
+    assert handed("handedback") == ([-5, -2, -1, 0], "SENT Test Realm-Alliance 5"), "what was handed over is not sent again"
+    def days_of(flags):
+        line = next(l for l in stub("snapshot", flags=flags) if l.startswith("DAYS "))
+        return {int(d.split(":")[0]): int(d.split(":")[1]) for d in line.split()[1:]}
+    first = days_of("bigmarket")
+    assert sorted(first) == list(range(-13, 1)) and 56000 <= sum(first.values()) <= 60000, "a big market: 60000 rows at most, newest first"
+    after = days_of("bigmarket,handedback")   # days -4 to 0 were handed over at the last logout
+    assert sorted(after) == list(range(-15, -4)) + [-2, -1, 0] and sum(after.values()) <= 60000, \
+        "the next logout: the new days, then on into the backlog from where the last one stopped"
+
+    # a month of scans: a usual level, a direction, a weekday pattern, an estimate, and the market ranked
+    def month(today):
+        days = []
+        for d in range(today - 29, today + 1):
+            steady = 700 if d == today else 1000 + (40 if d % 2 else -40)     # cheap today against a level of 1000
+            rising = 2000 + (d - today + 29) * 50                             # up 50 copper a day
+            weekly = 500 if d % 7 == 3 else 900                               # dips once a week
+            days.append({"day": d, "rows": [1, steady, steady, 50, 2, rising, rising + 100, 5, 3, weekly, weekly, 300, 4, 20, 20, 9000]})
+        return {"takenAt": today * 86400 + 3600, "who": {"realm": "R"}, "character": {"faction": "Horde"},
+                "prices": [[1, 700, 0, "Steady Ore"], [2, 3450, 0, "Rising Gem"], [3, 900, 0, "Weekly Herb"], [4, 20, 0, "Junk"]],
+                "market": {"day0": 0, "today": today, "days": days}}
+    far = Game(month(20000))
+    far.market = market
+    assert market.ingest(far.snapshot) == 120
+    ore = run_tool(far, "price_history", {"item": "Steady Ore"})
+    assert (ore["days_with_a_scan"], ore["now"], ore["usual_price"], ore["now_against_usual"]) == (30, "7s", "10s", "-30%")
+    assert ore["next_week_estimate"]["confidence"] == "fair" and len(ore["series"]) == 30 and ore["kept_by_wisp"]["rows"] == 120
+    gem = run_tool(far, "price_history", {"item": "Rising Gem", "days": 60})
+    assert gem["direction"] == "rising about 13% a week", gem["direction"]
+    assert gem["next_week_estimate"]["around"] == "34s 75c", "the recent level carried half a week along its direction"
+    herb = run_tool(far, "price_history", {"item": "Weekly Herb"})
+    assert herb["cheapest_weekday"].endswith("(5s)") and herb["dearest_weekday"].endswith("(9s)")
+    cheap = run_tool(far, "market_scan", {"find": "below_usual"})
+    assert [(i["item"], i["now_against_usual"]) for i in cheap["items"]] == [("Steady Ore", "-30%")], cheap["items"]
+    assert [i["item"] for i in run_tool(far, "market_scan", {"find": "rising"})["items"]] == ["Rising Gem"]
+    assert [i["item"] for i in run_tool(far, "market_scan", {"find": "swings"})["items"]][0] == "Rising Gem"
+    busy = run_tool(far, "market_scan", {"find": "most_listed", "limit": 2})["items"]
+    assert [i["item"] for i in busy] == ["Weekly Herb", "Steady Ore"], "junk worth under a silver is never listed"
+    assert run_tool(far, "market_scan", {"find": "most_listed", "name_contains": "gem"})["items"][0]["item"] == "Rising Gem"
+    assert run_tool(far, "market_scan", {"find": "most_listed", "among": "my_bags"})["items"] == []
+    for bad in ({"find": "x"}, {"find": "rising", "days": 1}, {"find": "rising", "limit": 0}, {"find": "rising", "among": "x"}):
+        assert "error" in run_tool(far, "market_scan", bad), bad
+    assert market.size(game.snapshot)["rows"] == 7, "each realm and faction is its own market"
 
     # the addon checks a pasted list as strictly as a waypoint
     def paste(cmd, flags=""):

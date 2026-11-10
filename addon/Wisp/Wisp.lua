@@ -367,6 +367,66 @@ local function prices(wanted)
   return out
 end
 
+local function myMarket() return tostring(GetRealmName()) .. "-" .. tostring((UnitFactionGroup("player"))) end
+
+-- Auctionator's day-by-day record: for each day it scanned, each item's lowest and highest price
+-- and the most it saw listed. It keeps about three weeks; Wisp's overlay keeps everything it is
+-- handed, for good. Each logout hands over the days since the last one, plus two for overlap,
+-- and then older days not handed over yet: newest first and no more than 60000 rows, so a logout
+-- never takes long and a backlog drains over the next few logouts.
+-- Returns { day0 = start of its day 0, today = its number for today, oldest = the oldest day
+--           handed over so far, days = { { day = n, rows = { item, low, high, listed or -1, item, ... } }, ... } }
+local function marketDays()
+  local A = Auctionator
+  local db = type(A) == "table" and type(A.Database) == "table" and A.Database.db
+  local day0 = type(A) == "table" and type(A.Constants) == "table" and A.Constants.SCAN_DAY_0
+  if type(db) ~= "table" or type(day0) ~= "number" then return nil end
+  local today = math.floor((time() - day0) / 86400)
+  local sent = type(WispData) == "table" and type(WispData.marketSent) == "table" and WispData.marketSent[myMarket()]
+  if type(sent) ~= "table" then sent = {} end
+  local newFrom = type(sent.to) == "number" and sent.to - 2 or today - 60   -- from here on: not handed over yet
+  local oldest = type(sent.from) == "number" and sent.from or today + 1     -- before here: not handed over yet
+  local counts = {}
+  for key, row in pairs(db) do
+    if tonumber(key) and type(row) == "table" and type(row.h) == "table" then
+      for day in pairs(row.h) do
+        local d = tonumber(day)
+        if d and d <= today and (d >= newFrom or d < oldest) then counts[d] = (counts[d] or 0) + 1 end
+      end
+    end
+  end
+  local take, total, lowest = {}, 0, oldest
+  for d = today, today - 60, -1 do
+    local n = counts[d]
+    if n then
+      if total > 0 and total + n > 60000 then break end
+      total, take[d] = total + n, true
+      if d < lowest then lowest = d end
+    end
+  end
+  local byDay = {}
+  for key, row in pairs(db) do
+    local id = tonumber(key)
+    if id and type(row) == "table" and type(row.h) == "table" then
+      for day, high in pairs(row.h) do
+        local d = tonumber(day)
+        if d and take[d] and type(high) == "number" then
+          local list = byDay[d]
+          if not list then list = {}; byDay[d] = list end
+          local low = type(row.l) == "table" and type(row.l[day]) == "number" and row.l[day] or high
+          local listed = type(row.a) == "table" and type(row.a[day]) == "number" and row.a[day] or -1
+          local n = #list
+          list[n + 1], list[n + 2], list[n + 3], list[n + 4] = id, low, high, listed
+        end
+      end
+    end
+  end
+  local days = {}
+  for d, list in pairs(byDay) do days[#days + 1] = { day = d, rows = list } end
+  table.sort(days, function(a, b) return a.day < b.day end)
+  return { day0 = day0, today = today, oldest = math.min(lowest, today), days = days }
+end
+
 local function buildSnapshot()
   local version, _, _, interface = GetBuildInfo()
   local map = C_Map.GetBestMapForUnit("player")
@@ -388,6 +448,8 @@ local function buildSnapshot()
   if not okC then books = {} end
   local okA, market = pcall(prices, wanted)
   if not okA then market = nil end
+  local okM, record = pcall(marketDays)
+  if not okM then record = nil end
   return {
     v = 1,
     takenAt = time(),
@@ -409,6 +471,7 @@ local function buildSnapshot()
     bags = carried,
     recipes = books,
     prices = market,
+    market = record,
     quests = questLog(DB, ZoneDB),
     completed = C_QuestLog.GetAllCompletedQuestIDs(),
   }
@@ -555,7 +618,12 @@ frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:SetScript("OnEvent", function(_, event)
   if event == "PLAYER_LOGOUT" then
-    save()
+    local snapshot = save()
+    if snapshot and snapshot.market then   -- these days are now handed over
+      if type(WispData) ~= "table" then WispData = {} end
+      WispData.marketSent = WispData.marketSent or {}
+      WispData.marketSent[myMarket()] = { to = snapshot.market.today, from = snapshot.market.oldest }
+    end
   elseif event == "AUCTION_HOUSE_CLOSED" then
     pcall(learnNames)   -- a scan has just shown the game these items
   elseif event ~= "PLAYER_LOGIN" then

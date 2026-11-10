@@ -148,6 +148,10 @@ local function dec(s)
   return val()
 end
 C_EncodingUtil = { SerializeJSON = enc, DeserializeJSON = dec, EncodeBase64 = b64enc, DecodeBase64 = b64dec }
+local SAVED   -- with bigmarket the snapshot is kept as a table: these encoders are far too slow for 60000 rows
+if flags:find("bigmarket") then
+  C_EncodingUtil.SerializeJSON = function(t) SAVED = t; return "{}" end
+end
 
 -- the character: a level 12 human in Elwynn with two quests
 function GetBuildInfo() return "1.60.1", "70862", "Nov 1 2026", 16001 end
@@ -305,9 +309,30 @@ if not flags:find("noauctionator") then
   local seen = { [4306] = { 450, 0 }, [4305] = { 2100, 3 }, [7048] = { 9000, 1 }, [2589] = { 120, 2 }, [2996] = { 300, 0 }, [31] = { 77 } }
   itemNames[2589], itemNames[31] = "Linen Cloth", "Old Thing"
   -- its own price table, keyed by text: item ids, and other keys for pets and item-level variants
-  local db = { ["g:1234:20"] = { m = 5 }, ["p:77"] = { m = 9 } }
-  for id, row in pairs(seen) do db[tostring(id)] = { m = row[1] } end
-  Auctionator = { Database = { db = db }, API = { v1 = {
+  local db = { ["g:1234:20"] = { m = 5, h = {} }, ["p:77"] = { m = 9, h = {} } }
+  for id, row in pairs(seen) do db[tostring(id)] = { m = row[1], h = {}, l = {}, a = {} } end
+  -- its day-by-day record: day numbers count from the start of 2020, as text keys
+  local day0 = os.time({ year = 2020, month = 1, day = 1, hour = 0 })
+  local today = math.floor((os.time() - day0) / 86400)
+  local function day(id, ago, low, high, listed)
+    local row, key = db[tostring(id)], tostring(today - ago)
+    row.h[key] = high
+    if low < high then row.l[key] = low end
+    row.a[key] = listed
+  end
+  day(4306, 0, 450, 470, 120); day(4306, 1, 430, 430, 80); day(4306, 5, 380, 400, 200); day(4306, 70, 300, 300, 10)
+  day(2589, 2, 120, 130, 900)
+  db["4305"].h[tostring(today - 3)], db["4305"].a = 2100, nil   -- an old record without quantities
+  if flags:find("bigmarket") then   -- more than one logout may carry: 4000 items scanned on each of 21 days
+    for id = 100000, 103999 do
+      local row = { m = id, h = {}, l = {}, a = {} }
+      for ago = 0, 20 do row.h[tostring(today - ago)], row.a[tostring(today - ago)] = id + ago, 40 end
+      db[tostring(id)] = row
+    end
+  end
+  if flags:find("handedover") then WispData = { marketSent = { ["Test Realm-Alliance"] = { to = today - 1, from = today - 4 } } } end
+  if flags:find("handedback") then WispData = { marketSent = { ["Test Realm-Alliance"] = { to = today, from = today - 4 } } } end
+  Auctionator = { Constants = { SCAN_DAY_0 = day0 }, Database = { db = db }, API = { v1 = {
     GetAuctionPriceByItemID = function(id, item) caller(id); return seen[item] and seen[item][1] end,
     GetAuctionAgeByItemID = function(id, item) caller(id); return seen[item] and seen[item][2] end,
     ConvertToSearchString = function(id, term)
@@ -338,6 +363,14 @@ if mode == "snapshot" then
   SlashCmdList.WISP("save")
   boot.scripts.OnEvent(boot, "PLAYER_LOGOUT")
   out("SNAPSHOT " .. tostring(WispSnapshot))
+  if SAVED then
+    local days = {}
+    for _, d in ipairs(SAVED.market.days) do days[#days + 1] = number(d.day - SAVED.market.today) .. ":" .. number(#d.rows / 4) end
+    out("DAYS " .. table.concat(days, " "))
+  end
+  for market, upTo in pairs(type(WispData) == "table" and WispData.marketSent or {}) do
+    out("SENT " .. market .. " " .. upTo.to - upTo.from)
+  end
 elseif mode == "paste" then
   SlashCmdList.WISP("")
   WispInbox.text = ARG

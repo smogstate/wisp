@@ -13,7 +13,9 @@ The model calls them, Python runs them, the model reads the result and can call 
 | `wowhead_search`, `wowhead_get`, … | Items, spells, quests, NPCs with coordinates, as validated structures | [Wowhead](Wowhead.md) |
 | `dungeons`, `dungeon` | **Built.** Every dungeon, and one in full: quests with this character's status and next step, bosses, loot, entrance | [Integrations](Integrations.md) |
 | `recipes` | **Built.** The recipes of the character's professions as the game listed them: colour, grey point, what each makes, materials with the count in bags and the auction price | [Integrations](Integrations.md) |
-| `auction_prices` | **Built.** The auction price of any item Auctionator has scanned, by name: lowest price seen, when, earlier prices Wisp has kept, the worth of the player's own stock | [Integrations](Integrations.md) |
+| `auction_prices` | **Built.** The auction price of any item Auctionator has scanned, by name: lowest price seen, when, its usual price over 30 days, the worth of the player's own stock | [Integrations](Integrations.md) |
+| `price_history` | **Built.** One item's price over every scan day kept: series, usual level, direction, weekday pattern, an estimate for next week with its confidence | [Integrations](Integrations.md) |
+| `market_scan` | **Built.** The whole kept market ranked in code: below or above usual, rising, falling, swinging, most listed; narrowed to bags, materials or crafts | [Integrations](Integrations.md) |
 | `craft_plan` | **Built.** The arithmetic of a plan, in code: recipes × times → materials needed, made along the way, covered by the bags, left to buy, and the cost | [Integrations](Integrations.md) |
 | `character` | The saved character snapshot: class, spec, level, gear, quest log, addon state. With a date, the snapshot from then | [Architecture](Architecture.md) |
 | `changes` | **Built.** What changed between two snapshots, computed in code: level, money, quests finished, picked up and dropped, profession skill, zone. For the last session, or looking back a number of days | [Architecture](Architecture.md) |

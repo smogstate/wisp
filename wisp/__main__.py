@@ -27,6 +27,7 @@ from pathlib import Path
 from . import local
 from .game import Game, find_saved_file
 from .history import History, ago_words, diff, recap
+from .market import Market
 from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
 from .sessions import Sessions, record
 
@@ -93,6 +94,10 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 add("Auction prices in the snapshot", bool(game.crafting.prices),
                     f"for {len(game.crafting.prices)} items, {named} of them with a name so far",
                     "none yet: scan the auction house with Auctionator, then log out", optional=True)
+                kept = Market(local.APP_DIR / "market.sqlite").size(game.snapshot)
+                add("Price history kept by Wisp", kept["rows"] > 0,
+                    f"{kept['rows']} prices of {kept['items']} items, from {kept['first_day']} to {kept['last_day']}",
+                    "none yet: it grows with every day you scan the auction house", optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
     return _key_checks(out, add, call_model, provider, model)
@@ -160,6 +165,7 @@ class App:
         self.sessions = Sessions(local.APP_DIR / "sessions" if persist else Path(tempfile.mkdtemp(prefix="wisp-sessions-")))
         self.session = self.sessions.new()
         self.history = History(local.APP_DIR / "snapshots" if persist else Path(tempfile.mkdtemp(prefix="wisp-snapshots-")))
+        self.market = Market((local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-market-"))) / "market.sqlite")
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
 
     def ensure_addon(self):
@@ -207,6 +213,11 @@ class App:
         if game.snapshot:
             self.history.ingest(game.snapshot)
             game.history = self.history
+            try:
+                self.market.ingest(game.snapshot)
+                game.market = self.market
+            except Exception:   # a locked or damaged price file must not cost the rest of Wisp
+                game.market = None
         return game
 
     def recap(self, game: Game) -> dict | None:

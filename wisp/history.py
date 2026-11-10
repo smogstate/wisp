@@ -13,7 +13,7 @@ import json
 import re
 from pathlib import Path
 
-REFERENCE = ("dungeons", "recipes", "prices")   # large and much the same every time: not kept per snapshot
+REFERENCE = ("dungeons", "recipes", "prices", "market")   # large; prices have their own store (market.py)
 
 
 def character_key(snapshot: dict) -> str:
@@ -51,7 +51,6 @@ class History:
         key, taken = character_key(snapshot), int(taken)
         if self._seen.get(key, 0) >= taken:
             return False
-        self._log_prices(snapshot, taken)
         files = self._files(key)
         self._seen[key] = taken
         if files and int(files[-1].stem) >= taken:
@@ -80,60 +79,6 @@ class History:
 
     def count(self, snapshot: dict) -> int:
         return len(self._files(character_key(snapshot)))
-
-    # -- auction prices over time ---------------------------------------------
-    # One file per realm and faction: item id -> [[day, copper], ...], a new entry
-    # only when the price changed. The day is the one the price was seen on, not
-    # the day of the logout that reported it.
-
-    def _price_file(self, snapshot: dict) -> Path:
-        who = snapshot.get("who") if isinstance(snapshot.get("who"), dict) else {}
-        faction = (snapshot.get("character") or {}).get("faction") or "any"
-        name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", f"{who.get('realm') or 'realm'}-{faction}")[:80]
-        return self.folder / "_prices" / (name + ".json")
-
-    def _prices(self, snapshot: dict) -> dict:
-        try:
-            log = json.loads(self._price_file(snapshot).read_text(encoding="utf-8"))
-            return log if isinstance(log, dict) else {}
-        except (OSError, ValueError):
-            return {}
-
-    def _log_prices(self, snapshot: dict, taken: int):
-        rows = snapshot.get("prices")
-        if not isinstance(rows, list) or not rows:
-            return
-        log, today, changed = self._prices(snapshot), taken // 86400, False
-        for row in rows:
-            if not (isinstance(row, list) and len(row) >= 3 and all(isinstance(v, int) for v in row[:3]) and row[2] >= 0):
-                continue   # a price seen too long ago to date is not a point in time
-            item, price, day = str(row[0]), row[1], today - row[2]
-            points = log.setdefault(item, [])
-            if points and points[-1][0] >= day:
-                if points[-1] == [day, price] or points[-1][0] > day:
-                    continue
-                points[-1] = [day, price]   # scanned again the same day: the later price stands
-            elif points and points[-1][1] == price:
-                continue
-            else:
-                points.append([day, price])
-            del points[:-40]
-            changed = True
-        if changed:
-            file = self._price_file(snapshot)
-            file.parent.mkdir(parents=True, exist_ok=True)
-            partial = file.with_suffix(".part")
-            partial.write_text(json.dumps(log, separators=(",", ":")), encoding="utf-8")
-            partial.replace(file)
-
-    def price_points(self, snapshot: dict, item: int) -> list[tuple[int, int]]:
-        """(days before this snapshot, copper) for each earlier price of the item, newest first."""
-        taken = snapshot.get("takenAt")
-        if not isinstance(taken, (int, float)):
-            return []
-        today = int(taken) // 86400
-        points = self._prices(snapshot).get(str(item), [])
-        return [(today - day, price) for day, price in reversed(points[:-1])]
 
 
 def _quest_names(*snapshots: dict) -> dict:

@@ -3,6 +3,7 @@ model can call over it, and the WISP1 messages that go back into the game."""
 import base64
 import json
 import re
+import statistics
 import time
 from pathlib import Path
 
@@ -72,6 +73,7 @@ class Game:
         self.crafting = Crafting(self.snapshot)
         self.cards: list[dict] = []        # action cards made during the current answer
         self.history = None                # the snapshot history, when the app has one
+        self.market = None                 # the auction prices kept over time, when the app has them
 
     @classmethod
     def load(cls, wow_dir: Path | None) -> "Game":
@@ -348,8 +350,6 @@ class Game:
             return {"error": "There are no auction prices. They come from the Auctionator addon's own scans: "
                              + ("the player scans the auction house with it, then logs out." if craft.has_auctionator
                                 else "it was not installed at the last logout.")}
-        log = self.history._prices(self.snapshot) if self.history else {}   # read once for all the items
-        today = int(self.snapshot.get("takenAt", 0)) // 86400
         out = []
         for name in names:
             found = craft.find(name)
@@ -359,9 +359,12 @@ class Game:
                 if craft.bags.get(item):
                     line["in_bags"] = craft.bags[item]
                     line["bags_worth"] = coins(craft.prices[item][0] * craft.bags[item])
-                earlier = [{"days_ago": today - day, "price": coins(price)} for day, price in reversed(log.get(str(item), [])[:-1])]
-                if earlier:
-                    line["earlier"] = earlier[:5]
+                past = self.market.series(self.snapshot, item, 30) if self.market else []
+                if len(past) >= 3:
+                    usual = statistics.median(low for _, low, _, _ in past)
+                    line["usual_price_30_days"] = coins(usual)
+                    line["now_against_usual"] = f"{(craft.prices[item][0] - usual) / usual:+.0%}"
+                    line["days_with_a_scan"] = len(past)
                 entry["found"].append(line)
             if not found:
                 entry["note"] = "no price under that name"
@@ -370,7 +373,73 @@ class Game:
                 "note": "From the player's own Auctionator scans: the lowest price it saw listed, not a sale, and before "
                         "the auction house's cut. Names are as the player's game writes them. 'seen' is counted from "
                         "the last logout. An item with no price was not at the auction house when Auctionator looked, "
-                        "or is spelled differently."}
+                        "or is spelled differently. For how a price has moved and where it is heading, call price_history."}
+
+    def _no_market(self) -> dict | None:
+        if not self.snapshot:
+            return {"error": self.problem}
+        if self.market is None or not self.market.size(self.snapshot)["rows"]:
+            return {"error": "Wisp has no price history yet. It is built from the Auctionator addon's scans: "
+                             + ("the player scans the auction house, logs out, and every scan day from then on is kept."
+                                if self.crafting.has_auctionator else "the addon was not installed at the last logout.")}
+        return None
+
+    def tool_price_history(self, args: dict) -> dict:
+        problem = self._no_market()
+        if problem:
+            return problem
+        name, days = args.get("item"), args.get("days", 30)
+        if not isinstance(name, str) or not name.strip():
+            return {"error": "item must be an item name"}
+        if not isinstance(days, int) or isinstance(days, bool) or not 2 <= days <= 3650:
+            return {"error": "days must be a whole number from 2 to 3650"}
+        found = self.market.find(_clean(name, 80))
+        if not found:
+            return {"error": f"no item named like '{_clean(name, 80)}' has been scanned. Names are as the player's game writes them."}
+        if len(found) > 1:
+            return {"several_items_match": [n for _, n in found], "note": "Ask again with one of these names exactly."}
+        item, item_name = found[0]
+        out = self.market.history(self.snapshot, item, item_name, days)
+        if self.crafting.bags.get(item):
+            out["in_bags"] = self.crafting.bags[item]
+        out["kept_by_wisp"] = self.market.size(self.snapshot)
+        out["note"] = ("Lowest listed price per scan day, from the player's own Auctionator scans; a day without a scan has "
+                       "no entry. A listing is not a sale and the auction house takes a cut. next_week_estimate is a plain "
+                       "statistical estimate: give it as a range, with its confidence, never as a promise.")
+        return out
+
+    def tool_market_scan(self, args: dict) -> dict:
+        problem = self._no_market()
+        if problem:
+            return problem
+        kind, days, limit = args.get("find"), args.get("days", 30), args.get("limit", 15)
+        if kind not in SCANS:
+            return {"error": "find must be one of: " + ", ".join(SCANS)}
+        if not isinstance(days, int) or isinstance(days, bool) or not 5 <= days <= 3650:
+            return {"error": "days must be a whole number from 5 to 3650"}
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 40:
+            return {"error": "limit must be a whole number from 1 to 40"}
+        only, craft = None, self.crafting
+        among = args.get("among", "everything")
+        if among == "my_bags":
+            only = set(craft.bags)
+        elif among == "my_materials":
+            only = {item for r in craft.recipes.values() for item, _ in r["reagents"]}
+        elif among == "what_i_craft":
+            only = {r["makes"] for r in craft.recipes.values() if r["makes"] and r["learned"]}
+        elif among != "everything":
+            return {"error": "among must be everything, my_bags, my_materials or what_i_craft"}
+        name = _clean(args.get("name_contains"), 60) if isinstance(args.get("name_contains"), str) else ""
+        found = self.market.scan(self.snapshot, kind, days, limit, name, only)
+        for entry in found:
+            item = next((i for i, n in craft.names.items() if n == entry["item"]), None)
+            if item and craft.bags.get(item):
+                entry["in_bags"] = craft.bags[item]
+        return {"find": kind, "what_it_means": SCANS[kind], "items": found, "kept_by_wisp": self.market.size(self.snapshot),
+                "note": "Ranked in code over every item with at least 4 scan days in the period, seen in the last 3 days and "
+                        "usually worth 1s or more. Lowest listed prices from the player's own scans: a listing is not a "
+                        "sale, and thinly traded items can show big moves that mean nothing. For one item in depth, call "
+                        "price_history." + ("" if found else " Nothing stood out; with only a few scan days that is normal.")}
 
     def tool_craft_plan(self, args: dict) -> dict:
         if not self.snapshot:
@@ -440,6 +509,15 @@ class Game:
             out["warning"] = "The Auctionator addon was not installed at the last logout. The list needs it."
         return out
 
+
+SCANS = {
+    "below_usual": "priced well under their own usual level now: candidates to buy",
+    "above_usual": "priced well over their own usual level now: candidates to sell",
+    "rising": "prices climbing over the last two weeks",
+    "falling": "prices dropping over the last two weeks",
+    "swings": "prices that move a lot between a low and a high: candidates to buy low and sell high",
+    "most_listed": "the items with the most listings: the busiest markets",
+}
 
 QUALITY = {0: "poor", 1: "common", 2: "uncommon", 3: "rare", 4: "epic", 5: "legendary"}
 
@@ -527,6 +605,39 @@ TOOLS = [
         },
     },
     {
+        "name": "price_history",
+        "description": "One item's auction price over time, from every scan Wisp has kept: the price per scan day "
+                       "with how many were listed, its usual level, its lowest and highest with dates, its direction, "
+                       "the cheapest and dearest weekday once there is enough data, and an estimate of next week's "
+                       "price with its confidence. Use it for 'is this a good price', 'when should I sell', 'where is "
+                       "this heading'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"item": {"type": "string"},
+                           "days": {"type": "integer", "minimum": 2, "maximum": 3650, "description": "How far back. Default 30."}},
+            "required": ["item"], "additionalProperties": False,
+        },
+    },
+    {
+        "name": "market_scan",
+        "description": "Search the whole kept price history for the items that stand out, ranked in code: below_usual "
+                       "(cheap now, to buy), above_usual (dear now, to sell), rising, falling, swings (buy low, sell "
+                       "high), most_listed. Narrow it to the player's bags, the materials of their recipes or what "
+                       "they can craft, or to names containing a word. This is how to look through thousands of "
+                       "items: never guess which items are worth looking at.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "find": {"type": "string", "enum": ["below_usual", "above_usual", "rising", "falling", "swings", "most_listed"]},
+                "among": {"type": "string", "enum": ["everything", "my_bags", "my_materials", "what_i_craft"]},
+                "name_contains": {"type": "string"},
+                "days": {"type": "integer", "minimum": 5, "maximum": 3650, "description": "The period judged. Default 30."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 40},
+            },
+            "required": ["find"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "craft_plan",
         "description": "The arithmetic of a crafting plan, done in code: for each recipe and how many times to craft "
                        "it, the total materials, what the plan's own crafts supply (a bolt made in one step and used "
@@ -597,8 +708,11 @@ order or what is uncertain; never repeat its steps or numbers. Prices are the pl
 scans and skill is as of the last logout, so say how old they are when it matters. Wisp only knows the recipes the \
 character's profession window listed; for a path beyond those, say what is missing rather than fill it in from memory.
 
-The price of anything at the auction house comes only from auction_prices, never from memory. It is the lowest price \
-the player's Auctionator addon saw listed, as of its last scan: a listing, not a sale, and before the auction house's cut.
+The price of anything at the auction house comes only from auction_prices, price_history and market_scan, never from \
+memory. Prices are the lowest the player's Auctionator addon saw listed on the days it scanned: a listing, not a sale, \
+and before the auction house's cut. Wisp keeps every scan day, so for questions about earning gold, good prices or \
+where a price is heading, look there first; say how many scan days an answer rests on, and give any estimate of a \
+future price as a range with its confidence, never as a certainty.
 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
 into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.
