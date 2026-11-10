@@ -42,6 +42,53 @@ The addon can record what you meet. This is the answer to the one thing the game
 - **Auction prices** are already kept by Auctionator.
 - It only knows places you have been. A new zone starts empty.
 
+## More about you and your setup — interface present, to verify
+
+| Data | Interface | Use |
+|---|---|---|
+| **Action bars**: what sits on every button | `C_ActionBar`, action functions | Macro and rotation help that knows your real bars |
+| **Key bindings** | `C_KeyBindings` | "Which key is free?", binding advice |
+| **Installed addons**, and which are enabled | `C_AddOns` | Wisp finds its integrations by itself; addon help |
+| Currencies, achievements, titles | `C_CurrencyInfo`, `C_AchievementInfo` | Goals and progress |
+| Hunter pets and the stable | `C_StableInfo`, `C_PetInfo` | Pet advice |
+| Explored areas, known flight points | `C_MapExplorationInfo`, `C_TaxiMap` | "Where haven't I been?", route planning |
+| Honor and battleground results | `C_PvP` | PvP goals |
+| Quest rewards before you choose | `C_QuestInfoSystem`, `C_QuestOffer` | "Which reward should I take?" |
+| Game settings | `C_CVar` | Settings advice |
+
+## Other people and the economy — interface present, to verify
+
+| Data | Interface | Use |
+|---|---|---|
+| **Auction house listings**, when the window is open | `C_AuctionHouse` | Prices beyond what Auctionator stored |
+| **Guild roster, and which guild members can craft a recipe** | `C_GuildInfo.QueryGuildMembersForRecipe` | "Who in the guild can make this?" |
+| Group and raid composition: classes, roles | `C_PartyInfo`, unit functions | Dungeon prep for the actual group |
+| Group finder listings | `C_LFGList` | "Is anyone forming a group for this?" |
+| An inspected player's gear and build | inspect functions, `C_Traits.GenerateInspectImportString` | Compare with someone you inspected |
+| Friends, calendar events and invitations | `C_FriendList`, `C_Calendar` | Raid night planning |
+| Mail: what is waiting | `C_Mail`, inbox functions | Auction sales history |
+
+Data about other players is the one place to hold back: keep only what a question needs, and nothing from private chat.
+
+## The event stream — what happens while you play
+
+Beyond what the game *has*, an addon hears what *happens*. Recording it turns your own play into a personal database that nobody's terms cover.
+
+| Event | Recorded | Becomes |
+|---|---|---|
+| You loot a herb, an ore vein, a chest | Node name, map, position | Your own gathering map |
+| You loot a creature | Items, the creature, where | Your own drop notes |
+| You accept or hand in a quest | The NPC, its position, the quest | Quest givers and turn-ins you have used |
+| A craft gives a skill point — or does not | Recipe, your skill at that moment | Real skill-up odds, better than a calculation |
+| You open a vendor or trainer | What it sells or teaches, prices | Vendor and trainer lists |
+| You take a flight | From, to, duration | Travel times |
+| You gain experience, gold, reputation | Amount, source, time | Experience and gold per hour, by activity |
+| You die | Where, to what (from the recap) | Hardcore: your danger map |
+| A rare or treasure appears nearby | What and where | Rare spawn notes |
+| An auction sells or expires | Item, price | Your sales history |
+
+This is what makes [snapshot history](Architecture.md) richer than a series of photographs: it records the session, not only where it ended.
+
 ## After a fight, never during one
 
 - **What killed you**: `C_DeathRecap`. Useful for hardcore, and for "what went wrong".

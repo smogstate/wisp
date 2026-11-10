@@ -13,4 +13,5 @@ and architecture decision lives there. Update the wiki when decisions change.
 - Commands use the extensible `WISP1` protocol; one Lua file per addon integration (wiki/Protocol.md).
 - BYOK: Anthropic, Kimi, OpenRouter behind one provider contract modelled on kintale's (wiki/LLM-Providers.md). Tools return validated structures, not pages (wiki/Tools.md).
 - No live data out of the game except a screenshot. Do not reintroduce the pixel beacon.
+- `checks/` is throwaway code for milestone 0 (wiki/Checks.md), not part of the product.
 - Does not use Loom.

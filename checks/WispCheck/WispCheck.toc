@@ -1,0 +1,6 @@
+## Interface: 16001
+## Title: WispCheck
+## Notes: Throwaway. Tests what the Forever client gives an addon. /wispcheck
+## SavedVariables: WispCheckDB
+
+WispCheck.lua

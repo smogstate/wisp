@@ -102,6 +102,8 @@ The talent import string is documented in the source: a base64 bit stream holdin
 
 ## Still to run for real
 
+The in-client part is packaged as a throwaway addon, **`checks/WispCheck`**, with instructions in `checks/README.md`. Written 2026-11-10 and dry-run only in a Lua interpreter against a faked game; it waits for Denis to run it in Forever and send back the saved report.
+
 - **In the Forever client:** the paste box (does a paste arrive in one piece, does the key binding work); `CreateMacro`; listing a profession's recipes; a TomTom waypoint and an Auctionator list called from another addon; what is blocked in combat or in instances.
 - **With a key:** one tool-calling round trip on Kimi, and one on OpenRouter.
 - **On the Windows PC:** the Wowhead results are expected to be the same there, since the block follows the client and not the network; one request would confirm it.
