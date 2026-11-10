@@ -1,0 +1,8 @@
+{
+  "name": "wisp-tests",
+  "private": true,
+  "description": "Dev-only: a Lua VM to run the addon in tests",
+  "devDependencies": {
+    "fengari": "^0.1.4"
+  }
+}

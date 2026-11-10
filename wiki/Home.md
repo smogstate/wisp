@@ -23,4 +23,5 @@ This wiki is the project's knowledge base. Plain Markdown, no proprietary format
 
 ## Status
 
+- **2026-11-10** — milestone 0 desk checks done ([Checks](Checks.md)); Wowhead's database pages turned out closed to Wisp, and the game plus Questie became the primary data source ([Game Data](Game-Data.md), [Addon Landscape](Addon-Landscape.md)). A first working slice, the MVP, is built and tested without the game ([Roadmap](Roadmap.md)); it has not yet run in Forever or against a real model.
 - **2026-11-09** — project named; design worked out in one session (overlay + addon, paste protocol, red lines); wiki created. Architecture is agreed in outline, not yet signed off for building. No code yet: an early draft that predated these decisions was removed. Same day: Python tool set and the Wowhead tool drafted; Forever facts corrected (it has classes — an earlier note here said classless); BYOK provider seam drafted from kintale's.

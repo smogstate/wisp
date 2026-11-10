@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wisp</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #dfe3ea; --text: #1b1f27; --muted: #6a7384;
+    --accent: #0e8a7d; --accent-text: #ffffff; --user: #e7f4f2; --danger: #b3261e; --card: #fbfcfd;
+    --shadow: 0 1px 2px rgba(20, 30, 50, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #191d25; --line: #2a303b; --text: #e7eaf0; --muted: #8b95a7;
+      --accent: #45d0c0; --accent-text: #06201d; --user: #1d2b2c; --danger: #ff8a80; --card: #1e232c;
+      --shadow: none;
+    }
+  }
+  /* keeps the conversation a readable width in a wide browser window */
+  :root { --gutter: max(14px, calc((100vw - 760px) / 2)); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; padding: 10px var(--gutter);
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); flex: none; }
+  h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: .01em; }
+  #status { color: var(--muted); font-size: 12px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { font: inherit; color: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: transparent; padding: 6px 10px; }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: .5; cursor: default; }
+  main { flex: 1; overflow-y: auto; padding: 14px var(--gutter); display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 92%; padding: 9px 12px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user { align-self: flex-end; background: var(--user); border-bottom-right-radius: 4px; }
+  .msg.wisp { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; box-shadow: var(--shadow); }
+  .msg.wisp:empty { display: none; }
+  .msg.error { align-self: flex-start; color: var(--danger); border: 1px solid var(--danger); background: transparent; }
+  .trace { align-self: flex-start; color: var(--muted); font-size: 12px; padding-left: 4px; }
+  .note { align-self: center; color: var(--muted); font-size: 12px; }
+  .hello { margin: auto; text-align: center; color: var(--muted); max-width: 300px; }
+  .hello strong { display: block; color: var(--text); font-size: 16px; margin-bottom: 6px; }
+  .hello .warn { color: var(--danger); margin-top: 10px; }
+  .card { align-self: stretch; background: var(--card); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; box-shadow: var(--shadow); }
+  .card h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
+  .card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .card li { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; }
+  .card .addon { grid-row: span 2; align-self: start; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-top: 2px; }
+  .card .detail { color: var(--muted); font-size: 12px; }
+  .card footer { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .card footer span { flex: 1; color: var(--muted); font-size: 12px; }
+  .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  .primary:hover { border-color: var(--accent); filter: brightness(1.06); }
+  form { display: flex; gap: 8px; padding: 10px var(--gutter) 14px; background: var(--panel); border-top: 1px solid var(--line); align-items: flex-end; }
+  textarea {
+    flex: 1; resize: none; font: inherit; color: inherit; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; max-height: 140px; min-height: 38px;
+  }
+  #send { min-width: 68px; height: 38px; }
+  #send.stop { background: transparent; color: var(--danger); border-color: var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" aria-hidden="true"></span>
+  <h1>Wisp</h1>
+  <span id="status" role="status">starting…</span>
+  <button id="new" type="button" title="Start a new conversation">New</button>
+</header>
+<main id="log" aria-live="polite"></main>
+<form id="form">
+  <textarea id="input" rows="1" placeholder="Ask about your quests…" aria-label="Your question"></textarea>
+  <button id="send" class="primary" type="submit">Send</button>
+</form>
+<script>
+const token = new URLSearchParams(location.search).get("t") || "";
+const log = document.getElementById("log"), input = document.getElementById("input");
+const send = document.getElementById("send"), statusEl = document.getElementById("status");
+let running = false;
+
+const api = (path, body) => fetch(path, {
+  method: body === undefined ? "GET" : "POST",
+  headers: { "X-Wisp-Token": token, "Content-Type": "application/json" },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
+
+function add(tag, cls, text) {
+  const el = document.createElement(tag);
+  el.className = cls;
+  if (text !== undefined) el.textContent = text;   // textContent only: answers and game text are never parsed as HTML
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+function age(minutes) {
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return minutes + " min ago";
+  if (minutes < 48 * 60) return Math.round(minutes / 60) + " h ago";
+  return Math.round(minutes / 1440) + " days ago";
+}
+
+async function refresh() {
+  let s;
+  try { s = await (await api("/api/state")).json(); } catch { statusEl.textContent = "not connected"; return; }
+  statusEl.textContent = s.snapshot_problem ? "no character data"
+    : `level ${s.level ?? "?"} · ${s.quests} quests · saved ${age(s.snapshot_age_minutes ?? 0)}`;
+  statusEl.title = s.snapshot_problem || "Your character as of your last logout";
+  if (!log.querySelector(".msg, .card")) {
+    log.textContent = "";
+    const hello = add("div", "hello");
+    const title = document.createElement("strong");
+    title.textContent = "Ask about your quests";
+    hello.append(title, "Where do I hand this in? What comes next in the chain? Wisp knows your quest log as of your last logout.");
+    for (const problem of [s.snapshot_problem, s.model_problem, s.questie === false ? "Questie was not found, so locations will be missing." : null]) {
+      if (!problem) continue;
+      const warn = document.createElement("div");
+      warn.className = "warn";
+      warn.textContent = problem;
+      hello.append(warn);
+    }
+  }
+}
+
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  const area = document.createElement("textarea");   // older web views: the selection route
+  area.value = text;
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  return ok;
+}
+
+function showCard(card) {
+  const el = add("section", "card");
+  const h = document.createElement("h2");
+  h.textContent = "For the game";
+  const list = document.createElement("ul");
+  for (const line of card.lines) {
+    const li = document.createElement("li");
+    const addon = document.createElement("span"); addon.className = "addon"; addon.textContent = line.addon;
+    const text = document.createElement("span"); text.textContent = line.text;
+    const detail = document.createElement("span"); detail.className = "detail"; detail.textContent = line.detail;
+    li.append(addon, text, detail);
+    list.append(li);
+  }
+  const foot = document.createElement("footer");
+  const hint = document.createElement("span");
+  hint.textContent = "Then in the game: Ctrl+V twice";
+  const button = document.createElement("button");
+  button.type = "button"; button.className = "primary"; button.textContent = "Copy";
+  button.onclick = async () => {
+    const ok = await copy(card.wisp);
+    button.textContent = ok ? "Copied" : "Copy failed";
+    hint.textContent = ok ? "Now in the game: Ctrl+V twice" : "Could not reach the clipboard";
+  };
+  foot.append(hint, button);
+  el.append(h, list, foot);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setRunning(on) {
+  running = on;
+  send.textContent = on ? "Stop" : "Send";
+  send.classList.toggle("stop", on);
+  send.classList.toggle("primary", !on);
+}
+
+async function ask(text) {
+  log.querySelector(".hello")?.remove();
+  add("div", "msg user", text);
+  let bubble = add("div", "msg wisp");
+  setRunning(true);
+  try {
+    const res = await api("/api/ask", { text });
+    if (!res.ok) throw new Error((await res.json()).error || "request failed");
+    const reader = res.body.getReader(), decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const event = JSON.parse(buffer.slice(0, nl));
+        buffer = buffer.slice(nl + 1);
+        if (event.type === "text") { bubble.textContent += event.text; log.scrollTop = log.scrollHeight; }
+        else if (event.type === "tool") { add("div", "trace", (event.ok ? "looked up: " : "lookup failed: ") + event.name); bubble = add("div", "msg wisp"); }
+        else if (event.type === "card") { showCard(event.card); bubble = add("div", "msg wisp"); }
+        else if (event.type === "error") add("div", "msg error", event.message);
+        else if (event.type === "done" && event.reason === "stopped") add("div", "note", "stopped");
+      }
+    }
+  } catch (e) {
+    add("div", "msg error", "Wisp lost the connection to its own engine: " + e.message);
+  }
+  setRunning(false);
+  input.focus();
+}
+
+document.getElementById("form").onsubmit = (e) => {
+  e.preventDefault();
+  if (running) { api("/api/stop", {}); return; }
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  input.style.height = "";
+  ask(text);
+};
+input.onkeydown = (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("form").requestSubmit(); }
+};
+input.oninput = () => { input.style.height = ""; input.style.height = Math.min(input.scrollHeight + 2, 140) + "px"; };
+document.onkeydown = (e) => { if (e.key === "Escape" && running) api("/api/stop", {}); };
+document.getElementById("new").onclick = async () => {
+  if (running) return;
+  await api("/api/new", {});
+  log.textContent = "";
+  refresh();
+};
+refresh();
+setInterval(refresh, 30000);
+input.focus();
+</script>
+</body>
+</html>

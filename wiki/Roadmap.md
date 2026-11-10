@@ -2,6 +2,21 @@
 
 > Status: order proposed 2026-11-10; nothing is built. Decided by Denis so far: **snapshot history comes first among the feature ideas**, so it is part of the base, not an extra. Each milestone ends with a review before the next starts.
 
+## MVP — built 2026-11-10, ahead of the order below
+
+Denis asked for a first working slice once it was clear he has Questie. It cuts across milestones 1, 2 and 4:
+
+> Ask about a quest in your log; Wisp answers knowing your character; a card gives a waypoint to paste into TomTom.
+
+- **Addon** (`addon/Wisp`): snapshot at logout — character, quest log, completed quests, and Questie's data for each quest; a paste inbox with one command, `tomtom.waypoint`.
+- **Overlay** (`wisp/`): a chat window, Claude with the player's key, tools `character`, `quests`, `quest_done`, `waypoint`.
+- **A guard worth keeping:** the model never handles coordinates. Locations carry a ref; the waypoint tool accepts only refs, so a coordinate cannot be invented on its way to the game.
+- The interface is a web page served on the local machine only, shown in a pywebview window. This made it testable in a headless browser.
+
+Left out on purpose: themes beyond following the system, transparency, collapsing, sessions and slash commands, snapshot history, other providers, every other tool and integration.
+
+**Tested** only without the game and without a model key: the addon in a Lua interpreter against a faked game and Questie, the whole loop with a scripted model, the interface in headless Chrome, and the real Anthropic SDK against a local stand-in for the API. The game functions the addon calls were checked against Blizzard's Forever interface source. **Not tested:** the addon in Forever, what the real model answers, the pywebview window on Windows. Those are the next things to learn, and `checks/WispCheck` covers the game side.
+
 ## 0. Checks, before any product code
 
 Things the design assumes and nobody has run. Each is minutes of work and can change the plan. **Desk checks done 2026-11-10 — results in [Checks](Checks.md).** One of them does change the plan: Wowhead's database pages are closed to a plain client, and how Wisp gets that data is an open decision. The checks that need the game client or a provider key are still to run.
