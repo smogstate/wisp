@@ -105,6 +105,20 @@ class Game:
         taken = self.snapshot.get("takenAt")
         return max(0, int((time.time() - taken) / 60)) if isinstance(taken, (int, float)) else None
 
+    @staticmethod
+    def _reward(q: dict) -> dict:
+        """What handing a quest in gives, where Questie could say."""
+        out = {}
+        if isinstance(q.get("xp"), int) and not isinstance(q.get("xp"), bool) and q["xp"] > 0:
+            out["xp"] = q["xp"]
+        if isinstance(q.get("money"), int) and not isinstance(q.get("money"), bool) and q["money"] > 0:
+            out["money"] = coins(q["money"])
+        return out
+
+    def _share_of_level(self, xp: int) -> str | None:
+        bar = (self.snapshot.get("character") or {}).get("xpMax")
+        return f"{xp / bar:.0%} of a level" if isinstance(bar, int) and bar > 0 and xp else None
+
     def colour(self, level) -> str | None:
         """How hard a quest of this level is for the character, as the quest log colours it:
         red, orange, yellow, green, or grey for one that gives almost nothing any more."""
@@ -148,7 +162,7 @@ class Game:
         title = _clean(q.get("title"), 80)
         out = {
             "id": qid, "title": title, "level": q.get("level"), "colour": self.colour(q.get("level")),
-            "complete": bool(q.get("complete")),
+            "complete": bool(q.get("complete")), **self._reward(q),
             "objectives": [{"text": _clean(o.get("text"), 160), "done": bool(o.get("done"))}
                            for o in _as_list(q.get("objectives")) if isinstance(o, dict)],
             "starts": self._who(f"q{qid}.start", q.get("starts"), "quest giver"),
@@ -171,7 +185,7 @@ class Game:
         title = _clean(q.get("title"), 80)
         starts = self._who(f"a{qid}.start", q.get("starts"), "quest giver")
         return {"id": qid, "title": title, "level": q.get("level") if isinstance(q.get("level"), int) else None,
-                "colour": self.colour(q.get("level")),
+                "colour": self.colour(q.get("level")), **self._reward(q),
                 "requires_level": q.get("requiredLevel") if isinstance(q.get("requiredLevel"), int) else None,
                 "kind": q.get("kind") if q.get("kind") in ("elite", "dungeon", "raid", "pvp") else "normal",
                 "starts": starts, "zones": list(dict.fromkeys(w["zone"] for s in starts for w in s["where"] if w["zone"])),
@@ -313,6 +327,7 @@ class Game:
                     counts["open_quests"] += 1
                     if q["colour"] in ("green", "yellow", "orange"):   # not grey, and not out of reach
                         counts["worth_doing"] += 1
+                        counts["xp_on_offer"] = counts.get("xp_on_offer", 0) + q.get("xp", 0)
                     if q["level"]:
                         counts["levels"].append(q["level"])
                     if q["kind"] != "normal":
@@ -328,6 +343,64 @@ class Game:
         return {"kind": kind, "open_quests": len(found), "character_level": me.get("level"),
                 "quests": [{k: v for k, v in q.items() if v not in ([], None)} for q in found[:limit]],
                 **({"left_out": len(found) - limit} if len(found) > limit else {}), "note": note}
+
+    def tool_leveling(self, args: dict) -> dict:
+        """How fast the character levels, from what the addon measured: experience per hour,
+        the time to the next level at that pace, the rested bonus, and day by day."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        me, record = self.snapshot.get("character") or {}, self.snapshot.get("xp")
+        days_back = args.get("days", 14)
+        if not isinstance(days_back, int) or isinstance(days_back, bool) or not 1 <= days_back <= 60:
+            return {"error": "days must be a whole number from 1 to 60"}
+        level, xp, bar = me.get("level"), me.get("xp"), me.get("xpMax")
+        out = {"level": level}
+        if isinstance(xp, int) and isinstance(bar, int) and bar > 0:
+            out.update(experience=f"{xp:,} of {bar:,}", into_this_level=f"{xp / bar:.0%}", to_next_level=bar - xp)
+        rested = record.get("rested") if isinstance(record, dict) else None
+        if isinstance(rested, int) and rested > 0 and isinstance(bar, int) and bar > 0:
+            out["rested"] = f"{rested:,} XP of rested bonus ({rested / bar:.0%} of a level): kills give double until it is used up"
+        today = int(self.snapshot.get("takenAt", 0)) // 86400
+        days = [d for d in (record.get("days") if isinstance(record, dict) else None) or []
+                if isinstance(d, dict) and all(isinstance(d.get(k), int) and not isinstance(d.get(k), bool) for k in ("day", "gained", "secs"))
+                and d["day"] > today - days_back and d["gained"] > 0]
+        if not days:
+            out["note"] = ("No experience has been measured yet. From now on Wisp's addon notes each gain and each quest handed in, "
+                           "and they arrive here at logout.")
+            return out
+        from .market import date_of
+        gained, secs = sum(d["gained"] for d in days), sum(d["secs"] for d in days)
+        quest_xp, quests = sum(d.get("questXp") or 0 for d in days), sum(d.get("quests") or 0 for d in days)
+        rows = []
+        for d in sorted(days, key=lambda d: -d["day"]):
+            rows.append({"date": date_of(d["day"]), "gained": d["gained"], "time_gaining": f"{d['secs'] // 3600}h {d['secs'] % 3600 // 60}m",
+                         "per_hour": round(d["gained"] * 3600 / d["secs"]) if d["secs"] >= 600 else "too little time to say",
+                         "quests_handed_in": d.get("quests") or 0, **({"levels_gained": d["levels"]} if d.get("levels") else {})})
+        out.update(period_days=days_back, gained=gained, quests_handed_in=quests, days=rows,
+                   from_quests=f"{quest_xp / gained:.0%}" if gained else "–")
+        note = ("Measured by Wisp's addon from the character's own play. time_gaining is the time between one gain and the next "
+                "when under five minutes, so long breaks are left out and per_hour is a little generous. ")
+        if secs >= 600:
+            rate = gained * 3600 / secs
+            out["per_hour"] = round(rate)
+            if isinstance(out.get("to_next_level"), int):
+                hours = out["to_next_level"] / rate
+                out["next_level_in"] = f"about {int(hours)}h {int(hours % 1 * 60)}m of play at this pace" if hours >= 1 else f"about {max(1, round(hours * 60))} minutes of play at this pace"
+        else:
+            out["per_hour"] = "too little time measured to say"
+            note += "A rate needs ten minutes of gaining behind it. "
+        out["note"] = note + "For what to do next, questing_route says how much experience a zone's quests hold."
+        if args.get("show") is True:
+            headline = f"level {level} · {out.get('into_this_level', '?')} in" + (f" · {out['next_level_in']}" if "next_level_in" in out else "")
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": "Leveling", "table": {
+                "title": f"{out['per_hour']:,} XP an hour" if isinstance(out["per_hour"], int) else "Your leveling", "sub": headline,
+                "columns": ["Day", "Gained", "Time", "Per hour", "Quests"],
+                "rows": [[r["date"][5:], f"{r['gained']:,}", r["time_gaining"], f"{r['per_hour']:,}" if isinstance(r["per_hour"], int) else "–",
+                          r["quests_handed_in"]] for r in rows[:14]],
+                "notes": [f"{out['from_quests']} of it from handing in quests." + (" " + out["rested"].split(":")[0] + "." if "rested" in out else ""),
+                          "Time between gains, breaks over five minutes left out."]}})
+            out["shown"] = "a table card with these figures is now shown to the player: do not repeat them in your text"
+        return out
 
     def tool_questing_route(self, args: dict) -> dict:
         """What to do in a zone, in an order to walk it: hand in what is done, pick up what is
@@ -349,6 +422,8 @@ class Game:
         def first_in_zone(people):
             return next(((who["name"], w) for who in people for w in who["where"] if w["zone"] == zone), None)
 
+        gains = {"now": 0, "later": 0}   # experience for handing in on this walk, and for what is picked up on it
+
         def hub(found, action, key):
             name, w = found
             stop = hubs.setdefault((round(w["x"]), round(w["y"])), {"who": name, "x": w["x"], "y": w["y"], "ref": w["ref"], "actions": []})
@@ -358,11 +433,13 @@ class Game:
             if q["complete"]:
                 found = first_in_zone(q["ends"])
                 if found:
-                    hub(found, f"Hand in: {q['title']}", "hand_in")
+                    hub(found, f"Hand in: {q['title']}" + (f" ({q['xp']:,} XP)" if q.get("xp") else ""), "hand_in")
+                    gains["now"] += q.get("xp", 0)
             elif isinstance(q.get("game_pointer"), dict) and q["game_pointer"]["zone"] == zone:
                 todo = next((o["text"] for o in q["objectives"] if not o["done"]), "")
                 w = q["game_pointer"]
-                fields.append({"who": q["title"], "x": w["x"], "y": w["y"], "ref": w["ref"], "actions": ["Go on: " + (todo or q["title"])]})
+                fields.append({"who": q["title"], "x": w["x"], "y": w["y"], "ref": w["ref"],
+                               "actions": ["Go on: " + (todo or q["title"]) + (f" ({q['xp']:,} XP when handed in)" if q.get("xp") else "")]})
                 counts["go_on"] += 1
         skipped = {"grey": 0, "red": 0}
         for q in self.available:
@@ -373,7 +450,8 @@ class Game:
                 skipped[q["colour"]] += 1
                 continue
             kind = "" if q["kind"] == "normal" else f", {q['kind']}"
-            hub(found, f"Pick up: {q['title']} (level {q['level']}{kind})", "pick_up")
+            hub(found, f"Pick up: {q['title']} (level {q['level']}{kind}" + (f", {q['xp']:,} XP" if q.get("xp") else "") + ")", "pick_up")
+            gains["later"] += q.get("xp", 0)
         if not hubs and not fields:
             return {"zone": zone, "nothing_to_do": "No quest in the log leads here and none worth doing is open here.",
                     "left_out": skipped, "try": "available_quests with no arguments shows which zones have quests worth doing."}
@@ -396,11 +474,14 @@ class Game:
         said = [f"{n} to hand in" * bool(n) for n in (counts["hand_in"],)] + [f"{counts['pick_up']} to pick up"] * bool(counts["pick_up"]) \
             + [f"{counts['go_on']} to go on with"] * bool(counts["go_on"])
         places = [self.places[s["ref"]] for s in stops]
+        worth = [f"{gains['now']:,} XP to hand in ({self._share_of_level(gains['now'])})" if gains["now"] and self._share_of_level(gains["now"]) else "",
+                 f"{gains['later']:,} XP in the quests picked up ({self._share_of_level(gains['later'])})" if gains["later"] and self._share_of_level(gains["later"]) else ""]
+        worth = [w for w in worth if w]
         self.cards.append({
             "id": f"card{len(self.cards) + 1}", "lines": [],
             "route": {"title": f"Questing in {zone}", "sub": f"level {me.get('level', '?')} · " + ", ".join(p for p in said if p),
                       "steps": steps,
-                      "notes": ["As of your last logout. Quest givers first, then the quests under way, each time the nearest."
+                      "notes": worth + ["As of your last logout. Quest givers first, then the quests under way, each time the nearest."
                                 + (f" Left out: {skipped['grey']} grey" + (f" and {skipped['red']} red" if skipped["red"] else "") + "."
                                    if skipped["grey"] or skipped["red"] else "")]},
             "hint": "Waypoints for TomTom: Copy, then in the game Ctrl+V twice",
@@ -409,6 +490,8 @@ class Game:
         })
         return {"zone": zone, "shown": "the route, as a card with its numbered stops and a Copy button for the waypoints",
                 "stops": [{"stop": i + 1, **s} for i, s in enumerate(steps)], "left_out": skipped,
+                "experience": {"for_handing_in_now": gains["now"], "in_quests_picked_up": gains["later"],
+                               "share_of_a_level_now": self._share_of_level(gains["now"])},
                 "starts": "from where the character stands" if here else "at the first quest giver",
                 "note": "The player now sees the route. Do not repeat its stops: say in a sentence or two what it achieves or what "
                         "to watch for (an elite quest, a quest that is orange). Nothing has happened in the game yet."}
@@ -1325,6 +1408,19 @@ TOOLS = [
         },
     },
     {
+        "name": "leveling",
+        "description": "How fast the character levels, measured from their own play: experience per hour, the time "
+                       "to the next level at that pace, the rested bonus, what share came from quests, and day by "
+                       "day. Use it for 'how fast am I leveling', 'when will I reach the next level', 'is questing "
+                       "or grinding better for me'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer", "minimum": 1, "maximum": 60, "description": "How far back. Default 14."},
+                           "show": {"type": "boolean", "description": "true to also show the player a table card."}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "questing_route",
         "description": "Show the player what to do in a zone, as a route card: the quests to hand in, the open quests "
                        "worth picking up (not grey, not red), and the quests under way, with the stops ordered to "
@@ -1660,7 +1756,8 @@ them was not installed, the tool says so, and you tell the player which addon wo
 Quests the character has not picked up come from available_quests: what is open to them, by zone and by kind (elite \
 group quests, dungeon, raid, PvP), nearest first, each with the colour the quest log would give it. For what to do \
 now, call questing_route: it lays the zone's hand-ins, pick-ups and quests under way out as a route card. For where to \
-level next, compare zones by their quests worth doing and their quest levels against the character's level.
+level next, compare zones by their quests worth doing, the experience on offer there and their quest levels against \
+the character's level. How fast they level, and when the next level comes at that pace, is in leveling.
 
 For earning gold at the auction house, start from the player's own things: gold shows what their bags would fetch \
 and which of their recipes turn a profit; market_scan and price_history show what is cheap or dear against its usual \

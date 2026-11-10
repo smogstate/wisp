@@ -110,6 +110,17 @@ Limits: the route is as of the last logout and knows the next step of a quest on
 
 Not built, and the natural next steps: **experience per hour** and time to the next level (the addon would note each session), and **what really sold and for how much** (from the auction house's mail), which would turn "listed for" into "sold for".
 
+## Leveling: experience per hour and what quests give — built 2026-11-10
+
+For Denis's interest in leveling. Two things the route and the zone comparison lacked: how fast the character really levels, and what each quest is worth.
+
+- **The addon measures gains.** On every change of the experience bar it adds the gain to the day's total, with the time between one gain and the next when under five minutes; a level gained is the rest of the old bar plus the new one so far. `QUEST_TURNED_IN` (verified in the Forever source) gives each hand-in's experience and money, so the share that came from quests is known. Kept for 60 days per character. The rested pool is read at logout.
+- **`leveling`**: experience per hour over the period, **the time to the next level at that pace**, the rested bonus as a share of a level, the share from quests, and day by day; as a table card on request. A rate needs ten minutes of gaining behind it.
+- **What a quest gives** comes from Questie's own reckoning (`QuestXP`, which adjusts for the character's level and knows about Forever): experience and money, for quests in the log and for open ones.
+- **The questing route now says what it is worth**: each stop's quests with their experience, and on the card the experience to hand in now and the experience in the quests picked up, each as a share of a level. Zones are compared by the experience on offer in quests worth doing.
+
+Limits: time is "time between gains", so a rate is a little generous and says nothing about travel. Quest experience is Questie's figure, not the game's; where Questie has none, the quest simply shows none. Not yet run in the game.
+
 ## Auction house mail: what really sold — built 2026-11-10
 
 Denis: "read buys and sells from auction house mail". Until now every gold figure in Wisp was a listing. The auction house's mail is the one place the game states what really happened.

@@ -219,7 +219,7 @@ def main():
         assert first["model"] == "claude-opus-5-5" and first["stream"] is True
         assert first["fallbacks"] == "default" and first["output_config"] == {"effort": "medium"}
         assert "server-side-fallback-2026-07-01" in REQUESTS[0]["headers"].get("anthropic-beta", "")
-        assert [t["name"] for t in first["tools"]] == ["character", "quests", "available_quests", "questing_route", "gold", "investments",
+        assert [t["name"] for t in first["tools"]] == ["character", "quests", "available_quests", "leveling", "questing_route", "gold", "investments",
             "auction_ledger", "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "price_history",
             "market_scan", "market_query", "item_links", "gathering", "farming",
             "craft_plan",

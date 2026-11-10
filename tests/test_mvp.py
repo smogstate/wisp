@@ -476,8 +476,8 @@ def test_available_quests(wow: Path, tmp: Path):
     everywhere = quests()
     assert everywhere["open_quests"] == 6 and everywhere["character_zone"] == "Elwynn Forest"
     assert everywhere["by_zone"] == [
-        {"zone": "Elwynn Forest", "open_quests": 5, "worth_doing": 3, "elite": 1, "dungeon": 1, "quest_levels": "5-25"},
-        {"zone": "Dun Morogh", "open_quests": 1, "worth_doing": 1, "elite": 1, "quest_levels": "12"}], \
+        {"zone": "Elwynn Forest", "open_quests": 5, "worth_doing": 3, "xp_on_offer": 2060, "elite": 1, "dungeon": 1, "quest_levels": "5-25"},
+        {"zone": "Dun Morogh", "open_quests": 1, "worth_doing": 1, "xp_on_offer": 800, "elite": 1, "quest_levels": "12"}], \
         "worth doing: not grey (level 5 at 12) and not red (level 25)"
 
     # the example asked for: which elite quests are open around here
@@ -514,15 +514,17 @@ def test_questing_route(wow: Path):
     out = run_tool(game, "questing_route", {})
     assert out["zone"] == "Elwynn Forest" and out["starts"] == "from where the character stands"
     assert [(s["text"], s["detail"]) for s in out["stops"]] == [
-        ("Marshal Dughan", "Pick up: A Fishy Peril (level 10)"),
-        ("Wanted Poster", "Pick up: An Unwelcome Guest (level 9) · Pick up: Wanted: Hogger (level 11, elite)"),
-        ("Eagan Peltskinner", "Hand in: Wolves Across the Border"),
-        ("The Jasperlode Mine", "Go on: Scout through the Jasperlode Mine")], \
+        ("Marshal Dughan", "Pick up: A Fishy Peril (level 10, 620 XP)"),
+        ("Wanted Poster", "Pick up: An Unwelcome Guest (level 9, 540 XP) · Pick up: Wanted: Hogger (level 11, elite, 900 XP)"),
+        ("Eagan Peltskinner", "Hand in: Wolves Across the Border (450 XP)"),
+        ("The Jasperlode Mine", "Go on: Scout through the Jasperlode Mine (700 XP when handed in)")], \
         "quest givers first, the nearest each time, two quests at one giver as one stop; then the quest under way"
     assert out["left_out"] == {"grey": 1, "red": 1}, "a level 5 quest gives nothing at 12, a level 25 one is out of reach"
     card = game.cards[-1]
     assert card["route"]["title"] == "Questing in Elwynn Forest" and card["route"]["sub"] == "level 12 · 1 to hand in, 3 to pick up, 1 to go on with"
-    assert "Left out: 1 grey and 1 red." in card["route"]["notes"][0] and "TomTom" in card["hint"]
+    assert card["route"]["notes"][:2] == ["450 XP to hand in (4% of a level)", "2,060 XP in the quests picked up (21% of a level)"]
+    assert "Left out: 1 grey and 1 red." in card["route"]["notes"][2] and "TomTom" in card["hint"]
+    assert out["experience"] == {"for_handing_in_now": 450, "in_quests_picked_up": 2060, "share_of_a_level_now": "4% of a level"}
     ways = [l for l in stub("paste", card["wisp"]) if l.startswith("WAY ")]
     assert ways == ["WAY tomtom 1429 0.421 0.659 1. Marshal Dughan", "WAY tomtom 1429 0.246 0.747 2. Wanted Poster",
                     "WAY tomtom 1429 0.489 0.402 3. Eagan Peltskinner", "WAY tomtom 1429 0.615 0.538 4. The Jasperlode Mine"], ways
@@ -530,6 +532,38 @@ def test_questing_route(wow: Path):
     assert [s["text"] for s in far["stops"]] == ["Rudra Amberstill"] and far["starts"] == "at the first quest giver"
     assert "zones_with_quests" in run_tool(game, "questing_route", {"zone": "Nowhere"})
     assert "nothing_to_do" in run_tool(game, "questing_route", {"zone": "Stormwind"}), "a zone known only for a vendor"
+
+
+def test_leveling(wow: Path):
+    """How fast the character levels, from the gains the addon measured."""
+    game = Game.load(wow)
+    day = game.snapshot["xp"]["days"][0]
+    assert (day["gained"], day["secs"], day["quests"], day["questXp"], day["questMoney"], day["levels"]) == (1200, 200, 1, 450, 300, 0), \
+        "two kills, a quest handed in, and a kill after a break that is not counted as time"
+    assert game.snapshot["xp"]["rested"] == 2500
+    lines = stub("snapshot", flags="levelup")
+    up = json.loads(base64.b64decode(next(l for l in lines if l.startswith("SNAPSHOT ")).split()[1]))["xp"]["days"][0]
+    assert (up["gained"], up["levels"]) == (7500, 1), "the rest of the old bar and the new one so far"
+    short = run_tool(game, "leveling", {})
+    assert (short["experience"], short["into_this_level"], short["to_next_level"]) == ("4,200 of 10,000", "42%", 5800)
+    assert short["per_hour"] == "too little time measured to say" and "next_level_in" not in short and short["from_quests"] == "38%"
+    assert short["rested"].startswith("2,500 XP of rested bonus (25% of a level)")
+    assert game.quests[0]["xp"] == 450 and game.available[3]["money"] == "15s", "what Questie reckons a quest gives"
+
+    today = game.snapshot["takenAt"] // 86400
+    played = Game(dict(game.snapshot, xp={"rested": 0, "days": [
+        {"day": today, "gained": 4000, "secs": 2400, "quests": 3, "questXp": 2000, "questMoney": 0, "levels": 0},
+        {"day": today - 1, "gained": 2000, "secs": 1200, "quests": 0, "questXp": 0, "questMoney": 0, "levels": 1},
+        {"day": today - 20, "gained": 90000, "secs": 60, "quests": 0, "questXp": 0, "questMoney": 0, "levels": 0}]}))
+    out = run_tool(played, "leveling", {"show": True})
+    assert (out["per_hour"], out["gained"], out["from_quests"], out["next_level_in"]) == (6000, 6000, "33%", "about 58 minutes of play at this pace")
+    assert [(d["gained"], d["per_hour"]) for d in out["days"]] == [(4000, 6000), (2000, 6000)] and out["days"][1]["levels_gained"] == 1
+    assert "rested" not in out and len(run_tool(played, "leveling", {"days": 30})["days"]) == 3
+    table = played.cards[-1]["table"]
+    assert table["title"] == "6,000 XP an hour" and table["sub"] == "level 12 · 42% in · about 58 minutes of play at this pace"
+    assert table["rows"][0][1:] == ["4,000", "0h 40m", "6,000", 3]
+    quiet = Game.load(make_wow_dir(Path(tempfile.mkdtemp()), flags="noxp"))
+    assert "No experience has been measured yet" in run_tool(quiet, "leveling", {})["note"] and "error" in run_tool(quiet, "leveling", {"days": 0})
 
 
 def test_gold(wow: Path, tmp: Path):
@@ -1262,6 +1296,7 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        test_leveling(wow)
         with tempfile.TemporaryDirectory() as v:
             test_investments(wow, Path(v))
         with tempfile.TemporaryDirectory() as m:

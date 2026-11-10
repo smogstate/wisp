@@ -63,6 +63,17 @@ local function fromQuestie(questId, DB, ZoneDB, follow)
   local ok, q = pcall(DB.GetQuest, questId)
   if not ok or not q then return nil end
   local out = { title = q.name, level = q.level, requiredLevel = q.requiredLevel, starts = {}, ends = {} }
+  local XP = questieModule("QuestXP")   -- what handing it in gives, as Questie reckons it for this character's level
+  if type(XP) == "table" then
+    if type(XP.GetQuestLogRewardXP) == "function" then
+      local okX, xp = pcall(XP.GetQuestLogRewardXP, XP, questId, false)
+      if okX and type(xp) == "number" and xp > 0 then out.xp = xp end
+    end
+    if type(XP.GetQuestRewardMoney) == "function" then
+      local okM, money = pcall(XP.GetQuestRewardMoney, questId)
+      if okM and type(money) == "number" and money > 0 then out.money = money end
+    end
+  end
   people(out.starts, "npc", q.Starts and q.Starts.NPC, DB, ZoneDB)
   people(out.starts, "object", q.Starts and q.Starts.GameObject, DB, ZoneDB)
   people(out.ends, "npc", q.Finisher and q.Finisher.NPC, DB, ZoneDB)
@@ -102,6 +113,7 @@ local function questLog(DB, ZoneDB)
         if okQ and known then
           quest.starts, quest.ends, quest.next = known.starts, known.ends, known.next
           quest.requiredLevel, quest.needs = known.requiredLevel, known.needs
+          quest.xp, quest.money = known.xp, known.money
         end
       end
       quests[#quests + 1] = quest
@@ -137,7 +149,7 @@ local function availableQuests(DB, ZoneDB)
         end
       end
       out[#out + 1] = { id = id, title = known.title, level = known.level, requiredLevel = known.requiredLevel,
-                        kind = kind, starts = known.starts, needs = known.needs }
+                        kind = kind, starts = known.starts, needs = known.needs, xp = known.xp, money = known.money }
     end
   end
   return out
@@ -630,6 +642,65 @@ local function vendorPrices(ids)
   return out
 end
 
+--------------------------------------------------------------- experience ----
+-- How fast the character levels: experience gained per day, the time it took, and what part
+-- came from handing in quests. "secs" is time spent gaining: the gaps between one gain and the
+-- next, when under five minutes. Kept for 60 days.
+--   WispData.xp[character]["d" .. day] = { gained, secs, last, quests, questXp, questMoney, levels }
+
+local lastXp   -- { xp, max }: where the bar stood at the last look
+
+local function xpDay()
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.xp = WispData.xp or {}
+  local mine = WispData.xp[myKey()] or {}
+  WispData.xp[myKey()] = mine
+  local day = "d" .. math.floor(time() / 86400)
+  mine[day] = mine[day] or { gained = 0, secs = 0, quests = 0, questXp = 0, questMoney = 0, levels = 0 }
+  return mine[day]
+end
+
+local function xpChanged()
+  local xp, max = UnitXP("player"), UnitXPMax("player")
+  if type(xp) ~= "number" or type(max) ~= "number" then return end
+  if lastXp then
+    local gained
+    if max ~= lastXp.max then gained = (lastXp.max - lastXp.xp) + xp   -- a level was gained: the rest of the old bar, and the new one so far
+    else gained = xp - lastXp.xp end
+    if gained > 0 then
+      local today, now = xpDay(), time()
+      today.gained = today.gained + gained
+      if max ~= lastXp.max then today.levels = today.levels + 1 end
+      if today.last and now - today.last <= 300 then today.secs = today.secs + (now - today.last) end
+      today.last = now
+    end
+  end
+  lastXp = { xp = xp, max = max }
+end
+
+local function questHandedIn(_, xp, money)
+  local today = xpDay()
+  today.quests = today.quests + 1
+  today.questXp = today.questXp + (tonumber(xp) or 0)
+  today.questMoney = today.questMoney + (tonumber(money) or 0)
+end
+
+local function xpRecord()
+  local mine = type(WispData) == "table" and type(WispData.xp) == "table" and WispData.xp[myKey()]
+  local days, oldest = {}, math.floor(time() / 86400) - 60
+  for key, d in pairs(type(mine) == "table" and mine or {}) do
+    local day = tonumber(tostring(key):sub(2)) or 0
+    if day < oldest then
+      mine[key] = nil
+    else
+      days[#days + 1] = { day = day, gained = d.gained, secs = d.secs, quests = d.quests, questXp = d.questXp,
+                          questMoney = d.questMoney, levels = d.levels }
+    end
+  end
+  table.sort(days, function(a, b) return a.day < b.day end)
+  return { rested = GetXPExhaustion and GetXPExhaustion() or nil, days = days }
+end
+
 ------------------------------------------------------- auction house mail ----
 -- What was really bought and sold: every auction ends in a mail with an invoice (who paid what,
 -- the deposit, the house's cut). The addon notes each one when the mailbox is open, once, and
@@ -819,6 +890,8 @@ local function buildSnapshot()
   if not okG then nodes = nil end
   local okT, deals = pcall(auctionMail)
   if not okT then deals = {} end
+  local okX, progress = pcall(xpRecord)
+  if not okX then progress = nil end
   return {
     v = 1,
     takenAt = time(),
@@ -847,6 +920,7 @@ local function buildSnapshot()
     gather = nodes,
     loot = looted,
     auctionMail = deals,
+    xp = progress,
     vendor = vendor,
     quests = log,
     available = open,
@@ -994,6 +1068,8 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("TRADE_SKILL_SHOW")
 frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
+frame:RegisterEvent("PLAYER_XP_UPDATE")
+frame:RegisterEvent("QUEST_TURNED_IN")
 frame:RegisterEvent("MAIL_SHOW")
 frame:RegisterEvent("MAIL_INBOX_UPDATE")
 frame:RegisterEvent("LOOT_OPENED")
@@ -1009,6 +1085,10 @@ frame:SetScript("OnEvent", function(_, event, ...)
     end
   elseif event == "AUCTION_HOUSE_CLOSED" then
     pcall(learnNames)   -- a scan has just shown the game these items
+  elseif event == "PLAYER_XP_UPDATE" then
+    pcall(xpChanged)
+  elseif event == "QUEST_TURNED_IN" then
+    pcall(questHandedIn, ...)
   elseif event == "MAIL_SHOW" or event == "MAIL_INBOX_UPDATE" then
     pcall(scanMail)
   elseif event == "LOOT_OPENED" then
@@ -1023,6 +1103,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
   else
     C_Timer.After(20, function() pcall(learnNames) end)   -- once the login rush is over
     pcall(pruneLoot)
+    pcall(xpChanged)   -- where the bar stands as the session begins
     pcall(SetOverrideBindingClick, opener, false, PASTE_KEY, "WispInboxOpener")
   end
 end)

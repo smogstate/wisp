@@ -33,6 +33,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **What to do now.** *What should I do here?* gives a route card for your zone: where to hand in, what to pick up (grey and out-of-reach quests left out), which quests to go on with, in an order to walk them, with a numbered waypoint for each stop. *Where should I level next?* compares zones by the quests worth doing at your level.
 
+**How fast you level.** *How fast am I leveling?* and *when do I hit the next level?* are answered from your own play: experience per hour, time to the next level at that pace, your rested bonus, and how much came from quests. The questing route shows what each quest gives and what the whole walk is worth as a share of a level.
+
 **What to sell.** *What should I sell?* lists what your bags would fetch and says for each item whether to sell now, hold, or vendor it. *What can I craft for money?* ranks your recipes by profit at today's listings.
 
 **Investments.** Tell Wisp what you bought to sell later: *I bought 200 Silk Cloth at 3s each as an investment*. It keeps the position and shows what you paid, what it is listed for now, how the price has moved since, and what you have made, both on what you sold (*I sold 150 at 5s*) and on what you still hold. *How are my investments doing?* shows them all; asking about one shows its chart against what you paid.

@@ -110,6 +110,9 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                     f"{game.gathering.total} places of {len(game.gathering.nodes)} kinds",
                     "none yet: GatherMate2 notes each herb, vein and pool as you gather; log out after gathering",
                     optional=True)
+            gains = [d for d in ((game.snapshot.get("xp") or {}).get("days") or []) if isinstance(d, dict)]
+            add("Experience measured by Wisp", bool(gains), f"{len(gains)} days of play", "none yet: it starts with your next gain",
+                optional=True)
             mails = game.snapshot.get("auctionMail")
             add("Auction mail noted by Wisp", bool(mails), f"{len(mails or [])} purchases and sales in the last two months",
                 "none yet: open a mailbox that holds auction mail, then log out", optional=True)

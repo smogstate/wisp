@@ -158,12 +158,12 @@ def main():
         assert sent["stream_options"] == {"include_usage": True} and sent["max_completion_tokens"] == 16000
         assert sent["reasoning_effort"] == "low", "K3 thinks at 'max' unless told otherwise"
         assert sent["messages"][0]["role"] == "system" and sent["messages"][1] == {"role": "user", "content": "where do I hand in the wolf quest?"}
-        assert [t["function"]["name"] for t in sent["tools"]] == ["character", "quests", "available_quests", "questing_route", "gold", "investments",
+        assert [t["function"]["name"] for t in sent["tools"]] == ["character", "quests", "available_quests", "leveling", "questing_route", "gold", "investments",
             "auction_ledger", "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "price_history",
             "market_scan", "market_query", "item_links", "gathering", "farming",
             "craft_plan",
             "shopping_list", "notes", "waypoint"]
-        assert sent["tools"][7]["type"] == "function" and sent["tools"][7]["function"]["parameters"]["required"] == ["quest_ids"]
+        assert sent["tools"][8]["type"] == "function" and sent["tools"][8]["function"]["parameters"]["required"] == ["quest_ids"]
 
         history = REQUESTS[2]["body"]["messages"]
         assert [m["role"] for m in history] == ["system", "user", "assistant", "tool", "assistant", "tool"]

@@ -168,8 +168,10 @@ function UnitLevel() return 12 end
 function GetQuestGreenRange() return 6 end   -- at level 12, a quest of level 6 is still green and one of level 5 is grey
 function UnitName() return "Тестер" end
 function GetRealmName() return "Test Realm" end
-function UnitXP() return 4200 end
-function UnitXPMax() return 10000 end
+local xpNow, xpMax = 4200, 10000   -- where the bar stands at logout; a session below starts lower and climbs to it
+function UnitXP() return xpNow end
+function UnitXPMax() return xpMax end
+function GetXPExhaustion() return 2500 end
 function GetProfessions() return 4, nil, nil, 7 end   -- with empty slots, as the game returns them
 function GetProfessionInfo(i) if i == 4 then return "Tailoring", nil, 150, 225 end return "Fishing", nil, 31, 75 end
 function UnitFactionGroup() return "Alliance", "Альянс" end
@@ -261,12 +263,15 @@ QuestieDB.IsGroupQuest = function(id) return tags[id] == "elite" end
 QuestieDB.IsDungeonQuest = function(id) return tags[id] == "dungeon" end
 QuestieDB.IsRaidQuest = function() return false end
 QuestieDB.IsPvPQuest = function() return false end
+local questXp = { [33] = 450, [34] = 540, [40] = 620, [76] = 700, [176] = 900, [314] = 800, [386] = 2100, [84] = 60 }
+local QuestXP = { GetQuestLogRewardXP = function(_, id) return questXp[id] or 0 end,
+                  GetQuestRewardMoney = function(id) return id == 176 and 1500 or 0 end }
 local ZoneDB = { GetUiMapIdByAreaId = function(_, area) return ({ [12] = 1429, [1519] = 1453, [1] = 1426 })[area] end }
 -- what it draws its map icons from: quest id -> true; 34 follows a quest in the log, 9999 is one it has no record of
 local AvailableQuests = { __availableQuests = { [34] = true, [40] = true, [84] = true, [176] = true, [314] = true, [386] = true, [9999] = true } }
 if flags:find("oldquestie") then AvailableQuests = {} end
 if not flags:find("noquestie") then
-  local modules = { QuestieDB = QuestieDB, ZoneDB = ZoneDB, AvailableQuests = AvailableQuests }
+  local modules = { QuestieDB = QuestieDB, ZoneDB = ZoneDB, AvailableQuests = AvailableQuests, QuestXP = QuestXP }
   QuestieLoader = { ImportModule = function(_, name) return modules[name] or {} end }
 end
 -- DungeonJournal, in the shape of its own tables (made-up entries, not its data)
@@ -471,6 +476,20 @@ local function openMailbox(boot)
   for _, m in ipairs(inbox) do m.days = m.days - 40 / 86400 end
   boot.scripts.OnEvent(boot, "MAIL_INBOX_UPDATE")
 end
+-- A session's worth of experience: two kills, a quest handed in, a long break, another kill.
+local function gain(boot, after, to, max)
+  clock = clock + after
+  xpNow, xpMax = to, max or xpMax
+  boot.scripts.OnEvent(boot, "PLAYER_XP_UPDATE", "player")
+end
+local function goLeveling(boot)
+  gain(boot, 0, 3150)
+  gain(boot, 60, 3300)
+  boot.scripts.OnEvent(boot, "QUEST_TURNED_IN", 21, 450, 300)
+  gain(boot, 140, 3750)
+  gain(boot, 800, 4200)   -- after a long break: that break is not time spent gaining
+  if flags:find("levelup") then gain(boot, 30, 500, 11000) end   -- the bar fills and starts again
+end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end
@@ -480,7 +499,9 @@ assert(loadfile(here .. "/../addon/Wisp/Wisp.lua"))()
 if mode == "snapshot" then
   local boot
   for _, f in ipairs(FRAMES) do if f.scripts.OnEvent then boot = f end end
+  if not flags:find("noxp") then xpNow = 3000 end
   boot.scripts.OnEvent(boot, "PLAYER_LOGIN")
+  if not flags:find("noxp") then goLeveling(boot) end
   if flags:find("visitauction") then   -- names are learned after the auction house closes, a pass at a time
     boot.scripts.OnEvent(boot, "AUCTION_HOUSE_CLOSED")
     runTimers()
