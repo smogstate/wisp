@@ -21,7 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from wisp.__main__ import App, serve  # noqa: E402
+from wisp import local  # noqa: E402
+from wisp.__main__ import App, check, serve  # noqa: E402
 from wisp.game import Game, encode_wisp1, read_snapshot, run_tool  # noqa: E402
 from wisp.llm import FakeChat, answer  # noqa: E402
 
@@ -183,6 +184,67 @@ def test_server(wow: Path):
         server.shutdown()
 
 
+def test_this_pc(tmp: Path):
+    """Choosing the game folder, installing the addon, the sample folder, the setup check."""
+    root = tmp / "World of Warcraft"
+    forever = root / "_forever_"
+    (forever / "Interface" / "AddOns").mkdir(parents=True)
+    assert local.game_folder(root) == forever, "the World of Warcraft folder is accepted"
+    assert local.game_folder(str(forever)) == forever and local.game_folder(f'"{forever}"') == forever
+    assert local.game_folder(tmp) is None and local.game_folder("") is None and local.game_folder(None) is None
+
+    assert local.addon_state(forever) == "missing" and local.addon_state(None) == "missing"
+    assert local.install_addon(forever) is None
+    installed = forever / "Interface" / "AddOns" / "Wisp"
+    assert sorted(f.name for f in installed.iterdir()) == ["Wisp.lua", "Wisp.toc"]
+    assert local.addon_state(forever) == "installed"
+    (installed / "Wisp.lua").write_text("-- an old version")
+    assert local.addon_state(forever) == "outdated"
+
+    sample = local.sample_game_folder()
+    game = Game.load(sample)
+    assert game.problem is None and len(game.quests) == 2 and "q33.end.1.1" in game.places
+
+    results = {what: status for what, status, _ in check(sample, call_model=False)}
+    assert results["Game folder"] == "ok" and results["Snapshot readable"] == "ok"
+    assert results["Wisp addon installed"] == "FAIL" and results["TomTom installed"] == "note"
+    assert "A real call to the model" not in results, "no model call when asked not to"
+    assert check(None, call_model=False)[0] == ("Game folder", "FAIL", "not chosen yet")
+
+    app = App(None, fake=True)   # persist is off: real settings and keys are never touched
+    assert "error" in app.save_settings({"wow_dir": str(tmp)})
+    assert app.save_settings({"wow_dir": str(root), "key": "sk-ant-would-be-secret"})["wow_dir"] == str(forever)
+    assert app.wow_dir == forever
+    assert "sk-ant" not in json.dumps(app.settings()), "the key is never sent back"
+    assert "error" in App(None, fake=True).install_addon()
+
+
+def test_settings_api(wow: Path):
+    app = App(wow, fake=True)
+    app.new_chat()
+    server, url = serve(app)
+    base, token = url.split("/?t=")
+
+    def call(path, body=None):
+        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
+                                     headers={"X-Wisp-Token": token, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read())
+
+    try:
+        (wow / "Interface" / "AddOns").mkdir(parents=True, exist_ok=True)
+        settings = call("/api/settings")
+        assert settings["wow_dir"] == str(wow) and settings["addon"] == "missing" and settings["can_browse"] is False
+        assert "error" in call("/api/settings", {"wow_dir": str(wow / "nowhere")})
+        assert call("/api/install-addon", {})["addon"] == "installed"
+        results = call("/api/check", {})["results"]
+        assert {"what": "Wisp addon installed", "status": "ok", "detail": ""} in results
+        assert call("/api/copy", {"text": "anything else"}) == {"copied": False}, "only Wisp messages go to the clipboard"
+        assert "error" in call("/api/browse", {})
+    finally:
+        server.shutdown()
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -192,4 +254,7 @@ if __name__ == "__main__":
         test_without_questie(Path(b))
         test_bad_files(Path(c))
         test_server(wow)
+        test_settings_api(wow)
+    with tempfile.TemporaryDirectory() as d:
+        test_this_pc(Path(d))
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

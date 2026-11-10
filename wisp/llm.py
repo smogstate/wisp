@@ -14,11 +14,12 @@ MAX_HOPS = 6   # tool rounds per question
 
 
 class AnthropicChat:
-    def __init__(self):
+    def __init__(self, api_key: str | None = None):
         import anthropic   # imported here so everything else works without the SDK
 
         self.sdk = anthropic
-        self.client = anthropic.Anthropic()   # key from ANTHROPIC_API_KEY
+        # without a key given, the SDK looks in ANTHROPIC_API_KEY
+        self.client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
         self.messages = []
         # eager_input_streaming: tool inputs stream as they are generated; the
         # server then no longer validates them, which run_tool does instead
@@ -65,7 +66,7 @@ class AnthropicChat:
                     if attempt == 2:
                         raise
         except sdk.AuthenticationError:
-            yield {"type": "error", "message": "The Anthropic key was rejected. Check ANTHROPIC_API_KEY."}
+            yield {"type": "error", "message": "The Anthropic key was rejected. Check it in Settings."}
             return
         except sdk.RateLimitError:
             yield {"type": "error", "message": "Anthropic is rate limiting this key. Wait a moment and ask again."}

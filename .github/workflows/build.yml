@@ -1,0 +1,80 @@
+# Builds Wisp.exe on a real Windows machine, tests it there, and publishes it
+# as the "mvp" release, so that running Wisp needs no Python.
+name: build
+
+on:
+  push:
+    branches: [master]
+    paths-ignore: ["wiki/**", "checks/**", "**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+          npm ci
+
+      - name: Tests (addon in a Lua VM, the whole loop, the settings)
+        run: python tests/test_mvp.py
+
+      - name: Tests (the Anthropic SDK against a stand-in API)
+        run: python tests/test_anthropic.py
+
+      - name: The window, from source
+        run: python -m wisp --smoke smoke-source.json
+
+      - name: Result
+        if: always()
+        shell: pwsh
+        run: if (Test-Path smoke-source.json) { Get-Content smoke-source.json } else { "no result file" }
+
+      - name: Build Wisp.exe
+        run: >
+          pyinstaller --noconfirm --onefile --windowed --name Wisp
+          --add-data "wisp/ui.html;wisp" --add-data "addon/Wisp;addon/Wisp"
+          wisp_app.py
+
+      - name: The window, from the exe
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\Wisp.exe -ArgumentList "--smoke", "smoke-exe.json" -Wait -PassThru
+          if (Test-Path smoke-exe.json) { Get-Content smoke-exe.json } else { "no result file" }
+          if (Test-Path "$env:APPDATA\Wisp\wisp.log") { Get-Content "$env:APPDATA\Wisp\wisp.log" }
+          "exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: Wisp
+          path: |
+            dist/Wisp.exe
+            smoke-*.json
+
+      - name: Publish as the "mvp" release
+        if: github.ref == 'refs/heads/master'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete mvp --yes --cleanup-tag 2>$null
+          Start-Sleep -Seconds 5
+          gh release create mvp dist/Wisp.exe --prerelease --target $env:GITHUB_SHA --title "Wisp MVP" --notes "Wisp.exe, built and tested on Windows by this repository's build workflow from commit $env:GITHUB_SHA. No Python needed. See README.md for how to use it. The exe is not signed, so Windows SmartScreen will ask before running it."
