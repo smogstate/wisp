@@ -48,7 +48,21 @@ def check(wow_dir: Path | None, call_model: bool = True) -> list[tuple[str, str,
         add("Questie installed", (addons / "Questie").is_dir(), bad="without it Wisp knows almost no locations")
         add("TomTom installed", (addons / "TomTom").is_dir(), bad="without it the built-in map pin is used", optional=True)
         saved = find_saved_file(wow_dir)
-        add("Snapshot file", saved is not None, str(saved), "log in with the Wisp addon enabled, then log out once")
+        if saved is None:
+            # say which step is missing, from what the game has written so far
+            seen = local.addon_seen_by_game(wow_dir) if state != "missing" else "missing"
+            add("Snapshot file", False, bad={
+                "missing": "install the addon first",
+                "unseen": "the game has not noticed the addon yet: close the game completely, start it again, and on the "
+                          "character screen open AddOns and tick Wisp",
+                "disabled": "Wisp is switched off in the game: on the character screen open AddOns and tick Wisp",
+                "enabled": "the game has the addon but has not saved yet: log in with your character, then log out to "
+                           "the character screen (the game only writes addon data at logout)",
+                "unknown": "restart the game so it sees the addon, log in with your character, then log out to the "
+                           "character screen (the game only writes addon data at logout)",
+            }[seen])
+            return _key_checks(out, add, call_model)
+        add("Snapshot file", True, str(saved))
         game = Game.load(wow_dir)
         if game.problem:
             add("Snapshot readable", False, bad=game.problem)
@@ -58,6 +72,10 @@ def check(wow_dir: Path | None, call_model: bool = True) -> list[tuple[str, str,
                 bad="Questie was not ready at logout; play a little, then log out again")
             places = sum(1 for ref in game.places if ".start." in ref or ".end." in ref)
             add("Quest locations found", places > 0, f"{places} for quest givers and turn-ins", "none: is your quest log empty?")
+    return _key_checks(out, add, call_model)
+
+
+def _key_checks(out, add, call_model):
     key, source = local.get_key()
     add("API key", key is not None, f"from {source}" if source == "environment" else "saved on this PC", "not entered yet")
     if not call_model or key is None:

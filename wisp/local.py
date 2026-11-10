@@ -124,6 +124,29 @@ def addon_state(wow_dir: Path | None) -> str:
     return "installed"
 
 
+def addon_seen_by_game(wow_dir: Path) -> str:
+    """Whether the game itself lists the Wisp addon for any character: 'enabled',
+    'disabled', 'unseen' (characters exist, none lists it) or 'unknown' (the
+    game keeps no such list here). The game writes one AddOns.txt per character,
+    under WTF/Account/<account>/<realm>/<character>, with a line per addon."""
+    lists = list(wow_dir.glob("WTF/Account/*/*/*/AddOns.txt"))
+    if not lists:
+        return "unknown"
+    seen = "unseen"
+    for file in lists:
+        try:
+            lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            name, _, state = line.partition(":")
+            if name.strip().lower() == "wisp":
+                if state.strip().lower() == "enabled":
+                    return "enabled"
+                seen = "disabled"
+    return seen
+
+
 def install_addon(wow_dir: Path) -> str | None:
     """Copy the addon into Interface\\AddOns\\Wisp. Returns a problem in words, or None."""
     target = wow_dir / "Interface" / "AddOns" / "Wisp"

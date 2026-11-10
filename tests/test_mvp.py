@@ -211,6 +211,23 @@ def test_this_pc(tmp: Path):
     assert "A real call to the model" not in results, "no model call when asked not to"
     assert check(None, call_model=False)[0] == ("Game folder", "FAIL", "not chosen yet")
 
+    # no snapshot yet: the check says which step is missing, from what the game has written
+    def why(folder):
+        return next(detail for what, _, detail in check(folder, call_model=False) if what == "Snapshot file")
+
+    local.install_addon(forever)
+    assert "restart the game" in why(forever), "no character folders at all: the general advice"
+    character = forever / "WTF" / "Account" / "ACC" / "Realm" / "Hero"
+    character.mkdir(parents=True)
+    (character / "AddOns.txt").write_text("Questie: enabled\nTomTom: enabled\n")
+    assert local.addon_seen_by_game(forever) == "unseen" and "has not noticed the addon" in why(forever)
+    (character / "AddOns.txt").write_text("Questie: enabled\nWisp: disabled\n")
+    assert local.addon_seen_by_game(forever) == "disabled" and "switched off" in why(forever)
+    (character / "AddOns.txt").write_text("Questie: enabled\nWisp: enabled\n")
+    assert local.addon_seen_by_game(forever) == "enabled" and "has not saved yet" in why(forever)
+    (installed / "Wisp.toc").unlink()
+    assert "install the addon first" in why(forever)
+
     app = App(None, fake=True)   # persist is off: real settings and keys are never touched
     assert "error" in app.save_settings({"wow_dir": str(tmp)})
     assert app.save_settings({"wow_dir": str(root), "key": "sk-ant-would-be-secret"})["wow_dir"] == str(forever)
