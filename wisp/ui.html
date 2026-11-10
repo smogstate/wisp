@@ -202,7 +202,8 @@
   <label for="provider">Answers come from</label>
   <div class="row">
     <select id="provider" aria-label="Provider"></select>
-    <select id="model" aria-label="Model" style="flex:1;min-width:0"></select>
+    <input id="model" list="models" aria-label="Model" spellcheck="false" autocomplete="off" style="flex:1;min-width:0">
+    <datalist id="models"></datalist>
   </div>
   <div class="hint" id="model-hint"></div>
   <label>API keys</label>
@@ -722,19 +723,25 @@ function showSettings(s) {
 
 // The models of one provider, from its own catalogue once it has a key.
 async function showModels(provider) {
-  const select = $("model");
+  const field = $("model"), choices = $("models");
+  field.value = "";   // until this provider's own model is known, none is sent
   let list = { models: [], current: "", has_key: false };
   try { list = await (await api("/api/models?provider=" + encodeURIComponent(provider))).json(); } catch {}
-  select.textContent = "";
+  choices.textContent = "";
   for (const model of list.models || []) {
     const option = document.createElement("option");
-    option.value = option.textContent = model;
-    select.append(option);
+    option.value = model;
+    choices.append(option);
   }
-  select.value = list.current;
+  field.value = field.placeholder = list.current;
   $("model-hint").textContent = list.has_key ? "Changing the provider starts a new conversation; the earlier one is kept."
     : "Paste a key for this provider below to see all its models.";
 }
+
+// A provider can have hundreds of models: the field is typed in, and its list narrows as you type.
+// It empties when entered, so the whole list shows, and takes its model back if left empty.
+$("model").addEventListener("focus", e => { e.target.value = ""; });
+$("model").addEventListener("blur", e => { if (!e.target.value.trim()) e.target.value = e.target.placeholder; });
 
 const keysNow = () => Object.fromEntries([...document.querySelectorAll("#keys input")].filter(f => f.value.trim()).map(f => [f.dataset.provider, f.value]));
 const modelNow = () => ({ keys: keysNow(), provider: $("provider").value, model: $("model").value });

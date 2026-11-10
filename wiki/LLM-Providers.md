@@ -1,16 +1,20 @@
 # LLM providers
 
-> **Built 2026-11-10: Anthropic and Kimi.** Two wires as planned — Anthropic's own, and the OpenAI-shaped one (`OpenAIChat` in `wisp/llm.py`) on which Kimi is a base URL, a default model and two quirks. OpenRouter is the same wire and not added yet. What turned out differently from the draft below is listed first.
+> **Built 2026-11-10: Anthropic, Kimi and OpenRouter.** Two wires as planned — Anthropic's own, and the OpenAI-shaped one (`OpenAIChat` in `wisp/llm.py`) on which Kimi is a base URL, a default model and two quirks, and OpenRouter a base URL plus what its catalogue says about each model. What turned out differently from the draft below is listed first.
 >
 > - **A conversation stays with its provider.** Each keeps the history in its own format, reasoning included, so switching provider starts a new conversation and the earlier one is kept. Changing model within a provider continues the same conversation.
 > - **Kimi's reasoning goes back with every turn**, as its API reference asks: the assistant message is stored whole, `reasoning_content` and tool calls included.
 > - **K3 models are asked for low reasoning effort**; their default is the maximum, which is too slow beside a game.
 > - **The key is tried on `api.moonshot.ai`, then `api.moonshot.cn`**, kintale's lesson, built in.
 > - **No price for Kimi yet.** Moonshot's pricing page showed no numbers when read, so Kimi conversations show tokens and "cost unknown" until there is a verified price.
+> - **OpenRouter is driven by its public catalogue** (`/api/v1/models`, no key, read once per run). Per model it gives: whether it calls tools (only those are offered in Settings), its output limit (Wisp asks for 16,000 tokens or the model's limit, whichever is less), whether it reasons (then low effort is asked, as with Kimi), and its prices. If the catalogue cannot be read, OpenRouter still works on defaults.
+> - **OpenRouter's cost is the one it reports** with each response (`usage.cost`). If a response carries none, the catalogue's prices are used. Wisp's own price table is not involved.
+> - **OpenRouter's reasoning comes as blocks** (`reasoning_details`: text, summary or encrypted, some signed). Wisp joins the streamed pieces and sends the blocks back unchanged and in order. A block is only valid for the model that wrote it, so after a change of model within a conversation the earlier model's blocks are left out; the conversation itself continues.
+> - **The model is a typed field with a narrowing list**, not a drop-down: OpenRouter lists hundreds. The default there is `anthropic/claude-opus-5.5`.
 > - **The `openai` package** is used for the OpenAI-shaped wire.
 > - One key and one remembered model per provider, in the Windows credential store; the model list comes from the provider's own catalogue.
 >
-> Tested with the real `openai` SDK against a local stand-in for the API. **Not yet run against Kimi itself.**
+> Tested with the real `openai` SDK against local stand-ins for both APIs. **Not yet run against Kimi or OpenRouter themselves.**
 >
 > Status of the text below: draft 2026-11-09. Requirement from Denis: **BYOK**, several providers supported — **Anthropic, Kimi, OpenRouter** — abstracted the way kintale does it. Nothing here is built; the code block has not been run.
 

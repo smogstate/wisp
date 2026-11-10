@@ -21,6 +21,8 @@ MAX_HOPS = 6   # tool rounds per question
 PROVIDERS = {
     "anthropic": {"label": "Claude", "company": "Anthropic", "model": MODEL, "env": "ANTHROPIC_API_KEY", "hint": "sk-ant-…"},
     "moonshot": {"label": "Kimi", "company": "Moonshot", "model": "kimi-k3.1-pro", "env": "MOONSHOT_API_KEY", "hint": "sk-…"},
+    "openrouter": {"label": "OpenRouter", "company": "OpenRouter", "model": "anthropic/claude-opus-5.5",
+                   "env": "OPENROUTER_API_KEY", "hint": "sk-or-…"},
 }
 
 # US dollars per million tokens, from Anthropic's price list as of 2026-11-03.
@@ -33,17 +35,42 @@ def new_usage() -> dict:
     return {"requests": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "cost": 0.0, "priced": True}
 
 
-def add_usage(total: dict, model: str, input_tokens=0, output_tokens=0, cache_read=0, cache_write=0):
-    """Add one model response to a conversation's running total."""
+def add_usage(total: dict, model: str, input_tokens=0, output_tokens=0, cache_read=0, cache_write=0,
+              cost: float | None = None, price: dict | None = None):
+    """Add one model response to a conversation's running total. `cost` is what the
+    provider itself says the response cost, and wins; `price` is a provider's own
+    per-million price list for the model, used before Wisp's table."""
     counts = {"input": input_tokens or 0, "output": output_tokens or 0,
               "cache_read": cache_read or 0, "cache_write": cache_write or 0}
     total["requests"] += 1
-    price = PRICES.get(model, {})
+    price = price or PRICES.get(model, {})
     for kind, tokens in counts.items():
         total[kind] += tokens
-        if tokens and kind not in price:
-            total["priced"] = False
-        total["cost"] += tokens * price.get(kind, 0) / 1_000_000
+        if cost is None:
+            if tokens and kind not in price:
+                total["priced"] = False
+            total["cost"] += tokens * price.get(kind, 0) / 1_000_000
+    if cost is not None:
+        total["cost"] += cost
+
+
+def merge_reasoning(parts: list, new) -> None:
+    """Join streamed pieces of a model's reasoning into whole blocks, in order.
+    Pieces of one block share a type and an index; their text is appended and
+    their other fields (id, format, signature) are kept as last given."""
+    for piece in new or []:
+        if not isinstance(piece, dict):
+            continue
+        same = next((p for p in parts if p.get("type") == piece.get("type") and p.get("index") == piece.get("index")), None)
+        if same is None:
+            parts.append(dict(piece))
+            continue
+        for key, value in piece.items():
+            if key in ("text", "summary", "data"):
+                if value:
+                    same[key] = (same.get(key) or "") + value
+            elif value is not None:
+                same[key] = value
 
 
 class AnthropicChat:
@@ -171,7 +198,7 @@ class OpenAIChat:
     def request(self) -> dict:
         return {
             "model": self.model,
-            "messages": [{"role": "system", "content": SYSTEM}, *self.messages],
+            "messages": [{"role": "system", "content": SYSTEM}, *map(self.sendable, self.messages)],
             "tools": self.tools,
             "stream": True,
             "stream_options": {"include_usage": True},   # the last chunk then carries the token counts
@@ -179,12 +206,23 @@ class OpenAIChat:
             **self.extra_for(self.model),
         }
 
+    def sendable(self, message: dict) -> dict:
+        """A message as the provider gets it. Reasoning blocks are signed by the model
+        that wrote them, so after a change of model the earlier ones stay behind."""
+        message = dict(message)
+        if message.pop("reasoned_by", None) != self.model:
+            message.pop("reasoning_details", None)
+        return message
+
     def extra_for(self, model: str) -> dict:
         return {}
 
+    def price_for(self, model: str) -> dict | None:
+        return None
+
     def stream(self, should_stop):
         sdk = self.sdk
-        text, reasoning, calls, finish = "", "", {}, None
+        text, reasoning, blocks, calls, finish = "", "", [], {}, None
         try:
             try:
                 chunks = self.client().chat.completions.create(**self.request())
@@ -202,7 +240,8 @@ class OpenAIChat:
                     used = chunk.usage
                     cached = getattr(getattr(used, "prompt_tokens_details", None), "cached_tokens", 0) or 0
                     add_usage(self.usage, chunk.model or self.model, (used.prompt_tokens or 0) - cached,
-                              used.completion_tokens, cache_read=cached)
+                              used.completion_tokens, cache_read=cached,
+                              cost=getattr(used, "cost", None), price=self.price_for(self.model))
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]
@@ -211,6 +250,7 @@ class OpenAIChat:
                     text += delta.content
                     yield {"type": "text", "text": delta.content}
                 reasoning += getattr(delta, "reasoning_content", None) or ""
+                merge_reasoning(blocks, getattr(delta, "reasoning_details", None))
                 for piece in delta.tool_calls or []:   # a call arrives in fragments, told apart by index
                     call = calls.setdefault(piece.index, {"id": "", "name": "", "arguments": ""})
                     call["id"] = piece.id or call["id"]
@@ -236,6 +276,8 @@ class OpenAIChat:
         message = {"role": "assistant", "content": text}
         if reasoning:
             message["reasoning_content"] = reasoning
+        if blocks:   # the same thing as blocks, where a provider gives it that way: back unchanged and in order
+            message["reasoning_details"], message["reasoned_by"] = blocks, self.model
         if ordered:
             message["tool_calls"] = [{"id": c["id"], "type": "function",
                                       "function": {"name": c["name"], "arguments": c["arguments"]}} for c in ordered]
@@ -268,7 +310,67 @@ class MoonshotChat(OpenAIChat):
         return {"reasoning_effort": "low"} if model.startswith("kimi-k3") else {}
 
 
-CHATS = {"anthropic": AnthropicChat, "moonshot": MoonshotChat}
+_catalogue: dict | None = None   # OpenRouter's public model list, read once per run
+
+
+def openrouter_catalogue() -> dict:
+    """Per model: whether it calls tools and reasons, its output limit, its prices
+    per million tokens. Public, no key needed. Empty if it cannot be read, in which
+    case OpenRouter still works on defaults."""
+    global _catalogue
+    if _catalogue is None:
+        import urllib.request
+        try:
+            with urllib.request.urlopen(OpenRouterChat.bases[0] + "/models", timeout=10) as reply:
+                listed = json.load(reply)["data"]
+        except Exception:
+            return {}
+        found = {}
+        for m in listed:
+            params, pricing, price = m.get("supported_parameters") or [], m.get("pricing") or {}, {}
+            for kind, key in (("input", "prompt"), ("output", "completion"), ("cache_read", "input_cache_read")):
+                try:
+                    if float(pricing[key]) >= 0:   # a router that picks the model for you is listed at -1
+                        price[kind] = float(pricing[key]) * 1_000_000
+                except (KeyError, TypeError, ValueError):
+                    pass
+            if "input" in price:
+                price.setdefault("cache_read", price["input"])   # no cache price listed: cached input costs as input
+            found[m["id"]] = {"tools": "tools" in params, "reasoning": "reasoning" in params, "price": price,
+                              "max_out": (m.get("top_provider") or {}).get("max_completion_tokens")}
+        _catalogue = found
+    return _catalogue
+
+
+class OpenRouterChat(OpenAIChat):
+    """OpenRouter: one key, hundreds of models from many providers, on the same
+    wire. What differs per model is read from its public catalogue."""
+    provider = "openrouter"
+    company = "OpenRouter"
+    bases = ["https://openrouter.ai/api/v1"]
+
+    def client(self):
+        # these two headers are how OpenRouter attributes traffic to an app
+        return self.sdk.OpenAI(api_key=self.key, base_url=self.bases[self.base], max_retries=1,
+                               default_headers={"HTTP-Referer": "https://github.com/smogstate/wisp", "X-Title": "Wisp"})
+
+    def request(self) -> dict:
+        request = super().request()
+        known = openrouter_catalogue().get(self.model, {})
+        limit = request.pop("max_completion_tokens")
+        # some models allow far less output than others, and asking for more is an error, not a clamp
+        request["max_tokens"] = min(limit, known["max_out"]) if known.get("max_out") else limit
+        body = {"usage": {"include": True}}   # ask what the response really cost
+        if known.get("reasoning"):
+            body["reasoning"] = {"effort": "low"}
+        request["extra_body"] = body
+        return request
+
+    def price_for(self, model: str) -> dict | None:
+        return openrouter_catalogue().get(model, {}).get("price") or None
+
+
+CHATS = {"anthropic": AnthropicChat, "moonshot": MoonshotChat, "openrouter": OpenRouterChat}
 
 
 def list_models(provider: str, key: str) -> list[str]:
@@ -278,6 +380,8 @@ def list_models(provider: str, key: str) -> list[str]:
         if provider == "anthropic":
             import anthropic
             return [m.id for m in anthropic.Anthropic(api_key=key, max_retries=0).models.list(limit=100)]
+        if provider == "openrouter":   # only the models that can call tools: Wisp cannot work without them
+            return [model for model, known in openrouter_catalogue().items() if known["tools"]]
         chat = CHATS[provider](key)
         for chat.base in range(len(chat.bases)):
             try:

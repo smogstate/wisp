@@ -15,14 +15,14 @@ Wisp never sends input to the game and never reads its memory. See [Red Lines](w
 
 ## Run it
 
-You need the game on Windows, an API key for Claude (Anthropic) or Kimi (Moonshot), and the Questie addon. TomTom is recommended; without it Wisp uses the built-in map pin. With the **DungeonJournal** addon installed, Wisp also knows every dungeon: ask *what am I missing for the Deadmines?* or *what drops in Scholomance?* **No Python is needed.**
+You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot) or OpenRouter, and the Questie addon. TomTom is recommended; without it Wisp uses the built-in map pin. With the **DungeonJournal** addon installed, Wisp also knows every dungeon: ask *what am I missing for the Deadmines?* or *what drops in Scholomance?* **No Python is needed.**
 
 1. **Download [Wisp.exe](https://github.com/smogstate/wisp/releases/download/mvp/Wisp.exe)** and run it. It is not signed, so Windows SmartScreen will warn: choose *More info*, then *Run anyway*. An antivirus may also ask, as it can with any small unsigned program.
 2. **Settings** opens by itself the first time.
    - *Game folder*: Wisp looks in the usual places; otherwise browse to your `World of Warcraft` folder.
    - The **addon installs itself** once Wisp knows the game folder, and updates itself with each new `Wisp.exe`. It is one package; there is nothing else to download.
-   - *API keys*: paste a key for Anthropic, for Moonshot (Kimi), or both. They are kept in the Windows credential store on this PC.
-   - *Answers come from*: which of the two answers, and which of its models. `/model` opens this. Changing the provider starts a new conversation, since one provider cannot read the other's history; the earlier conversation is kept.
+   - *API keys*: paste a key for Anthropic, for Moonshot (Kimi), for OpenRouter, or any of them. They are kept in the Windows credential store on this PC.
+   - *Answers come from*: which of them answers, and which of its models (type to narrow the list; OpenRouter has hundreds, and Wisp offers the ones that can use its tools). `/model` opens this. Changing the provider starts a new conversation, since one provider cannot read the other's history; the earlier conversation is kept.
 3. **Start the game** (or restart it, so it sees the new addon). On the character screen, check that Wisp is ticked under AddOns. Log in, then **log out once**. The addon writes your character and quests to disk at logout.
 4. In Settings press **Check setup**. Every line should say `ok`; a line that says `FAIL` tells you what to do.
 5. **Ask**, for example: *where do I hand in my wolf quest, and what comes next?*

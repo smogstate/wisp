@@ -49,7 +49,7 @@ The `WISP1` paste protocol, the integration registry and manifest, TomTom, actio
 
 ## 5. The other providers
 
-Kimi and OpenRouter, `/model`, `/cost`, the daily cap.
+Kimi and OpenRouter, `/model`, `/cost` — built. The daily cap is not.
 
 ## 6. Professions
 
