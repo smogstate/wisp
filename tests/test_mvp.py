@@ -48,7 +48,9 @@ def make_wow_dir(tmp: Path, flags="") -> Path:
     saved = tmp / "WTF/Account/TEST/SavedVariables"
     saved.mkdir(parents=True)
     # the game writes saved variables as Lua assignments
-    (saved / "Wisp.lua").write_text(f'\nWispData = {{\n["recipes"] = {{\n}},\n}}\nWispSnapshot = "{snapshot}"\n', encoding="utf-8")
+    quests = next((l.split(" ") for l in lines if l.startswith("QUESTS ")), None)
+    kept = f'WispQuests = "{quests[1]}"\nWispQuestsKey = "{quests[2]}"\n' if quests else ""
+    (saved / "Wisp.lua").write_text(f'\nWispData = {{\n["recipes"] = {{\n}},\n}}\nWispSnapshot = "{snapshot}"\n{kept}', encoding="utf-8")
     return tmp
 
 
@@ -1507,6 +1509,54 @@ def test_sessions(wow: Path, tmp: Path):
         server.shutdown()
 
 
+def test_quest_search(tmp: Path):
+    """Any quest at all: the addon reads Questie's whole list once, in the background, and keeps it."""
+    lines = stub("snapshot", flags="questindex")
+    assert "QUESTSAGAIN KEPT" in lines, "the next login keeps what was read: it is read again only when Questie or the character changes"
+    wow = make_wow_dir(tmp, flags="questindex")
+    (wow / "Interface" / "AddOns" / "Questie").mkdir(parents=True)
+    game = Game.load(wow)
+    db = game.questdb()
+    assert db is not None and 9001 not in db.quests and 9003 not in db.quests, "another race's and another class's quests are left out"
+    assert 9002 not in db.quests and {7, 33, 155, 166, 386} <= set(db.quests), "and so are those Questie hides"
+
+    both = run_tool(game, "quest_search", {"name": "defias"})
+    assert both["found"] == 2 and [q["id"] for q in both["quests"]] == [155, 166]
+    first, second = both["quests"]
+    assert first["state"] == "open by its requirements" and first["zone"] == "Westfall", "its earlier quest (7) is done, and level 9 is reached"
+    assert first["starts"][0]["name"] == "Gryan Stoutmantle" and first["starts"][0]["where"]["zone"] == "Westfall"
+    assert second["state"] == "not yet" and second["why_not_open"] == ["needs level 14", "first: The Defias Brotherhood (id 155)"]
+    assert second["kind"] == "dungeon" and second["colour"] == "red"
+    assert second["kill"] == [{"name": "Edwin VanCleef", "kind": "npc", "where": "no place known: inside an instance, or Questie has none"}]
+    assert [(c["id"], c["state"]) for c in second["chain"]] == [(7, "done"), (155, "open by its requirements"), (166, "not yet")] and second["chain"][2]["this_one"]
+
+    wolves = run_tool(game, "quest_search", {"name": "Wolfs Across the Border"})["quests"]   # misspelt: the closest name
+    assert len(wolves) == 1 and wolves[0]["state"] == "in the log" and wolves[0]["objective"].startswith("Bring 8 pieces")
+    assert wolves[0]["bring"] == ["Tough Wolf Meat"] and wolves[0]["kill"][0]["name"] == "Prowler"
+    assert wolves[0]["starts"][0]["name"] == "Eagan Peltskinner", "colour codes stripped"
+    ref = wolves[0]["starts"][0]["where"]["ref"]
+    assert "error" not in run_tool(game, "waypoint", {"refs": [ref]}), "every place is a ref the waypoint tool takes"
+    assert [c["id"] for c in wolves[0]["chain"]] == [33, 34]
+    assert run_tool(game, "quest_search", {"id": 7})["quest"]["state"] == "done"
+    assert run_tool(game, "quest_search", {"id": 40})["quest"]["state"] == "open now"
+    assert "another race or class" in run_tool(game, "quest_search", {"id": 9001})["error"]
+
+    assert [q["id"] for q in run_tool(game, "quest_search", {"zone": "westfall", "kind": "dungeon"})["quests"]] == [166]
+    elwynn = run_tool(game, "quest_search", {"zone": "here", "limit": 4})
+    assert elwynn["found"] > 4 and len(elwynn["quests"]) == 4 and elwynn["left_out"] == elwynn["found"] - 4
+    assert [q.get("level", 0) for q in elwynn["quests"]] == sorted(q.get("level", 0) for q in elwynn["quests"]), "by level"
+    assert all(q["id"] != 7 for q in run_tool(game, "quest_search", {"zone": "here", "hide_done": True, "limit": 40})["quests"])
+    assert "error" in run_tool(game, "quest_search", {}) and "error" in run_tool(game, "quest_search", {"zone": "Narnia"})
+    assert run_tool(game, "quest_search", {"name": "no such quest anywhere"})["found"] == 0
+    from wisp.questdb import fold
+    assert fold("Ёжик, В Тумане!") == fold("ежик в тумане"), "as people type names: case, ё and punctuation do not matter"
+    checked = {what: (status, detail) for what, status, detail in check(wow, call_model=False)}
+    assert checked["Every quest from Questie"] == ("ok", f"{len(db.quests)} quests this character could take")
+
+    plain = Game.load(make_wow_dir(tmp / "plain"))   # not read yet: says how it comes
+    assert "about a minute after login" in run_tool(plain, "quest_search", {"name": "defias"})["error"]
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -1520,6 +1570,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as qs:
+            test_quest_search(Path(qs))
         test_leveling(wow)
         with tempfile.TemporaryDirectory() as v:
             test_investments(wow, Path(v))

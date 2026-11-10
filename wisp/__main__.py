@@ -126,6 +126,10 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
             add(t("Looting measured by Wisp"), looted > 0,
                 t("{looted} corpses and nodes over {days} days", looted=looted, days=len({r["day"] for r in game.farming.records})),
                 t("none yet: it starts with the first thing you loot after this update"), optional=True)
+            if (addons / "Questie").is_dir():
+                every = game.questdb()
+                add(t("Every quest from Questie"), every is not None, t("{n} quests this character could take", n=len(every.quests) if every else 0),
+                    t("not yet: Wisp's addon reads them in the background about a minute after login; log out after that"), optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add(t("Quest locations found"), places > 0, t("{n} for quest givers and turn-ins", n=places), t("none: is your quest log empty?"))
     return _key_checks(out, add, call_model, provider, model)

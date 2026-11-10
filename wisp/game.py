@@ -87,6 +87,8 @@ class Game:
         self.assets = None                 # the player's investments, when the app has a place for them
         self.web_seen: dict[str, str] = {}  # url -> title of every web page this conversation was given
         self.notes_dir: Path | None = None  # where research reports are kept, when the app has a place
+        self.saved_file: Path | None = None  # the addon's saved file: Questie's whole quest list is kept there too
+        self._questdb = None
 
     @classmethod
     def load(cls, wow_dir: Path | None) -> "Game":
@@ -96,9 +98,19 @@ class Game:
         if saved is None:
             return cls(None, t("no Wisp snapshot found: enable the Wisp addon, log in, then log out once"))
         try:
-            return cls(read_snapshot(saved))
+            game = cls(read_snapshot(saved))
         except ValueError as e:
             return cls(None, str(e))
+        game.saved_file = saved
+        return game
+
+    def questdb(self):
+        """Every quest the character could ever take, as the addon read them from Questie; None until it has."""
+        if self._questdb is None and self.snapshot:
+            from .questdb import QuestDB, read_index
+            index = read_index(self.saved_file)
+            self._questdb = QuestDB(index, self) if index else None
+        return self._questdb
 
     # -- reading the snapshot ------------------------------------------------
 
@@ -959,6 +971,62 @@ class Game:
             out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
         return out
 
+    def tool_quest_search(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        db = self.questdb()
+        if db is None:
+            return {"error": "Wisp's addon has not read Questie's quest list yet. It does that by itself in the background about "
+                             "a minute after login, with Questie running; the player then logs out once and it is here for good."
+                             + ("" if (self.snapshot.get("addons") or {}).get("questie") else " Questie was not running at the last logout.")}
+        query, qid, zone, kind = args.get("name"), args.get("id"), args.get("zone"), args.get("kind", "any")
+        if qid is not None and (not isinstance(qid, int) or isinstance(qid, bool)):
+            return {"error": "id must be a whole number"}
+        if kind not in ("any", "normal", "elite", "dungeon", "raid", "pvp"):
+            return {"error": "kind must be any, normal, elite, dungeon, raid or pvp"}
+        low, high = args.get("min_level", 0), args.get("max_level", 100)
+        if not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100 for v in (low, high)):
+            return {"error": "min_level and max_level must be whole numbers from 0 to 100"}
+        limit = args.get("limit", 15)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 40:
+            return {"error": "limit must be a whole number from 1 to 40"}
+        note = ("From Questie's whole quest database: every quest this character's race and class could ever take, not only "
+                "those in reach. state: done, in the log, open now (Questie shows it on the map), open by its requirements "
+                "(level and earlier quests allow it, though Questie may hide it, e.g. too low for the character), not yet "
+                "(why_not_open says what is missing), closed (another quest was chosen instead). colour is how the quest log "
+                "would colour it. Every place has a ref for the waypoint tool. Never add a quest or a fact from memory.")
+        if qid is not None:
+            if qid not in db.quests:
+                return {"error": f"no quest {qid} in Questie's list for this character: it may be for another race or class, "
+                                 "or hidden by Questie"}
+            return {"quest": db.detail(qid), "character_level": db.level, "note": note}
+        if not any(isinstance(v, str) and v.strip() for v in (query, zone)) and kind == "any" and (low, high) == (0, 100):
+            return {"error": "give a name, an id, or at least a zone, a kind or a level range"}
+        found = db.find(query) if isinstance(query, str) and query.strip() else sorted(db.quests)
+        if isinstance(zone, str) and zone.strip():
+            wanted = _clean(zone, 60).lower()
+            if wanted in ("here", "this zone", "my zone"):
+                wanted = str((self.snapshot.get("character") or {}).get("zone") or "").lower()
+            zones = db.zones()
+            match = [z for z in zones if z.lower() == wanted] or [z for z in zones if wanted and wanted in z.lower()]
+            if len(match) != 1:
+                return {"error": f"no single zone is named like '{_clean(zone, 60)}'", "zones": zones[:80]}
+            found = [i for i in found if db.quests[i].get("zone") == match[0]]
+        found = [i for i in found if kind == "any" or (db.quests[i].get("kind") or "normal") == kind]
+        found = [i for i in found if low <= (db.quests[i].get("level") or 0) <= high]
+        if args.get("hide_done") is True:
+            found = [i for i in found if i not in db.done]
+        if not found:
+            return {"found": 0, "note": "Nothing in Questie's list for this character matches. Quests for another race or class "
+                                        "are not in it.", "character_level": db.level}
+        if len(found) <= 3:
+            return {"found": len(found), "quests": [db.detail(i) for i in found], "character_level": db.level, "note": note}
+        if not (isinstance(query, str) and query.strip()):
+            found.sort(key=lambda i: (db.quests[i].get("level") or 0, db.quests[i]["name"]))
+        return {"found": len(found), "quests": [db.row(i) for i in found[:limit]],
+                **({"left_out": len(found) - limit} if len(found) > limit else {}), "character_level": db.level,
+                "note": note + " Several match: call again with id for one quest's givers, places, requirements and chain."}
+
     def tool_quest_done(self, args: dict) -> dict:
         ids = args.get("quest_ids")
         if not isinstance(ids, list) or not ids or len(ids) > 50 or not all(isinstance(i, int) for i in ids):
@@ -1547,7 +1615,8 @@ TOOLS = [
                        "asks for. With nothing: how many are open in each zone. With zone (a name, or 'here' for "
                        "where the character stands): that zone's quests, nearest first. With kind: only that kind. "
                        "Use it for 'what quests are there here', 'what elite quests can I do', 'where should I "
-                       "quest next'. The only source of quests outside the log: never name one from memory.",
+                       "quest next'. For one particular quest, or quests out of reach, use quest_search. "
+                       "Never name a quest from memory.",
         "input_schema": {
             "type": "object",
             "properties": {"zone": {"type": "string"},
@@ -1663,6 +1732,25 @@ TOOLS = [
                            "days": {"type": "integer", "minimum": 1, "maximum": 3650, "description": "How far back. Default 30."},
                            "item": {"type": "string", "description": "Only deals in items whose name contains this."},
                            "show": {"type": "boolean", "description": "true to also show the player the result as a table card."}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "quest_search",
+        "description": "Any quest at all, from Questie's whole quest database, not only those in the log or open now: by "
+                       "name (as the game writes it; part of a name works) or id, or every quest of a zone, a kind or a level "
+                       "range. For each: level and the level it needs, kind (elite = group quest, dungeon, raid, pvp), whether "
+                       "this character has done it, has it, can take it now, and if not what is missing (level, earlier "
+                       "quests); who gives it and takes it back and where (refs for waypoint), what it asks for (creatures "
+                       "with places, things, items), and the whole chain around it. Use it for 'where does quest X start', "
+                       "'what do I need before X', 'what elite quests are there in Westfall', 'which part of the chain am I on'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "id": {"type": "integer"}, "zone": {"type": "string"},
+                           "kind": {"type": "string", "enum": ["any", "normal", "elite", "dungeon", "raid", "pvp"]},
+                           "min_level": {"type": "integer", "minimum": 0, "maximum": 100},
+                           "max_level": {"type": "integer", "minimum": 0, "maximum": 100},
+                           "hide_done": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 40}},
             "additionalProperties": False,
         },
     },
@@ -1935,7 +2023,9 @@ Quests the character has not picked up come from available_quests: what is open 
 group quests, dungeon, raid, PvP), nearest first, each with the colour the quest log would give it. For what to do \
 now, call questing_route: it lays the zone's hand-ins, pick-ups and quests under way out as a route card. For where to \
 level next, compare zones by their quests worth doing, the experience on offer there and their quest levels against \
-the character's level. How fast they level, and when the next level comes at that pace, is in leveling.
+the character's level. How fast they level, and when the next level comes at that pace, is in leveling. Any \
+particular quest, or quests out of reach (a chain's later parts, a zone's elite quests at any level), is in quest_search: \
+where it starts, what must come first, and whether this character can take it yet.
 
 For earning gold at the auction house, start from the player's own things: gold shows what their bags would fetch \
 and which of their recipes turn a profit; market_scan and price_history show what is cheap or dear against its usual \

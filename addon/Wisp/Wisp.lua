@@ -175,6 +175,159 @@ local function availableQuests(DB, ZoneDB)
   return out
 end
 
+-------------------------------------------------------- every quest ----
+-- Questie's whole quest database, so that any quest can be asked about, not only the ones in
+-- the log or in reach. Read once after login, a slice at a time so the game never stalls, and
+-- kept in saved variables of their own (WispQuests, WispQuestsKey) that the game carries from
+-- session to session. Read again only when Questie's data, the game's language or the
+-- character's race or class is not what it was read for. Only quests this character could
+-- ever take; for each, who gives it and takes it back and where, what comes before and after
+-- it, and what it asks for. Wisp reads all this from Questie in the game; it carries no copy.
+
+local QUESTS_PER_SLICE = 200
+
+local function questIndexKey(DB)
+  local meta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+  local okV, version = pcall(meta, "Questie", "Version")
+  local count = 0
+  for _ in pairs(DB.QuestPointers) do count = count + 1 end
+  local _, race = UnitRace("player")
+  local _, class = UnitClass("player")
+  return table.concat({ okV and tostring(version) or "?", GetLocale(), tostring(race), tostring(class), count }, "|")
+end
+
+local function buildQuestIndex(DB, ZoneDB, key)
+  local Player, Corrections = questieModule("QuestiePlayer"), questieModule("QuestieCorrections")
+  local hidden = type(Corrections) == "table" and type(Corrections.hiddenQuests) == "table" and Corrections.hiddenQuests or {}
+  local function ask(fn, id, field)
+    if type(fn) ~= "function" then return nil end
+    local ok, value = pcall(fn, id, field)
+    if ok then return value end
+  end
+  local function allowed(check, mask)   -- a quest for another race or class is not this character's
+    if type(mask) ~= "number" or mask == 0 or type(Player) ~= "table" or type(Player[check]) ~= "function" then return true end
+    local ok, yes = pcall(Player[check], mask)
+    return not ok or yes and true or false
+  end
+  local function ids(list)
+    if type(list) ~= "table" then return nil end
+    local out = {}
+    for _, v in ipairs(list) do if type(v) == "number" then out[#out + 1] = v end end
+    return #out > 0 and out or nil
+  end
+  local function firsts(list, at)   -- objective records: the id is in one slot of each
+    local out = {}
+    for _, o in ipairs(type(list) == "table" and list or {}) do
+      if type(o) == "table" and type(o[at]) == "number" then out[#out + 1] = o[at] end
+    end
+    return out
+  end
+  local zoneOf = {}
+  local function zoneName(area)
+    if type(area) ~= "number" or area <= 0 then return nil end   -- below zero: a class or profession, not a place
+    if zoneOf[area] == nil then
+      local ok, map = pcall(ZoneDB.GetUiMapIdByAreaId, ZoneDB, area)
+      zoneOf[area] = ok and map and mapName(map) or false
+    end
+    return zoneOf[area] or nil
+  end
+  local kinds = { { "elite", DB.IsGroupQuest }, { "dungeon", DB.IsDungeonQuest }, { "raid", DB.IsRaidQuest }, { "pvp", DB.IsPvPQuest } }
+  local order = {}
+  for id in pairs(DB.QuestPointers) do if type(id) == "number" then order[#order + 1] = id end end
+  table.sort(order)
+  local Q = DB.QueryQuestSingle
+  local quests, wantNpc, wantObject, wantItem = {}, {}, {}, {}
+  local function want(set, list) for _, id in ipairs(list or {}) do set[id] = true end end
+  for i, id in ipairs(order) do
+    if i % QUESTS_PER_SLICE == 0 then coroutine.yield() end
+    local name = ask(Q, id, "name")
+    if type(name) == "string" and name ~= "" and not hidden[id]
+       and allowed("HasRequiredRace", ask(Q, id, "requiredRaces")) and allowed("HasRequiredClass", ask(Q, id, "requiredClasses")) then
+      local startedBy, finishedBy = ask(Q, id, "startedBy"), ask(Q, id, "finishedBy")
+      startedBy, finishedBy = type(startedBy) == "table" and startedBy or {}, type(finishedBy) == "table" and finishedBy or {}
+      local objectives, text = ask(Q, id, "objectives"), ask(Q, id, "objectivesText")
+      objectives = type(objectives) == "table" and objectives or {}
+      local level, req = ask(Q, id, "questLevel"), ask(Q, id, "requiredLevel")
+      local q = { id = id, name = name, level = type(level) == "number" and level or nil, req = type(req) == "number" and req or nil,
+                  zone = zoneName(ask(Q, id, "zoneOrSort")),
+                  sn = ids(startedBy[1]), so = ids(startedBy[2]), si = ids(startedBy[3]), en = ids(finishedBy[1]), eo = ids(finishedBy[2]),
+                  pre = ids(ask(Q, id, "preQuestSingle")), preAll = ids(ask(Q, id, "preQuestGroup")), excl = ids(ask(Q, id, "exclusiveTo")),
+                  text = type(text) == "table" and type(text[1]) == "string" and text[1]:sub(1, 240) or nil }
+      local nextId, flags = ask(Q, id, "nextQuestInChain"), ask(Q, id, "specialFlags")
+      if type(nextId) == "number" and nextId > 0 then q.next = nextId end
+      if type(flags) == "number" and flags % 2 == 1 then q.repeatable = true end
+      local kill = firsts(objectives[1], 1)
+      for _, credit in ipairs(firsts(objectives[5], 2)) do kill[#kill + 1] = credit end   -- kill credit: the creature it is named after
+      q.kill, q.use, q.items = ids(kill), ids(firsts(objectives[2], 1)), ids(firsts(objectives[3], 1))
+      for _, test in ipairs(kinds) do
+        if not q.kind and type(test[2]) == "function" then
+          local okT, yes = pcall(test[2], id)
+          if okT and yes then q.kind = test[1] end
+        end
+      end
+      want(wantNpc, q.sn); want(wantNpc, q.en); want(wantNpc, q.kill)
+      want(wantObject, q.so); want(wantObject, q.eo); want(wantObject, q.use)
+      want(wantItem, q.si); want(wantItem, q.items)
+      quests[#quests + 1] = q
+    end
+  end
+  -- who and what the quests name, each with one place where Questie has one
+  local maps, mapSeen = {}, {}
+  local function named(fn, wanted, located)
+    local out, n = {}, 0
+    for id in pairs(wanted) do
+      n = n + 1
+      if n % 300 == 0 then coroutine.yield() end
+      local name = ask(fn, id, "name")
+      if type(name) == "string" and name ~= "" then
+        local entry = { id = id, name = name }
+        local spawns = located and ask(fn, id, "spawns")
+        local okP, found = pcall(places, { spawns = type(spawns) == "table" and spawns or nil }, ZoneDB)
+        local p = okP and found[1]
+        if p then
+          entry.map, entry.x, entry.y = p.map, p.x, p.y
+          if not mapSeen[p.map] then mapSeen[p.map] = true; maps[#maps + 1] = { id = p.map, name = p.zone } end
+        end
+        out[#out + 1] = entry
+      end
+    end
+    return out
+  end
+  local npcs = named(DB.QueryNPCSingle, wantNpc, true)
+  local objects = named(DB.QueryObjectSingle, wantObject, true)
+  local items = named(DB.QueryItemSingle, wantItem, false)
+  return { v = 1, key = key, quests = quests, npcs = npcs, objects = objects, items = items, maps = maps }
+end
+
+local questIndexRun
+local function questIndexStep()
+  if not questIndexRun then return end
+  local ok, index = coroutine.resume(questIndexRun)
+  if not ok then questIndexRun = nil; return end   -- whatever went wrong, the index kept from before stays
+  if coroutine.status(questIndexRun) ~= "dead" then return C_Timer.After(0, questIndexStep) end
+  questIndexRun = nil
+  if type(index) == "table" then
+    local okJ, text = pcall(function() return E.EncodeBase64(E.SerializeJSON(index)) end)
+    if okJ and type(text) == "string" then WispQuests, WispQuestsKey = text, index.key end
+  end
+end
+
+local function startQuestIndex(tries)
+  tries = tries or 0
+  local DB, ZoneDB = questieModule("QuestieDB"), questieModule("ZoneDB")
+  if not (DB and ZoneDB and type(DB.QueryQuestSingle) == "function" and type(DB.QuestPointers) == "table") then
+    if tries < 12 and type(QuestieLoader) == "table" then   -- Questie may still be starting up
+      C_Timer.After(10, function() startQuestIndex(tries + 1) end)
+    end
+    return
+  end
+  if questIndexRun or not (E and E.SerializeJSON and E.EncodeBase64) then return end
+  local okK, key = pcall(questIndexKey, DB)
+  if not okK or (key == WispQuestsKey and type(WispQuests) == "string") then return end
+  questIndexRun = coroutine.create(function() return buildQuestIndex(DB, ZoneDB, key) end)
+  questIndexStep()
+end
+
 ----------------------------------------------------------- dungeons ----
 -- From the DungeonJournal addon, when it is installed: every dungeon with its
 -- entrance, its quests and what each needs first, its bosses and their loot.
@@ -1349,6 +1502,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
     pcall(captureRecipes)
   else
     C_Timer.After(20, function() pcall(learnNames) end)   -- once the login rush is over
+    C_Timer.After(30, function() pcall(startQuestIndex) end)
     pcall(pruneLoot)
     pcall(xpChanged)   -- where the bar stands as the session begins
     pcall(SetOverrideBindingClick, opener, false, PASTE_KEY, "WispInboxOpener")

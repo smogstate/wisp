@@ -266,12 +266,44 @@ QuestieDB.IsPvPQuest = function() return false end
 local questXp = { [33] = 450, [34] = 540, [40] = 620, [76] = 700, [176] = 900, [314] = 800, [386] = 2100, [84] = 60 }
 local QuestXP = { GetQuestLogRewardXP = function(_, id) return questXp[id] or 0 end,
                   GetQuestRewardMoney = function(id) return id == 176 and 1500 or 0 end }
-local ZoneDB = { GetUiMapIdByAreaId = function(_, area) return ({ [12] = 1429, [1519] = 1453, [1] = 1426 })[area] end }
+local ZoneDB = { GetUiMapIdByAreaId = function(_, area) return ({ [12] = 1429, [1519] = 1453, [1] = 1426, [40] = 1436 })[area] end }
+-- Questie's whole database, as it answers one field at a time: the quests above, and some far from
+-- this character: further down the Westfall chain, one already done, and three it can never take
+npcs[234] = { name = "Gryan Stoutmantle", spawns = { [40] = { { 56.3, 47.5 } } } }
+npcs[639] = { name = "Edwin VanCleef", spawns = { [1581] = { { -1, -1 } } } }
+local raw = {}
+for id, q in pairs(quests) do
+  raw[id] = { name = q.name, questLevel = q.level, requiredLevel = q.requiredLevel, zoneOrSort = 12, nextQuestInChain = q.nextQuestInChain,
+              startedBy = { q.Starts and q.Starts.NPC, q.Starts and q.Starts.GameObject }, finishedBy = { q.Finisher and q.Finisher.NPC } }
+end
+raw[33].objectives = { { { 118 } }, nil, { { 750 } } }
+raw[33].objectivesText = { "Bring 8 pieces of Tough Wolf Meat to Eagan Peltskinner." }
+raw[7] = { name = "Kobold Camp Cleanup", questLevel = 3, requiredLevel = 1, zoneOrSort = 12, startedBy = { { 240 } }, finishedBy = { { 240 } } }
+raw[155] = { name = "The Defias Brotherhood", questLevel = 14, requiredLevel = 9, zoneOrSort = 40, preQuestSingle = { 7 }, nextQuestInChain = 166,
+             startedBy = { { 234 } }, finishedBy = { { 234 } } }
+raw[166] = { name = "The Defias Brotherhood", questLevel = 22, requiredLevel = 14, zoneOrSort = 40, preQuestSingle = { 155 },
+             startedBy = { { 234 } }, finishedBy = { { 234 } }, objectives = { { { 639 } } },
+             objectivesText = { "Kill Edwin VanCleef and bring his head to Gryan Stoutmantle." } }
+raw[9001] = { name = "For the Horde!", questLevel = 16, requiredLevel = 10, requiredRaces = 690, startedBy = { { 240 } } }
+raw[9002] = { name = "Never Seen", questLevel = 5, startedBy = { { 240 } } }
+raw[9003] = { name = "A Warrior's Training", questLevel = 10, requiredClasses = 1, startedBy = { { 240 } } }
+tags[166] = "dungeon"
+QuestieDB.QuestPointers = {}
+for id in pairs(raw) do QuestieDB.QuestPointers[id] = true end
+QuestieDB.QueryQuestSingle = function(id, key) return raw[id] and raw[id][key] end
+QuestieDB.QueryNPCSingle = function(id, key) return npcs[id] and npcs[id][key] end
+QuestieDB.QueryObjectSingle = function(id, key) return objects[id] and objects[id][key] end
+QuestieDB.QueryItemSingle = function(id, key) return questieItems[id] and questieItems[id][key] end
+local QuestiePlayer = { HasRequiredRace = function(mask) return mask % 2 == 1 end,                   -- a human
+                        HasRequiredClass = function(mask) return math.floor(mask / 128) % 2 == 1 end }   -- a mage
+local QuestieCorrections = { hiddenQuests = { [9002] = true } }
+C_AddOns = { GetAddOnMetadata = function(name, field) if name == "Questie" and field == "Version" then return "11.9.0" end end }
 -- what it draws its map icons from: quest id -> true; 34 follows a quest in the log, 9999 is one it has no record of
 local AvailableQuests = { __availableQuests = { [34] = true, [40] = true, [84] = true, [176] = true, [314] = true, [386] = true, [9999] = true } }
 if flags:find("oldquestie") then AvailableQuests = {} end
 if not flags:find("noquestie") then
-  local modules = { QuestieDB = QuestieDB, ZoneDB = ZoneDB, AvailableQuests = AvailableQuests, QuestXP = QuestXP }
+  local modules = { QuestieDB = QuestieDB, ZoneDB = ZoneDB, AvailableQuests = AvailableQuests, QuestXP = QuestXP,
+                    QuestiePlayer = QuestiePlayer, QuestieCorrections = QuestieCorrections }
   QuestieLoader = { ImportModule = function(_, name) return modules[name] or {} end }
 end
 -- DungeonJournal, in the shape of its own tables (made-up entries, not its data)
@@ -537,6 +569,15 @@ if mode == "snapshot" then
   for _, f in ipairs(FRAMES) do if f.scripts.OnEvent then boot = f end end
   if not flags:find("noxp") then xpNow = 3000 end
   boot.scripts.OnEvent(boot, "PLAYER_LOGIN")
+  if flags:find("questindex") then   -- the session goes on long enough for Questie's quests to be read
+    runTimers()
+    local kept = WispQuests
+    WispQuests = "KEPT"
+    boot.scripts.OnEvent(boot, "PLAYER_LOGIN")   -- the next session: what was read is kept, not read again
+    runTimers()
+    out("QUESTSAGAIN " .. tostring(WispQuests))
+    WispQuests = kept
+  end
   if not flags:find("noxp") then goLeveling(boot) end
   if flags:find("visitauction") then   -- names are learned after the auction house closes, a pass at a time
     boot.scripts.OnEvent(boot, "AUCTION_HOUSE_CLOSED")
@@ -559,6 +600,7 @@ if mode == "snapshot" then
   SlashCmdList.WISP("save")
   boot.scripts.OnEvent(boot, "PLAYER_LOGOUT")
   out("SNAPSHOT " .. tostring(WispSnapshot))
+  if WispQuests then out("QUESTS " .. WispQuests .. " " .. WispQuestsKey) end
   if SAVED then
     local days = {}
     for _, d in ipairs(SAVED.market.days) do days[#days + 1] = number(d.day - SAVED.market.today) .. ":" .. number(#d.rows / 4) end

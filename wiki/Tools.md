@@ -21,6 +21,7 @@ The model calls them, Python runs them, the model reads the result and can call 
 | `report`, `notes` | **Built.** The end of a research run: a structured report with checked sources, kept as a note; and reading the kept notes | below |
 | `gathering` | **Built.** Gathering nodes from GatherMate2: what is on record, the zones a node is in, what a zone holds, and a route through a zone's nodes as one ref | [Integrations](Integrations.md) |
 | `farming` | **Built.** Measured from the player's own looting: gold per hour by zone, the rate of every item from every creature and node, and the worth of known gathering nodes | [Integrations](Integrations.md) |
+| `quest_search` | **Built.** Any quest in Questie's whole database: by name, id, zone, kind or level; whether the character can take it and what is missing; givers and places (refs); the chain | [Integrations](Integrations.md) |
 | `available_quests` | **Built.** Every quest the character could pick up, from Questie: by zone, by kind (elite, dungeon, raid, PvP), nearest first, with the quest giver's place | [Integrations](Integrations.md) |
 | `questing_route` | **Built.** A zone as a route card: hand-ins, pick-ups worth doing, quests under way, ordered to walk, with a waypoint per stop | [Integrations](Integrations.md) |
 | `gold` | **Built.** What the character's own things would fetch: bags to sell, hold or vendor; recipes ranked by profit | [Integrations](Integrations.md) |
