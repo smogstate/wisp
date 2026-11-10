@@ -84,6 +84,9 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
             add("Snapshot readable", True, f"{len(game.quests)} quests, saved {game.age_minutes()} minutes ago")
             add("Questie data in the snapshot", (game.snapshot.get("addons") or {}).get("questie"),
                 bad="Questie was not ready at logout; play a little, then log out again")
+            add("Open quests in the snapshot", bool(game.available), f"{len(game.available)} the character could pick up",
+                "none: Questie's list of available quests was not found; tell Wisp's author which Questie version this is",
+                optional=True)
             kept = History(local.APP_DIR / "snapshots").count(game.snapshot)
             add("Snapshots kept for this character", True, f"{kept}: one per logout Wisp has seen")
             if (addons / "ForeverDungeonJournal").is_dir():

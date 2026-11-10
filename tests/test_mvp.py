@@ -464,6 +464,43 @@ def test_item_graph(wow: Path, tmp: Path):
     assert "sold_by" not in out and "Questie was not available" in out["note"] and out["used_in_your_recipes"]
 
 
+def test_available_quests(wow: Path, tmp: Path):
+    """The quests Questie has down as open to the character: by zone, by kind, nearest first."""
+    game = Game.load(wow)
+    assert [q["id"] for q in game.snapshot["available"]] == [34, 40, 176, 314, 386], "one Questie has no record of is left out"
+
+    def quests(**args):
+        out = run_tool(game, "available_quests", args)
+        out.pop("note", None)
+        return out
+    everywhere = quests()
+    assert everywhere["open_quests"] == 5 and everywhere["character_zone"] == "Elwynn Forest"
+    assert everywhere["by_zone"] == [{"zone": "Elwynn Forest", "open_quests": 4, "elite": 1, "dungeon": 1},
+                                     {"zone": "Dun Morogh", "open_quests": 1, "elite": 1}]
+
+    # the example asked for: which elite quests are open around here
+    here = quests(zone="here", kind="elite")
+    assert (here["zone"], here["open_quests"], here["ordered"]) == ("Elwynn Forest", 1, "nearest first")
+    hogger = here["quests"][0]
+    assert (hogger["title"], hogger["level"], hogger["kind"], hogger["needs"]) == ("Wanted: Hogger", 11, "elite", ["Huge Gnoll Claw"])
+    assert hogger["starts"][0]["name"] == "Wanted Poster" and hogger["starts"][0]["where"][0]["ref"] == "a176.start.1.1"
+    assert run_tool(game, "waypoint", {"refs": ["a176.start.1.1"]})["shown"] == 1
+    assert game.cards[-1]["lines"][0]["text"] == "Waypoint: Wanted Poster (quest giver)"
+    assert [q["title"] for q in quests(kind="elite")["quests"]] == ["Wanted: Hogger", "Protecting the Herd"], "everywhere: by level"
+    near = [q["title"] for q in quests(zone="elwynn")["quests"]]
+    assert near == ["A Fishy Peril", "What Comes Around", "An Unwelcome Guest", "Wanted: Hogger"], \
+        "from where the character stands, at the marshal's feet: his two first, then the poster's"
+    assert quests(zone="Dun Morogh")["ordered"] == "by level" and quests(kind="raid")["quests"] == []
+    assert "zones_with_open_quests" in quests(zone="Nowhere") and "error" in quests(kind="x") and "error" in quests(limit=0)
+    claw = run_tool(game, "item_links", {"item": "Huge Gnoll Claw"})["asked_for_by_quests"]
+    assert claw == [{"quest": "Wanted: Hogger", "where": "open to you, not picked up", "status": "level 11, elite"}]
+
+    older = Game.load(make_wow_dir(tmp / "a", flags="oldquestie"))
+    assert "may keep it elsewhere" in run_tool(older, "available_quests", {})["error"]
+    without = Game.load(make_wow_dir(tmp / "b", flags="noquestie"))
+    assert "Questie was not running" in run_tool(without, "available_quests", {})["error"]
+
+
 def test_gathering(wow: Path, tmp: Path):
     """GatherMate2's nodes: which zones have the most, a route through one, and the way in from an item."""
     game = Game.load(wow)
@@ -947,6 +984,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as g:
             test_history(wow, Path(g))
         test_inbox_is_strict()
+        with tempfile.TemporaryDirectory() as q:
+            test_available_quests(wow, Path(q))
         with tempfile.TemporaryDirectory() as k:
             test_farming(wow, Path(k))
         with tempfile.TemporaryDirectory() as j:

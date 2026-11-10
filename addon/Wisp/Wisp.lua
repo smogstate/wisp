@@ -110,6 +110,39 @@ local function questLog(DB, ZoneDB)
   return quests
 end
 
+-- Every quest the character could pick up now, as Questie works it out: the same list it draws
+-- its map icons from, so it follows Questie's own settings (how far below your level it shows).
+-- For each: level, who gives it and where, the items it asks for, and whether Questie has it
+-- down as elite (a group quest), dungeon, raid or PvP.
+local function availableQuests(DB, ZoneDB)
+  local module = questieModule("AvailableQuests")
+  local ids = type(module) == "table" and module.__availableQuests
+  if not (DB and ZoneDB) or type(ids) ~= "table" then return nil end
+  local order = {}
+  for id in pairs(ids) do
+    if type(id) == "number" then order[#order + 1] = id end
+  end
+  table.sort(order)
+  local kinds = { { "elite", DB.IsGroupQuest }, { "dungeon", DB.IsDungeonQuest }, { "raid", DB.IsRaidQuest }, { "pvp", DB.IsPvPQuest } }
+  local out = {}
+  for _, id in ipairs(order) do
+    if #out >= 600 then break end
+    local ok, known = pcall(fromQuestie, id, DB, ZoneDB, false)
+    if ok and known and known.title then
+      local kind
+      for _, test in ipairs(kinds) do
+        if not kind and type(test[2]) == "function" then
+          local okT, yes = pcall(test[2], id)
+          if okT and yes then kind = test[1] end
+        end
+      end
+      out[#out + 1] = { id = id, title = known.title, level = known.level, requiredLevel = known.requiredLevel,
+                        kind = kind, starts = known.starts, needs = known.needs }
+    end
+  end
+  return out
+end
+
 ----------------------------------------------------------- dungeons ----
 -- From the DungeonJournal addon, when it is installed: every dungeon with its
 -- entrance, its quests and what each needs first, its bosses and their loot.
@@ -676,6 +709,8 @@ local function buildSnapshot()
   local okC, books = pcall(crafting, wanted)
   if not okC then books = {} end
   local log = questLog(DB, ZoneDB)
+  local okQ, open = pcall(availableQuests, DB, ZoneDB)
+  if not okQ then open = nil end
   for _, quest in ipairs(log) do
     for _, need in ipairs(quest.needs or {}) do wanted[need.id] = true end
   end
@@ -722,6 +757,7 @@ local function buildSnapshot()
     loot = looted,
     vendor = vendor,
     quests = log,
+    available = open,
     sources = sources,
     completed = C_QuestLog.GetAllCompletedQuestIDs(),
   }

@@ -47,6 +47,12 @@ class ItemGraph:
                 if item:
                     self.quests.setdefault(item, []).append({"quest": quest["title"], "where": "in your quest log",
                                                              "status": "ready to hand in" if quest["complete"] else "in progress"})
+        for raw, quest in zip((q for q in _list(snapshot.get("available")) if isinstance(q, dict)), game.available):
+            for need in (n for n in _list(raw.get("needs")) if isinstance(n, dict)):
+                item = name(need.get("id"), need.get("name"))
+                if item:
+                    self.quests.setdefault(item, []).append({"quest": quest["title"], "where": "open to you, not picked up",
+                                                             "status": f"level {quest['level']}" + ("" if quest["kind"] == "normal" else f", {quest['kind']}")})
         for raw, dungeon in zip((d for d in _list(snapshot.get("dungeons")) if isinstance(d, dict)), game.dungeons):
             status = {q["id"]: q["status"] for q in dungeon["quests"]}
             for quest in (q for q in _list(raw.get("quests")) if isinstance(q, dict)):

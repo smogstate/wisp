@@ -31,6 +31,8 @@ You need the game on Windows, an API key for Claude (Anthropic), Kimi (Moonshot)
 
 **Updates.** Wisp keeps itself current: when a newer build is published it downloads it, checks it, and starts as the new one the next time you open it (or right away if you press *Restart*). Settings has a switch to turn this off. The addon is updated along with it; restart the game to load a new addon.
 
+**Quests around you.** *What quests are open here?*, *what elite quests can I do?*, *where should I quest next?* Wisp reads the list of quests Questie has open for your character, with levels and quest givers, and can put the givers on a waypoint card.
+
 **Professions.** Open your profession window once in the game (Wisp says in chat that it read the recipes), then log out. Now ask *what should I craft to level tailoring, and what do I need to buy?* Wisp counts the materials, takes off what is in your bags, prices the rest from your own **Auctionator** scans, and gives you a card that creates the shopping list in Auctionator. It knows the recipes your character has; the bank is not counted.
 
 **What is this for, where do I get it.** Ask about any item you carry, craft with or need for a quest: Wisp shows which of your recipes use it, which quests ask for it, which boss drops it, who sells it and what drops it, with a waypoint to the seller.

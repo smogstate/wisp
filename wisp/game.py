@@ -73,6 +73,7 @@ class Game:
         self.quests = [self._quest(q) for q in _as_list(self.snapshot.get("quests")) if isinstance(q, dict)]
         self.dungeons = [self._dungeon(i, d) for i, d in enumerate(_as_list(self.snapshot.get("dungeons")))
                          if isinstance(d, dict)]
+        self.available = [self._available(q) for q in _as_list(self.snapshot.get("available")) if isinstance(q, dict)]
         self.crafting = Crafting(self.snapshot)
         self.gathering = Gathering(self.snapshot)
         self.farming = Farming(self.snapshot, self.crafting, self.gathering)
@@ -147,6 +148,17 @@ class Game:
                 "starts": self._who(f"q{qid}.next", nxt.get("starts"), "next quest"),
             }
         return out
+
+    def _available(self, q: dict) -> dict:
+        """A quest the character could pick up, as Questie has it."""
+        qid = q.get("id")
+        title = _clean(q.get("title"), 80)
+        starts = self._who(f"a{qid}.start", q.get("starts"), "quest giver")
+        return {"id": qid, "title": title, "level": q.get("level") if isinstance(q.get("level"), int) else None,
+                "requires_level": q.get("requiredLevel") if isinstance(q.get("requiredLevel"), int) else None,
+                "kind": q.get("kind") if q.get("kind") in ("elite", "dungeon", "raid", "pvp") else "normal",
+                "starts": starts, "zones": list(dict.fromkeys(w["zone"] for s in starts for w in s["where"] if w["zone"])),
+                "needs": [_clean(n.get("name"), 80) for n in _as_list(q.get("needs")) if isinstance(n, dict) and _clean(n.get("name"), 80)]}
 
     # -- dungeons, from the DungeonJournal addon --------------------------------
 
@@ -232,6 +244,62 @@ class Game:
         if not (self.snapshot.get("addons") or {}).get("questie"):
             note = "Questie was not available when the snapshot was taken, so most locations are missing."
         return {"quests": self.quests, "snapshot_age_minutes": self.age_minutes(), "note": note}
+
+    def tool_available_quests(self, args: dict) -> dict:
+        if not self.snapshot:
+            return {"error": self.problem}
+        if self.snapshot.get("available") is None:
+            return {"error": "The list of quests the character can pick up comes from the Questie addon, and it was not there at "
+                             "the last logout" + (": Questie was not running." if not (self.snapshot.get("addons") or {}).get("questie")
+                                                  else ". This version of Questie may keep it elsewhere.")}
+        me = self.snapshot.get("character") or {}
+        kind, zone = args.get("kind", "any"), args.get("zone")
+        if kind not in ("any", "normal", "elite", "dungeon", "raid", "pvp"):
+            return {"error": "kind must be any, normal, elite, dungeon, raid or pvp"}
+        limit = args.get("limit", 30)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 60:
+            return {"error": "limit must be a whole number from 1 to 60"}
+        found = [q for q in self.available if kind in ("any", q["kind"])]
+        note = ("Quests Questie has down as open to this character at the last logout: level, class, race and earlier quests "
+                "allow them, and they are not yet picked up. It follows Questie's own settings, so quests far below the "
+                "character's level are left out unless Questie is set to show them. 'elite' is the game's tag for a quest "
+                "meant for a group. Every quest giver's place has a ref for the waypoint tool.")
+        if isinstance(zone, str) and zone.strip():
+            wanted = _clean(zone, 60).lower()
+            if wanted in ("here", "this zone", "my zone"):
+                wanted = str(me.get("zone") or "").lower()
+            zones = sorted({z for q in self.available for z in q["zones"]})
+            match = [z for z in zones if z.lower() == wanted] or [z for z in zones if wanted and wanted in z.lower()]
+            if len(match) != 1:
+                return {"error": f"no single zone with open quests is named like '{_clean(zone, 60)}'" if match or wanted else
+                                 "the character's zone is not known", "zones_with_open_quests": zones[:60]}
+            found = [q for q in found if match[0] in q["zones"]]
+            here = me.get("zone") == match[0] and isinstance(me.get("x"), (int, float)) and isinstance(me.get("y"), (int, float))
+
+            def distance(q):   # from where the character stands, when it is in that zone
+                near = [((w["x"] - me["x"]) ** 2 + (w["y"] - me["y"]) ** 2) ** 0.5
+                        for s in q["starts"] for w in s["where"] if w["zone"] == match[0]]
+                return min(near) if near and here else 0
+            found.sort(key=lambda q: (distance(q), q["level"] or 0, q["title"]))
+            out = [{k: v for k, v in q.items() if k != "zones" and v not in ([], None)} for q in found[:limit]]
+            return {"zone": match[0], "kind": kind, "open_quests": len(found), "quests": out, "character_level": me.get("level"),
+                    "ordered": "nearest first" if here else "by level",
+                    **({"left_out": len(found) - limit} if len(found) > limit else {}), "note": note}
+        if kind == "any":   # no filter: the lie of the land, not three hundred quests
+            zones = {}
+            for q in found:
+                for z in q["zones"] or ["(no place known)"]:
+                    counts = zones.setdefault(z, {"zone": z, "open_quests": 0})
+                    counts["open_quests"] += 1
+                    if q["kind"] != "normal":
+                        counts[q["kind"]] = counts.get(q["kind"], 0) + 1
+            return {"open_quests": len(found), "by_zone": sorted(zones.values(), key=lambda z: (-z["open_quests"], z["zone"]))[:60],
+                    "character_zone": me.get("zone"), "character_level": me.get("level"),
+                    "note": note + " Ask with a zone (or zone 'here') or a kind for the quests themselves."}
+        found.sort(key=lambda q: (q["level"] or 0, q["title"]))
+        return {"kind": kind, "open_quests": len(found), "character_level": me.get("level"),
+                "quests": [{k: v for k, v in q.items() if v not in ([], None)} for q in found[:limit]],
+                **({"left_out": len(found) - limit} if len(found) > limit else {}), "note": note}
 
     def tool_quest_done(self, args: dict) -> dict:
         ids = args.get("quest_ids")
@@ -812,6 +880,22 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
+        "name": "available_quests",
+        "description": "The quests the character could pick up now and has not, from the Questie addon: level, kind "
+                       "(normal, elite for group quests, dungeon, raid, pvp), who gives each and where, the items it "
+                       "asks for. With nothing: how many are open in each zone. With zone (a name, or 'here' for "
+                       "where the character stands): that zone's quests, nearest first. With kind: only that kind. "
+                       "Use it for 'what quests are there here', 'what elite quests can I do', 'where should I "
+                       "quest next'. The only source of quests outside the log: never name one from memory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"zone": {"type": "string"},
+                           "kind": {"type": "string", "enum": ["any", "normal", "elite", "dungeon", "raid", "pvp"]},
+                           "limit": {"type": "integer", "minimum": 1, "maximum": 60}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "quest_done",
         "description": "Whether the player has completed given quests, by quest id.",
         "input_schema": {
@@ -1075,6 +1159,9 @@ What you know about the game comes only from your tools. They read a snapshot th
 logout, so it can be out of date: say so when it matters, and if the player tells you something changed, believe them. \
 Quest locations come from the Questie addon and everything about dungeons from the DungeonJournal addon; when one of \
 them was not installed, the tool says so, and you tell the player which addon would help.
+
+Quests the character has not picked up come from available_quests: what is open to them, by zone and by kind (elite \
+group quests, dungeon, raid, PvP), nearest first. Use it for what to do next and where.
 
 Never state a quest id, an NPC, a location or coordinates from memory. WoW Forever differs from every earlier version \
 of the game, so what you remember is unreliable. If the tools do not have something, say that plainly.

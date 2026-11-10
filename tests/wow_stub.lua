@@ -175,7 +175,7 @@ function UnitFactionGroup() return "Alliance", "Альянс" end
 local purse = 153422   -- at logout: the looting below starts 1s 55c short of it
 function GetMoney() return purse end
 function GetSubZoneText() return "Златоземье" end
-local maps = { [1429] = "Elwynn Forest", [1453] = "Stormwind City", [1436] = "Westfall", [1455] = "Ironforge" }
+local maps = { [1429] = "Elwynn Forest", [1453] = "Stormwind City", [1436] = "Westfall", [1455] = "Ironforge", [1426] = "Dun Morogh" }
 C_Map = {
   GetBestMapForUnit = function() return 1429 end,
   GetPlayerMapPosition = function() return { GetXY = function() return 0.4212, 0.6588 end } end,
@@ -214,6 +214,12 @@ local quests = {
            Starts = { GameObject = { 55 } }, Finisher = { NPC = { 196 } } },
   [76] = { name = "The Jasperlode Mine", level = 10, requiredLevel = 7,
            Starts = { NPC = { 240 } }, Finisher = { NPC = { 240 } } },
+  -- not picked up yet: Questie has these down as available to this character
+  [40] = { name = "A Fishy Peril", level = 10, requiredLevel = 7, Starts = { NPC = { 240 } }, Finisher = { NPC = { 240 } } },
+  [176] = { name = "Wanted: Hogger", level = 11, requiredLevel = 6, Starts = { GameObject = { 55 } }, Finisher = { NPC = { 240 } },
+            ObjectiveData = { { Type = "item", Id = 1931, Text = "Huge Gnoll Claw" } } },
+  [314] = { name = "Protecting the Herd", level = 12, requiredLevel = 5, Starts = { NPC = { 1265 } }, Finisher = { NPC = { 1265 } } },
+  [386] = { name = "What Comes Around", level = 25, requiredLevel = 22, Starts = { NPC = { 240 } }, Finisher = { NPC = { 240 } } },
 }
 local npcs = {
   [196] = { name = "Eagan |cffff0000Peltskinner", spawns = { [12] = { { 48.94, 40.16 } } } },
@@ -247,9 +253,19 @@ local QuestieDB = {
   GetNPC = function(_, id) return npcs[id] end,
   GetObject = function(_, id) return objects[id] end,
 }
-local ZoneDB = { GetUiMapIdByAreaId = function(_, area) return ({ [12] = 1429, [1519] = 1453 })[area] end }
+npcs[1265] = { name = "Rudra Amberstill", spawns = { [1] = { { 63.1, 49.8 } } } }
+local tags = { [176] = "elite", [314] = "elite", [386] = "dungeon" }
+QuestieDB.IsGroupQuest = function(id) return tags[id] == "elite" end
+QuestieDB.IsDungeonQuest = function(id) return tags[id] == "dungeon" end
+QuestieDB.IsRaidQuest = function() return false end
+QuestieDB.IsPvPQuest = function() return false end
+local ZoneDB = { GetUiMapIdByAreaId = function(_, area) return ({ [12] = 1429, [1519] = 1453, [1] = 1426 })[area] end }
+-- what it draws its map icons from: quest id -> true; 34 follows a quest in the log, 9999 is one it has no record of
+local AvailableQuests = { __availableQuests = { [34] = true, [40] = true, [176] = true, [314] = true, [386] = true, [9999] = true } }
+if flags:find("oldquestie") then AvailableQuests = {} end
 if not flags:find("noquestie") then
-  QuestieLoader = { ImportModule = function(_, name) return name == "QuestieDB" and QuestieDB or ZoneDB end }
+  local modules = { QuestieDB = QuestieDB, ZoneDB = ZoneDB, AvailableQuests = AvailableQuests }
+  QuestieLoader = { ImportModule = function(_, name) return modules[name] or {} end }
 end
 -- DungeonJournal, in the shape of its own tables (made-up entries, not its data)
 local completedIds = { [65] = true, [132] = true }

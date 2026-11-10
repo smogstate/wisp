@@ -74,6 +74,22 @@ The one place Wisp looks past Auctionator's public API is its price table (`Auct
 
 Not yet run in the game: the recipe calls (`GetRecipeInfo`, `GetRecipeSchematic`, and whether `GetAllRecipeIDs` exists there), the bag scan, and Auctionator's API from another addon.
 
+## Questie: every open quest — built 2026-11-10
+
+Denis: "why don't we have access to the quests db? I can't ask, for example, what elite quests are available in the area". Until now Wisp asked Questie only about quests already in the log, and about dungeon quests.
+
+- **Questie already works out which quests a character can pick up** — level, class, race, earlier quests — and draws its map icons from that list (`AvailableQuests.__availableQuests`). The addon exports that list at logout, 600 quests at most: level, required level, who gives each and where, the items it asks for.
+- **Kind** comes from Questie's own tests: elite (the game's tag for a group quest), dungeon, raid, PvP; everything else is normal.
+- **`available_quests`** ([Tools](Tools.md)): with nothing, how many quests are open in each zone and how many of them are elite and so on; with a zone (a name, or `here`), that zone's quests, **nearest first** when the character stands in it; with a kind, only that kind. Every quest giver has a ref, so "the elite quests here" can end in a waypoint card.
+- **Joined to the item graph**: an item an open quest asks for says so.
+
+Limits:
+
+- **It is Questie's view, with Questie's settings.** Quests far below the character's level are left out unless Questie is set to show them.
+- **As of the last logout.** A quest picked up or finished since is still listed until the next one.
+- The list is read from a field Questie keeps for itself, not a documented call; if a Questie version moves it, the tool says the list was not found.
+- How complete Questie's quest data is for Forever's new content is not known. Not yet run in the game.
+
 ## The item graph — built 2026-11-10
 
 Denis: "build a graph of items, what is used for what, for the LLM to navigate; bind recipes, items, quests".
