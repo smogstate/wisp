@@ -294,7 +294,22 @@ for id in pairs(raw) do QuestieDB.QuestPointers[id] = true end
 QuestieDB.QueryQuestSingle = function(id, key) return raw[id] and raw[id][key] end
 QuestieDB.QueryNPCSingle = function(id, key) return npcs[id] and npcs[id][key] end
 QuestieDB.QueryObjectSingle = function(id, key) return objects[id] and objects[id][key] end
-QuestieDB.QueryItemSingle = function(id, key) return questieItems[id] and questieItems[id][key] end
+-- its whole item list, a field at a time: a recipe scroll nobody here owns, sold by one vendor of each faction
+npcs[3005] = { name = "Horde Vendor", friendlyToFaction = "H", spawns = { [12] = { { 10, 10 } } } }
+local rawItems = {
+  [7090] = { name = "Pattern: Not Learned Yet", vendors = { 3005, 1347 } },
+  [2321] = { name = "Fine Thread", vendors = { 1347 } },
+  [4306] = { name = "Silk Cloth", npcDrops = { 100, 101, 102, 103, 104, 105, 106 }, objectDrops = { 77 } },
+  [6948] = { name = "Hearthstone" },                              -- comes from nowhere: left out
+  [5000] = { name = "Horde Only Thing", vendors = { 3005 } },     -- nobody sells it to this character: left out
+}
+QuestieDB.ItemPointers = {}
+for id in pairs(rawItems) do QuestieDB.ItemPointers[id] = true end
+QuestieDB.IsFriendlyToPlayer = function(side) return not side or side == "AH" or side == "A" end
+QuestieDB.QueryItemSingle = function(id, key)
+  if rawItems[id] then return rawItems[id][key] end
+  return questieItems[id] and questieItems[id][key]
+end
 local QuestiePlayer = { HasRequiredRace = function(mask) return mask % 2 == 1 end,                   -- a human
                         HasRequiredClass = function(mask) return math.floor(mask / 128) % 2 == 1 end }   -- a mage
 local QuestieCorrections = { hiddenQuests = { [9002] = true } }
@@ -381,6 +396,7 @@ C_TradeSkillUI = {
   GetFilteredRecipeIDs = function() return { 1, 3839, 8760, 3813, 8791 } end,
   GetRecipeInfo = function(id) return recipes[id].info end,
   GetRecipeSchematic = function(id) return recipes[id].plan end,
+  GetRecipeSourceText = function(id) return id == 8791 and "|cffffd100Vendor:|r Alexandra Bolero" or nil end,
 }
 local bagSlots = { [0] = { { itemID = 4306, stackCount = 20, itemName = "Silk Cloth" }, { itemID = 4306, stackCount = 12, itemName = "Silk Cloth" },
                            false, { itemID = 6948, stackCount = 1, itemName = "Hearthstone", isBound = true } },
@@ -602,6 +618,7 @@ if mode == "snapshot" then
   boot.scripts.OnEvent(boot, "PLAYER_LOGOUT")
   out("SNAPSHOT " .. tostring(WispSnapshot))
   if WispQuests then out("QUESTS " .. WispQuests .. " " .. WispQuestsKey) end
+  if WispItems then out("ITEMS " .. WispItems .. " " .. WispItemsKey) end
   if SAVED then
     local days = {}
     for _, d in ipairs(SAVED.market.days) do days[#days + 1] = number(d.day - SAVED.market.today) .. ":" .. number(#d.rows / 4) end

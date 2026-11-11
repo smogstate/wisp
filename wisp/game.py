@@ -102,6 +102,8 @@ class Game:
         except ValueError as e:
             return cls(None, str(e))
         game.saved_file = saved
+        from .questdb import read_index
+        game.graph.attach(read_index(saved, "WispItems", "items"))   # Questie's whole item list, when the addon has read it
         return game
 
     def questdb(self):
@@ -1125,9 +1127,24 @@ class Game:
             return {"error": "No recipes have been read yet. The game only shows a profession's recipes while its window "
                              "is open: the player opens the profession window once, logs out, and asks again.",
                     "professions": self.snapshot.get("professions")}
-        wanted, show = args.get("profession"), args.get("show", "skill_up")
+        wanted, show, search = args.get("profession"), args.get("show", "skill_up"), args.get("search")
         if show not in ("skill_up", "all"):
             return {"error": "show must be skill_up or all"}
+        if isinstance(search, str) and search.strip():   # one recipe by name, learned or not, and how to come by it
+            words = _clean(search, 80).lower().split()
+            hits = [r for b in books for r in b["recipes"]
+                    if all(w in (r["name"] + " " + (self.crafting.name(r["makes"]) if r["makes"] else "")).lower() for w in words)]
+            if not hits:
+                return {"found": 0, "note": "No recipe of the professions read so far is named like that ("
+                                            + ", ".join(b["profession"] for b in books) + "). The game lists a profession's recipes, "
+                                            "learned or not, while its window is open. For the recipe item itself, try item_links."}
+            return {"found": len(hits), "recipes": [
+                {**self.crafting.describe(r), "profession": r["profession"],
+                 **({} if r["learned"] else {"how_to_learn": self.graph.learn_from(r) or "not known: a trainer may teach it"})}
+                for r in hits[:12]],
+                "note": "how_to_learn is for recipes not learned yet: the_game_says is the game's own text; recipe_items are the "
+                        "items that teach it, from the Questie addon, with who sells or drops each and places that have refs "
+                        "for the waypoint tool. Vendors of the other faction are left out."}
         if isinstance(wanted, str) and wanted.strip():
             books = [b for b in books if b["profession"].lower() == wanted.strip().lower()]
             if not books:
@@ -1288,9 +1305,10 @@ class Game:
             return {"error": "item must be an item name"}
         found = self.graph.find(_clean(name, 80))
         if not found:
-            return {"error": f"Wisp knows no item named like '{_clean(name, 80)}'. It knows the items the character carries, "
-                             "crafts with, crafts, is asked for by quests, sees drop from dungeon bosses, or has a price for. "
-                             "Names are as the player's game writes them."}
+            return {"error": f"Wisp knows no item named like '{_clean(name, 80)}'. Names are as the player's game writes them."
+                             + ("" if self.graph.world else " So far it knows only the items the character carries, crafts with, crafts, "
+                                "is asked for by quests or has a price for: Questie's whole item list is read by Wisp's addon in the "
+                                "background about a minute after login, and is here after the next logout.")}
         if len(found) > 1:
             return {"several_items_match": [self.graph.names[i] for i in found], "note": "Ask again with one of these names exactly."}
         out = self.graph.around(found[0], self.crafting)
@@ -1300,8 +1318,8 @@ class Game:
         out["note"] = ("One step in every direction from this item. Follow a link with the tool for that kind of thing: "
                        "recipes and craft_plan for a recipe, quests or dungeon for a quest or a boss, price_history for the "
                        "price, item_links again for another item. Every place has a ref for the waypoint tool. Recipes are "
-                       "only the character's own; sellers, drops and quest needs come from the Questie addon and are listed "
-                       "only for items that matter to this character, the first few of each"
+                       "only those of the character's own professions; sellers, drops and quest needs come from the Questie "
+                       "addon, the first few of each, and never the other faction's vendors"
                        + ("." if addons.get("questie") else "; Questie was not available at the last logout, so those are missing."))
         return out
 
@@ -1799,12 +1817,15 @@ TOOLS = [
         "description": "The recipes of the player's professions, read from the game: for each, its skill-up colour "
                        "(orange, yellow, green, grey), the skill at which it turns grey, what it makes, and its "
                        "materials with how many are in the bags and the auction price of each. By default only the "
-                       "recipes that can still give skill; show=all lists every recipe. This is the only source of "
-                       "recipes and materials: never state them from memory.",
+                       "recipes that can still give skill; show=all lists every recipe. With search (part of a "
+                       "recipe's name or of what it makes): that recipe, learned or not, and for one not learned yet "
+                       "how to come by it: the recipe item that teaches it and who sells or drops that item, with "
+                       "places. Use search for 'where do I buy the recipe for X', 'can I learn X'. This is the only "
+                       "source of recipes and materials: never state them from memory.",
         "input_schema": {
             "type": "object",
             "properties": {"profession": {"type": "string", "description": "Leave out for every profession read so far."},
-                           "show": {"type": "string", "enum": ["skill_up", "all"]}},
+                           "show": {"type": "string", "enum": ["skill_up", "all"]}, "search": {"type": "string"}},
             "additionalProperties": False,
         },
     },
@@ -1878,7 +1899,8 @@ TOOLS = [
         "description": "Everything one step from an item, to follow how things connect: its auction price and the "
                        "count in the bags, the character's recipes that use it and those that make it, the quests "
                        "that ask for it (in the log or for a dungeon), the dungeon bosses that drop it, who sells "
-                       "it, what creatures drop it and what objects hold it, each with places that have refs. Use "
+                       "it, what creatures drop it and what objects hold it, each with places that have refs, for "
+                       "any item in the game, recipe items included (and which recipe one teaches). Use "
                        "it for 'what is this for', 'where do I get this', 'is it worth keeping', and walk on from "
                        "its answer one item at a time. Never state a use or a source of an item from memory.",
         "input_schema": {

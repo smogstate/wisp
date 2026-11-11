@@ -140,6 +140,7 @@ RU = {
     "none yet: open a mailbox that holds auction mail, then log out": "пока нет: откройте почтовый ящик с письмами аукциона, затем выйдите",
     "Looting measured by Wisp": "Добыча, измеренная Wisp", "{looted} corpses and nodes over {days} days": "трупов и мест сбора: {looted}, дней: {days}",
     "none yet: it starts with the first thing you loot after this update": "пока нет: начнётся с первой добычи после этого обновления",
+    "Every item from Questie": "Все предметы из Questie", "{n} items with who sells or drops them": "предметов с продавцами и источниками: {n}",
     "Every quest from Questie": "Все задания из Questie", "{n} quests this character could take": "заданий, доступных этому персонажу: {n}",
     "not yet: Wisp's addon reads them in the background about a minute after login; log out after that": "пока нет: аддон Wisp читает их в фоне примерно через минуту после входа; после этого выйдите из игры",
     "Quest locations found": "Найдено мест заданий",

@@ -50,6 +50,8 @@ def make_wow_dir(tmp: Path, flags="") -> Path:
     # the game writes saved variables as Lua assignments
     quests = next((l.split(" ") for l in lines if l.startswith("QUESTS ")), None)
     kept = f'WispQuests = "{quests[1]}"\nWispQuestsKey = "{quests[2]}"\n' if quests else ""
+    items = next((l.split(" ") for l in lines if l.startswith("ITEMS ")), None)
+    kept += f'WispItems = "{items[1]}"\nWispItemsKey = "{items[2]}"\n' if items else ""
     (saved / "Wisp.lua").write_text(f'\nWispData = {{\n["recipes"] = {{\n}},\n}}\nWispSnapshot = "{snapshot}"\n{kept}', encoding="utf-8")
     return tmp
 
@@ -1555,7 +1557,26 @@ def test_quest_search(tmp: Path):
     checked = {what: (status, detail) for what, status, detail in check(wow, call_model=False)}
     assert checked["Every quest from Questie"] == ("ok", f"{len(db.quests)} quests this character could take")
 
+    # every item, too: who sells a recipe the character has never held
+    assert sorted(game.graph.world) == [2321, 4306, 7090], "items that come from nowhere, or only from the other faction's vendors, are left out"
+    found = run_tool(game, "recipes", {"search": "learned yet"})
+    assert found["found"] == 1 and found["recipes"][0]["learned"] is False
+    how = found["recipes"][0]["how_to_learn"]
+    assert how["the_game_says"] == "Vendor: Alexandra Bolero", "the game's own text, its colour codes stripped"
+    scroll = how["recipe_items"][0]
+    assert scroll["item"] == "Pattern: Not Learned Yet" and [v["name"] for v in scroll["sold_by"]] == ["Alexandra Bolero"], "not the Horde's vendor"
+    assert scroll["sold_by"][0]["where"][0]["zone"] == "Stormwind City"
+    assert "error" not in run_tool(game, "waypoint", {"refs": [scroll["sold_by"][0]["where"][0]["ref"]]})
+    assert "how_to_learn" not in run_tool(game, "recipes", {"search": "bolt of silk"})["recipes"][0], "a learned recipe needs none"
+    assert run_tool(game, "recipes", {"search": "no such dish"})["found"] == 0
+    link = run_tool(game, "item_links", {"item": "pattern not learned"})   # no colon typed: found all the same
+    assert link["item"] == "Pattern: Not Learned Yet" and link["sold_by"][0]["name"] == "Alexandra Bolero"
+    assert link["teaches"] == {"recipe_id": 8791, "recipe": "Not Learned Yet", "profession": "Tailoring", "already_learned": False}
+    assert checked["Every item from Questie"] == ("ok", "3 items with who sells or drops them")
+
     plain = Game.load(make_wow_dir(tmp / "plain"))   # not read yet: says how it comes
+    assert "about a minute after login" in run_tool(plain, "item_links", {"item": "Pattern: Not Learned Yet"})["error"]
+    assert "how_to_learn" in run_tool(plain, "recipes", {"search": "learned yet"})["recipes"][0], "the game's own text is there without Questie's list"
     assert "about a minute after login" in run_tool(plain, "quest_search", {"name": "defias"})["error"]
 
 

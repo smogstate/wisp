@@ -5,9 +5,11 @@ it, the quests that ask for it, the bosses that drop it, who sells it, what
 drops it in the open world, and its price. The model asks for one item and
 gets everything one step away, then follows whichever link matters.
 
-Built in memory from the current snapshot each time it is read.
-ponytail: not kept between snapshots; into the SQLite file beside the prices
-once the addon hands over more items than the ones that matter today.
+Built in memory from the current snapshot each time it is read. On top of it
+comes Questie's whole item list, when the addon has read it (WispItems in the
+saved file): who sells, drops or holds any item at all, and with it the recipe
+items ("Recipe: Herb Baked Egg") that teach the recipes of the character's
+professions, matched by the name after the colon.
 """
 from .crafting import _text, coins
 from .i18n import t
@@ -20,7 +22,11 @@ def _list(value) -> list:
 class ItemGraph:
     def __init__(self, game):
         craft, snapshot = game.crafting, game.snapshot
-        self.gathering = game.gathering
+        self.game, self.gathering = game, game.gathering
+        self.world: dict[int, dict] = {}      # item -> its entry in Questie's whole item list
+        self.people: dict[str, dict] = {"npc": {}, "object": {}}
+        self.maps: dict[int, str] = {}
+        self.teachers: dict[str, list[int]] = {}   # what a recipe item's name says it teaches -> those items
         self.names: dict[int, str] = dict(craft.names)
         self.used_in: dict[int, list] = {}    # item -> recipes that need it
         self.made_by: dict[int, list] = {}    # item -> recipes that make it
@@ -84,15 +90,68 @@ class ItemGraph:
                     found[key + "_in_all"] = total   # Questie knows more than the few listed here
             self.sources[item] = {k: v for k, v in found.items() if v}
 
+    def attach(self, index: dict | None):
+        """Questie's whole item list, as the addon read it."""
+        if not index:
+            return
+        for kind, rows in (("npc", index.get("npcs")), ("object", index.get("objects"))):
+            self.people[kind] = {r["id"]: r for r in _list(rows) if isinstance(r, dict) and isinstance(r.get("id"), int)}
+        self.maps = {m["id"]: m.get("name") for m in _list(index.get("maps")) if isinstance(m, dict) and isinstance(m.get("id"), int)}
+        for entry in _list(index.get("items")):
+            name = _text(entry.get("name"), 80) if isinstance(entry, dict) else None
+            if not name or not isinstance(entry.get("id"), int) or isinstance(entry["id"], bool):
+                continue
+            self.world[entry["id"]] = entry
+            self.names.setdefault(entry["id"], name)
+            if ":" in name:   # "Recipe: Herb Baked Egg", "Pattern: ...", "Plans: ...": in any language, what follows the colon
+                self.teachers.setdefault(name.split(":", 1)[1].strip().lower(), []).append(entry["id"])
+
+    def _from_world(self, item: int) -> dict:
+        """Who sells an item, what drops it and what holds it, from the whole list; places get refs."""
+        entry, label = self.world.get(item), self.names.get(item, f"item {item}")
+        if not entry:
+            return {}
+
+        def people(kind, ids):
+            out = []
+            for some in _list(ids):
+                known = self.people[kind].get(some)
+                if known and _text(known.get("name"), 80):
+                    spot = [{"map": known["map"], "zone": self.maps.get(known["map"]), "x": known.get("x"), "y": known.get("y")}] if known.get("map") else []
+                    out.append({"kind": kind, "name": known["name"], "places": spot})
+            return out
+        found = {"sold_by": self.game._who(f"w{item}.vendor", people("npc", entry.get("v")), t("sells {item}", item=label)),
+                 "dropped_by": self.game._who(f"w{item}.drop", people("npc", entry.get("d")), t("drops {item}", item=label)),
+                 "found_in": self.game._who(f"w{item}.object", people("object", entry.get("o")), t("holds {item}", item=label))}
+        for key, total in (("dropped_by", entry.get("dn")), ("found_in", entry.get("on"))):
+            if isinstance(total, int) and total > len(found[key]):
+                found[key + "_in_all"] = total
+        return {k: v for k, v in found.items() if v}
+
+    def learn_from(self, recipe: dict) -> dict:
+        """How a recipe is come by: the recipe item that teaches it and who sells or drops that, and the game's own word."""
+        out = {}
+        if recipe.get("source"):
+            from .game import _clean   # game text: no colour codes or links
+            out["the_game_says"] = _clean(recipe["source"], 200)
+        made = self.names.get(recipe["makes"], "") if recipe["makes"] else ""
+        scrolls = self.teachers.get(recipe["name"].strip().lower()) or self.teachers.get(made.strip().lower()) or []
+        if scrolls:
+            out["recipe_items"] = [{"item": self.names[s], **(self._from_world(s) or {"source": "none known"})} for s in scrolls[:3]]
+        return out
+
     def find(self, query: str) -> list[int]:
         """Items by name: the exact one, else those containing the words, shortest name first."""
-        query = query.strip().lower()
+        from .questdb import fold   # as people type names: case, ё and punctuation do not matter
+        query = fold(query)
         if not query:
             return []
-        exact = [item for item, name in self.names.items() if name.lower() == query]
+        folded = [(fold(name), name, item) for item, name in self.names.items()]
+        exact = [item for text, _, item in folded if text == query]
         if exact:
             return exact[:1]
-        near = [(len(name), name, item) for item, name in self.names.items() if query in name.lower()]
+        words = query.split()
+        near = [(len(name), name, item) for text, name, item in folded if all(w in text for w in words)]
         return [item for _, _, item in sorted(near)[:8]]
 
     def around(self, item: int, craft) -> dict:
@@ -118,7 +177,14 @@ class ItemGraph:
             out["asked_for_by_quests"] = self.quests[item]
         if item in self.bosses:
             out["dropped_by_bosses"] = self.bosses[item]
-        out.update(self.sources.get(item, {}))
+        out.update(self.sources.get(item) or self._from_world(item))
+        if ":" in out["item"]:   # a recipe item: which of the character's recipes it teaches
+            taught = out["item"].split(":", 1)[1].strip().lower()
+            for r in craft.recipes.values():
+                if taught in (r["name"].lower(), self.names.get(r["makes"], "").lower() if r["makes"] else None):
+                    out["teaches"] = {"recipe_id": r["id"], "recipe": r["name"], "profession": r["profession"],
+                                      "already_learned": r["learned"]}
+                    break
         # gathered: a herb's node carries the herb's own name, an ore's vein is the object Questie says holds it
         gather = self.gathering
         for name in dict.fromkeys([out["item"]] + [o["name"] for o in out.get("found_in", [])]):

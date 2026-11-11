@@ -21,8 +21,8 @@ from pathlib import Path
 _read: dict = {}   # saved file -> ((mtime, size), index or None)
 
 
-def read_index(saved: Path | None) -> dict | None:
-    """The quest index from the saved file, or None when the addon has not written one yet."""
+def read_index(saved: Path | None, name: str = "WispQuests", holds: str = "quests") -> dict | None:
+    """An index the addon keeps in the saved file (the quests, or WispItems: the items), or None when it has not written it yet."""
     if saved is None:
         return None
     try:
@@ -30,18 +30,18 @@ def read_index(saved: Path | None) -> dict | None:
     except OSError:
         return None
     stamp = (stat.st_mtime_ns, stat.st_size)
-    if saved in _read and _read[saved][0] == stamp:
-        return _read[saved][1]
+    if (saved, name) in _read and _read[saved, name][0] == stamp:
+        return _read[saved, name][1]
     index = None
     try:
-        m = re.search(r'^WispQuests = "([A-Za-z0-9+/=]+)"', saved.read_text(encoding="utf-8", errors="replace"), re.M)
+        m = re.search(rf'^{name} = "([A-Za-z0-9+/=]+)"', saved.read_text(encoding="utf-8", errors="replace"), re.M)
         if m:
             data = json.loads(base64.b64decode(m.group(1)))
-            if isinstance(data, dict) and data.get("v") == 1 and isinstance(data.get("quests"), list):
+            if isinstance(data, dict) and data.get("v") == 1 and isinstance(data.get(holds), list):
                 index = data
     except (OSError, ValueError):
         pass
-    _read[saved] = (stamp, index)
+    _read[saved, name] = (stamp, index)
     return index
 
 

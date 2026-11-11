@@ -116,7 +116,9 @@ class Crafting:
             stale = read_at   # the colour was read at a lower skill and may have dropped since
         return {"id": recipe_id, "name": name, "profession": book["profession"], "learned": raw.get("learned") is not False,
                 "colour": colour, "colour_read_at_skill": stale, "grey_at": grey_at,
-                "makes": makes, "makes_count": _int(raw.get("makesMin"), 1, 10000) or 1, "reagents": reagents}
+                "makes": makes, "makes_count": _int(raw.get("makesMin"), 1, 10000) or 1, "reagents": reagents,
+                # the game's own word on how an unlearned recipe is come by; cleaned of colour codes where it is shown
+                "source": raw["source"][:400] if isinstance(raw.get("source"), str) else None}
 
     # -- what the tools return ------------------------------------------------
 

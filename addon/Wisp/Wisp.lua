@@ -186,34 +186,65 @@ end
 
 local QUESTS_PER_SLICE = 200
 
-local function questIndexKey(DB)
+local function indexKey(DB, pointers, ...)
   local meta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
   local okV, version = pcall(meta, "Questie", "Version")
   local count = 0
-  for _ in pairs(DB.QuestPointers) do count = count + 1 end
+  for _ in pairs(pointers) do count = count + 1 end
+  return table.concat({ okV and tostring(version) or "?", GetLocale(), count, ... }, "|")
+end
+
+local function questIndexKey(DB)
   local _, race = UnitRace("player")
   local _, class = UnitClass("player")
-  return table.concat({ okV and tostring(version) or "?", GetLocale(), tostring(race), tostring(class), count }, "|")
+  return indexKey(DB, DB.QuestPointers, tostring(race), tostring(class))
+end
+
+local function ask(fn, id, field)   -- one field of one Questie record, or nil
+  if type(fn) ~= "function" then return nil end
+  local ok, value = pcall(fn, id, field)
+  if ok then return value end
+end
+
+local function ids(list)
+  if type(list) ~= "table" then return nil end
+  local out = {}
+  for _, v in ipairs(list) do if type(v) == "number" then out[#out + 1] = v end end
+  return #out > 0 and out or nil
+end
+
+-- Names for a set of ids, each with one place where Questie has one, and the maps those places are on.
+local function namer(ZoneDB)
+  local maps, mapSeen = {}, {}
+  return function(fn, wanted, located)
+    local out, n = {}, 0
+    for id in pairs(wanted) do
+      n = n + 1
+      if n % 300 == 0 then coroutine.yield() end
+      local name = ask(fn, id, "name")
+      if type(name) == "string" and name ~= "" then
+        local entry = { id = id, name = name }
+        local spawns = located and ask(fn, id, "spawns")
+        local okP, found = pcall(places, { spawns = type(spawns) == "table" and spawns or nil }, ZoneDB)
+        local p = okP and found[1]
+        if p then
+          entry.map, entry.x, entry.y = p.map, p.x, p.y
+          if not mapSeen[p.map] then mapSeen[p.map] = true; maps[#maps + 1] = { id = p.map, name = p.zone } end
+        end
+        out[#out + 1] = entry
+      end
+    end
+    return out
+  end, maps
 end
 
 local function buildQuestIndex(DB, ZoneDB, key)
   local Player, Corrections = questieModule("QuestiePlayer"), questieModule("QuestieCorrections")
   local hidden = type(Corrections) == "table" and type(Corrections.hiddenQuests) == "table" and Corrections.hiddenQuests or {}
-  local function ask(fn, id, field)
-    if type(fn) ~= "function" then return nil end
-    local ok, value = pcall(fn, id, field)
-    if ok then return value end
-  end
   local function allowed(check, mask)   -- a quest for another race or class is not this character's
     if type(mask) ~= "number" or mask == 0 or type(Player) ~= "table" or type(Player[check]) ~= "function" then return true end
     local ok, yes = pcall(Player[check], mask)
     return not ok or yes and true or false
-  end
-  local function ids(list)
-    if type(list) ~= "table" then return nil end
-    local out = {}
-    for _, v in ipairs(list) do if type(v) == "number" then out[#out + 1] = v end end
-    return #out > 0 and out or nil
   end
   local function firsts(list, at)   -- objective records: the id is in one slot of each
     local out = {}
@@ -271,45 +302,79 @@ local function buildQuestIndex(DB, ZoneDB, key)
       quests[#quests + 1] = q
     end
   end
-  -- who and what the quests name, each with one place where Questie has one
-  local maps, mapSeen = {}, {}
-  local function named(fn, wanted, located)
-    local out, n = {}, 0
-    for id in pairs(wanted) do
-      n = n + 1
-      if n % 300 == 0 then coroutine.yield() end
-      local name = ask(fn, id, "name")
-      if type(name) == "string" and name ~= "" then
-        local entry = { id = id, name = name }
-        local spawns = located and ask(fn, id, "spawns")
-        local okP, found = pcall(places, { spawns = type(spawns) == "table" and spawns or nil }, ZoneDB)
-        local p = okP and found[1]
-        if p then
-          entry.map, entry.x, entry.y = p.map, p.x, p.y
-          if not mapSeen[p.map] then mapSeen[p.map] = true; maps[#maps + 1] = { id = p.map, name = p.zone } end
-        end
-        out[#out + 1] = entry
-      end
-    end
-    return out
-  end
+  local named, maps = namer(ZoneDB)   -- who and what the quests name, each with one place where Questie has one
   local npcs = named(DB.QueryNPCSingle, wantNpc, true)
   local objects = named(DB.QueryObjectSingle, wantObject, true)
   local items = named(DB.QueryItemSingle, wantItem, false)
   return { v = 1, key = key, quests = quests, npcs = npcs, objects = objects, items = items, maps = maps }
 end
 
-local questIndexRun
-local function questIndexStep()
-  if not questIndexRun then return end
-  local ok, index = coroutine.resume(questIndexRun)
-  if not ok then questIndexRun = nil; return end   -- whatever went wrong, the index kept from before stays
-  if coroutine.status(questIndexRun) ~= "dead" then return C_Timer.After(0, questIndexStep) end
-  questIndexRun = nil
-  if type(index) == "table" then
-    local okJ, text = pcall(function() return E.EncodeBase64(E.SerializeJSON(index)) end)
-    if okJ and type(text) == "string" then WispQuests, WispQuestsKey = text, index.key end
+-- Questie's whole item list, the same way (WispItems, WispItemsKey): every item somebody sells,
+-- something drops or something holds, so that "who sells this recipe" has an answer for an item
+-- the character has never touched. Per item: vendors friendly to this character (up to four),
+-- the first few creatures and objects it comes from and how many there are in all.
+local function buildItemIndex(DB, ZoneDB, key)
+  local Q = DB.QueryItemSingle
+  local friendly = {}
+  local function sells(npc)   -- not the other faction's vendors
+    if friendly[npc] == nil then
+      local ok, yes = pcall(DB.IsFriendlyToPlayer, ask(DB.QueryNPCSingle, npc, "friendlyToFaction"))
+      friendly[npc] = (not ok or yes) and true or false
+    end
+    return friendly[npc]
   end
+  local function first(list, most)
+    local out = {}
+    for i = 1, math.min(#list, most) do out[i] = list[i] end
+    return out
+  end
+  local order = {}
+  for id in pairs(DB.ItemPointers) do if type(id) == "number" then order[#order + 1] = id end end
+  table.sort(order)
+  local items, wantNpc, wantObject = {}, {}, {}
+  for i, id in ipairs(order) do
+    if i % QUESTS_PER_SLICE == 0 then coroutine.yield() end
+    if #items >= 30000 then break end
+    local name = ask(Q, id, "name")
+    if type(name) == "string" and name ~= "" then
+      local vendors, drops, objects = {}, ids(ask(Q, id, "npcDrops")) or {}, ids(ask(Q, id, "objectDrops")) or {}
+      for _, npc in ipairs(ids(ask(Q, id, "vendors")) or {}) do
+        if #vendors < 4 and sells(npc) then vendors[#vendors + 1] = npc end
+      end
+      if #vendors + #drops + #objects > 0 then
+        local entry = { id = id, name = name }
+        if #vendors > 0 then entry.v = vendors end
+        if #drops > 0 then entry.d, entry.dn = first(drops, 3), #drops end
+        if #objects > 0 then entry.o, entry.on = first(objects, 2), #objects end
+        for _, npc in ipairs(vendors) do wantNpc[npc] = true end
+        for _, npc in ipairs(entry.d or {}) do wantNpc[npc] = true end
+        for _, object in ipairs(entry.o or {}) do wantObject[object] = true end
+        items[#items + 1] = entry
+      end
+    end
+  end
+  local named, maps = namer(ZoneDB)
+  local npcs = named(DB.QueryNPCSingle, wantNpc, true)
+  local objects = named(DB.QueryObjectSingle, wantObject, true)
+  return { v = 1, key = key, items = items, npcs = npcs, objects = objects, maps = maps }
+end
+
+-- One index at a time, a slice per frame; what was kept before stays if anything goes wrong.
+local indexRun, indexQueue = nil, {}
+local function indexStep()
+  if not indexRun then
+    indexRun = table.remove(indexQueue, 1)
+    if not indexRun then return end
+  end
+  local ok, index = coroutine.resume(indexRun.run)
+  if ok and coroutine.status(indexRun.run) ~= "dead" then return C_Timer.After(0, indexStep) end
+  local keep = indexRun.keep
+  indexRun = nil
+  if ok and type(index) == "table" then
+    local okJ, text = pcall(function() return E.EncodeBase64(E.SerializeJSON(index)) end)
+    if okJ and type(text) == "string" then keep(text, index.key) end
+  end
+  C_Timer.After(0, indexStep)   -- the next one, if any
 end
 
 local function startQuestIndex(tries)
@@ -321,11 +386,20 @@ local function startQuestIndex(tries)
     end
     return
   end
-  if questIndexRun or not (E and E.SerializeJSON and E.EncodeBase64) then return end
+  if indexRun or #indexQueue > 0 or not (E and E.SerializeJSON and E.EncodeBase64) then return end
   local okK, key = pcall(questIndexKey, DB)
-  if not okK or (key == WispQuestsKey and type(WispQuests) == "string") then return end
-  questIndexRun = coroutine.create(function() return buildQuestIndex(DB, ZoneDB, key) end)
-  questIndexStep()
+  if okK and not (key == WispQuestsKey and type(WispQuests) == "string") then
+    indexQueue[#indexQueue + 1] = { run = coroutine.create(function() return buildQuestIndex(DB, ZoneDB, key) end),
+                                    keep = function(text, built) WispQuests, WispQuestsKey = text, built end }
+  end
+  if type(DB.QueryItemSingle) == "function" and type(DB.ItemPointers) == "table" then
+    local okI, itemsKey = pcall(indexKey, DB, DB.ItemPointers, tostring((UnitFactionGroup("player"))))
+    if okI and not (itemsKey == WispItemsKey and type(WispItems) == "string") then
+      indexQueue[#indexQueue + 1] = { run = coroutine.create(function() return buildItemIndex(DB, ZoneDB, itemsKey) end),
+                                      keep = function(text, built) WispItems, WispItemsKey = text, built end }
+    end
+  end
+  indexStep()
 end
 
 ----------------------------------------------------------- dungeons ----
@@ -475,6 +549,7 @@ local function captureRecipes()
       -- "skill" is the skill this recipe's colour was read at, so its age can be told.
       book.recipes["r" .. id] = {
         id = id, name = r.name, learned = r.learned and true or false, colour = COLOUR[r.relativeDifficulty],
+        source = (not r.learned and T.GetRecipeSourceText) and T.GetRecipeSourceText(id) or nil,
         greyAt = r.maxTrivialLevel, skillUps = r.numSkillUps, skill = info.skillLevel,
         makes = plan.outputItemID, makesMin = plan.quantityMin, makesMax = plan.quantityMax, reagents = reagents,
       }
@@ -523,7 +598,7 @@ local function crafting(wanted)
       if r.makes then wanted[r.makes] = true end
       list[#list + 1] = { id = r.id, name = r.name, learned = r.learned, colour = r.colour, greyAt = r.greyAt,
                           skillUps = r.skillUps, skill = r.skill, makes = r.makes, makesName = r.makes and itemName(r.makes),
-                          makesMin = r.makesMin, makesMax = r.makesMax, reagents = reagents }
+                          makesMin = r.makesMin, makesMax = r.makesMax, reagents = reagents, source = r.source }
     end
     table.sort(list, function(a, b) return a.id < b.id end)
     books[#books + 1] = { profession = profession, seenAt = book.seenAt, skill = book.skill, max = book.max, recipes = list }
