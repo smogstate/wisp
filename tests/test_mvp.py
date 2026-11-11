@@ -1843,6 +1843,22 @@ def test_alts_recipes(tmp: Path):
     assert used == [{"recipe_id": 2538, "recipe": "Charred Wolf Meat", "profession": "Cooking", "needs_each": 1, "colour": "green",
                      "makes": used[0]["makes"], "crafter": "another character of yours: Warrior, level 30"}]
     assert "Realm" not in json.dumps(run_tool(game, "recipes", {"show": "all"})), "an alt is told by class and level, never by name or realm"
+    # what the other characters hold is taken first: a bolt in the cook's bank saves a craft, dye from the shared bank and the cook's bags
+    assert game.crafting.alts == [{"label": "another character of yours: Warrior, level 30", "name": "Кук", "bags": {6260: 4},
+                                   "bank": {4305: 1, 2321: 5}}], "what is bound to an alt is no use to anyone else"
+    assert game.crafting.shared == {6260: 1}, "the bank the characters share, seen by the cook only: counted once"
+    tree = run_tool(game, "craft_tree", {"item": "Azure Silk Hood", "quantity": 3, "show": True})
+    assert [s["craft"] for s in tree["crafts_in_order"]] == ["5 × Bolt of Silk Cloth", "3 × Azure Silk Hood"]
+    held = {r["item"]: r for r in tree["materials"]}
+    assert held["Blue Dye"]["already_held"] == [{"where": "the bank your characters share", "count": 1},
+                                                {"where": "another character of yours: Warrior, level 30, bags", "count": 4}] and held["Blue Dye"]["to_buy"] == 1
+    assert held["Bolt of Silk Cloth"]["already_held"] == [{"where": "another character of yours: Warrior, level 30, bank", "count": 1}]
+    assert held["Silk Cloth"]["need"] == 20 and held["Fine Thread"]["already_held"] == [{"where": "your bags", "count": 3}], "the nearest stock first"
+    assert "Кук" not in json.dumps(tree, ensure_ascii=False), "the model is told class and level"
+    card = game.cards[-1]
+    assert card["table"]["rows"][0] == ["Blue Dye", 6, 5, 1, "–"]
+    assert card["table"]["notes"][1] == "Held elsewhere: Blue Dye: 1 — shared bank, 4 — Кук: bags; Bolt of Silk Cloth: 1 — Кук: bank", "the card names the character"
+    assert 'LIST Azure Silk Hood = "Blue Dye";1' in stub("paste", card["wisp"]), "the list is for the one dye still missing"
     assert all(b["owner"] is None for b in Game.load(make_wow_dir(tmp / "solo")).crafting.books)
 
 
@@ -1857,18 +1873,22 @@ def test_whole_graph(tmp: Path):
     tree = run_tool(game, "craft_tree", {"item": "Azure Silk Hood", "quantity": 3})
     assert [s["craft"] for s in tree["crafts_in_order"]] == ["6 × Bolt of Silk Cloth", "3 × Azure Silk Hood"], "the parts first"
     assert tree["crafts_in_order"][0]["who_can"] == "this character" and tree["professions_needed"] == ["Tailoring"]
-    raw = {r["item"]: r for r in tree["raw_materials"]}
-    assert set(raw) == {"Silk Cloth", "Blue Dye", "Fine Thread"}, raw.keys()
-    assert (raw["Silk Cloth"]["need"], raw["Silk Cloth"]["have"], raw["Silk Cloth"]["to_get"], raw["Silk Cloth"]["cost_of_all"]) == (24, 32, 0, "1g 8s")
-    assert raw["Blue Dye"]["need"] == 6 and raw["Fine Thread"]["need"] == 3 and raw["Fine Thread"]["sold_by_a_vendor"] is True
-    assert tree["no_auction_price_for"] == ["Blue Dye", "Fine Thread"] and tree["cost_of_the_priced_ones"] == "1g 8s" and tree["raw_materials_cost"] is None
-    assert tree["product_listed_for"] == "2g 70s"
-    # an intermediate cheaper to buy than to make is named: a bolt is listed at 21s, four silk cost 18s, so here making wins
-    assert "cheaper_to_buy_than_to_make" not in tree
-    shown = run_tool(game, "craft_tree", {"item": "Azure Silk Hood", "show": True})
+    held = {r["item"]: r for r in tree["materials"]}
+    assert set(held) == {"Silk Cloth", "Blue Dye", "Fine Thread"}, held.keys()
+    assert held["Silk Cloth"] == {"item": "Silk Cloth", "need": 24, "already_held": [{"where": "your bags", "count": 24}], "to_buy": 0, "each": "4s 50c"}
+    assert held["Blue Dye"] == {"item": "Blue Dye", "need": 6, "to_buy": 6} and held["Fine Thread"]["to_buy"] == 0
+    assert tree["no_auction_price_for"] == ["Blue Dye"] and tree["to_buy_in_all"] is None and tree["product_listed_for"] == "2g 70s"
+    shown = run_tool(game, "craft_tree", {"item": "Azure Silk Hood", "quantity": 3, "show": True})
     card = game.cards[-1]
-    assert "shown" in shown and card["heading"] == "Crafting, down to raw materials" and card["table"]["title"] == "Raw materials for 1 × Azure Silk Hood"
-    assert card["table"]["rows"][0] == ["Silk Cloth", 8, 32, "4s 50c", "36s"] and "2 × Bolt of Silk Cloth → 1 × Azure Silk Hood" in card["table"]["notes"][0]
+    assert "shown" in shown and card["heading"] == "Shopping list, down to raw materials" and card["table"]["title"] == "To craft 3 × Azure Silk Hood"
+    assert card["table"]["sub"] == "to buy: 1 item, price unknown · 2 kinds of craft"
+    assert card["table"]["rows"] == [["Blue Dye", 6, "–", 6, "–"], ["Fine Thread", 3, 3, "–", "–"], ["Silk Cloth", 24, 24, "–", "–"]]
+    assert "6 × Bolt of Silk Cloth → 3 × Azure Silk Hood" in card["table"]["notes"][0]
+    # the card's button makes the shopping list for exactly what is missing
+    listed = stub("paste", card["wisp"])
+    assert 'LIST Azure Silk Hood = "Blue Dye";6' in listed, listed
+    run_tool(game, "craft_tree", {"item": "Bolt of Silk Cloth", "show": True})
+    assert "wisp" not in game.cards[-1] and game.cards[-1]["table"]["sub"].startswith("nothing to buy: you hold it all"), "all held: no button"
     # a profession nobody of the player's has: still broken down, and it says who cannot
     egg = run_tool(game, "craft_tree", {"item": "Herb Baked Egg"})
     assert egg["crafts_in_order"][0]["who_can"] == "none of your characters has learned it: needs Cooking" and egg["professions_needed"] == ["Cooking"]

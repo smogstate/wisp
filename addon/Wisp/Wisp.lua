@@ -1358,6 +1358,22 @@ local function marketDays()
   return { day0 = day0, today = today, oldest = math.min(lowest, today), days = days }
 end
 
+-- What the account's other characters hold, as each was at its own last logout (bags) and last look
+-- at its bank: so a shopping list can count what is already there. The name is for the card the player
+-- reads; the overlay tells the model only class and level.
+local function otherCharacters(wanted)
+  local out = {}
+  for key, me in pairs(type(WispData) == "table" and type(WispData.chars) == "table" and WispData.chars or {}) do
+    if key ~= myKey() and type(me) == "table" and #out < 40 then
+      local bank = type(WispData.bank) == "table" and WispData.bank[key] or nil
+      for _, line in ipairs(type(me.bags) == "table" and me.bags or {}) do wanted[line.id] = true end
+      for _, line in ipairs(type(bank) == "table" and type(bank.items) == "table" and bank.items or {}) do wanted[line.id] = true end
+      out[#out + 1] = { name = me.name, class = me.class, level = me.level, bags = me.bags, bank = bank }
+    end
+  end
+  return out
+end
+
 local inboxWorks = function() return false end   -- set by the one-click inbox, further down
 
 local function buildSnapshot()
@@ -1393,6 +1409,8 @@ local function buildSnapshot()
   local okD, ladders = pcall(listingsRecord, wanted)
   if not okD then ladders = nil end
   local okK, banked = pcall(bankRecord, wanted)
+  local okE, others = pcall(otherCharacters, wanted)   -- before the prices are chosen: their things are worth pricing too
+  if not okE then others = nil end
   if not okK then banked = nil end
   local okO, listed = pcall(ownAuctions, wanted)
   if not okO then listed = nil end
@@ -1435,6 +1453,7 @@ local function buildSnapshot()
     dungeons = journal,
     bags = carried,
     bank = banked,
+    alts = others,
     recipes = books,
     prices = market,
     market = record,
@@ -1689,7 +1708,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
     if type(WispData) ~= "table" then WispData = {} end
     WispData.chars = WispData.chars or {}   -- what an alt's recipes are labelled with: class and level, no name
     local _, classFile = UnitClass("player")
-    WispData.chars[myKey()] = { class = classFile, level = UnitLevel("player") }
+    local okB, carried = pcall(bags)   -- what this character holds, for when another one is asked what to buy
+    WispData.chars[myKey()] = { class = classFile, level = UnitLevel("player"), name = UnitName("player"), bags = okB and carried or nil }
     local snapshot = save()
     if snapshot and snapshot.market then   -- these days are now handed over
       if type(WispData) ~= "table" then WispData = {} end

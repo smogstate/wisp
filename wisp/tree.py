@@ -34,13 +34,32 @@ def _who(recipe: dict) -> str:
 
 def breakdown(game, item: int, quantity: int) -> dict:
     graph, craft = game.graph, game.crafting
-    raw, steps, dearer = {}, [], []
+    raw, steps, dearer, taken = {}, [], [], {}
+    places = craft.stock()                                  # bags, bank, the shared bank, then each other character
+    pool = [dict(held) for _, _, held in places]            # used up as the walk goes: nothing is counted twice
+
+    def name(some: int) -> str:
+        return graph.names.get(some, f"item {some}")
 
     def cost_of(some: int):   # what one costs to buy: the lowest listing, else unknown
         return craft.prices[some][0] if some in craft.prices else None
 
+    def from_stock(some: int, need: int) -> int:
+        """Take what is already held, nearest first. Returns how many are still needed."""
+        for at, held in enumerate(pool):
+            if need and held.get(some):
+                use = min(need, held[some])
+                held[some] -= use
+                need -= use
+                taken.setdefault(some, {})[at] = taken.get(some, {}).get(at, 0) + use
+        return need
+
     def walk(some: int, need: int, path: tuple):
-        """Returns what `need` of this cost when made from raw materials at auction prices, or None when a price is missing."""
+        """Returns what the part still to be got costs at auction, or None when a price is missing."""
+        if path:   # what is already held of a part needs neither making nor buying; the product itself is what was asked for
+            need = from_stock(some, need)
+            if not need:
+                return 0
         options = [r for r in graph.made_by.get(some, []) if r["reagents"]]
         if not options or some in path or len(path) >= DEPTH:
             raw[some] = raw.get(some, 0) + need
@@ -55,58 +74,65 @@ def breakdown(game, item: int, quantity: int) -> dict:
                 known = False
             else:
                 total += part_cost
-        steps.append({"craft": f"{crafts} × {recipe['name']}", "makes": f"{crafts * recipe['makes_count']} × {graph.names.get(some, f'item {some}')}",
-                      "profession": recipe["profession"], "who_can": _who(recipe), "_item": some, "_crafts": crafts})
+        steps.append({"craft": f"{crafts} × {recipe['name']}", "makes": f"{crafts * recipe['makes_count']} × {name(some)}",
+                      "profession": recipe["profession"], "who_can": _who(recipe)})
         bought = cost_of(some)
         if path and known and bought is not None and bought * need < total:   # an intermediate cheaper to buy than to make
-            dearer.append({"item": graph.names.get(some, f"item {some}"), "need": need, "buying_costs": coins(bought * need),
-                           "making_costs": coins(total)})
+            dearer.append({"item": name(some), "need": need, "buying_costs": coins(bought * need), "making_costs": coins(total)})
         return total if known else None
 
-    made_cost = walk(item, quantity, ())
+    walk(item, quantity, ())
     if not steps:
         return {"error": "no recipe"}
-    rows, total, unpriced = [], 0, []
-    for some, need in sorted(raw.items(), key=lambda kv: (-(cost_of(kv[0]) or 0) * kv[1], graph.names.get(kv[0], ""))):
-        have = craft.bags.get(some, 0) + craft.bank.get(some, 0)
-        each, world = cost_of(some), graph.world.get(some) or {}
-        row = {"item": graph.names.get(some, f"item {some}"), "need": need, "have": have, "to_get": max(0, need - have),
-               "each": coins(each) if each is not None else None, "cost_of_all": coins(each * need) if each is not None else None,
-               "_cost": (each or 0) * need}
-        if world.get("v"):
+    rows, total, unpriced, buy = [], 0, [], []
+    for some in sorted(set(raw) | set(taken), key=lambda i: (-(cost_of(i) or 0) * raw.get(i, 0), name(i))):
+        get, each = raw.get(some, 0), cost_of(some)
+        held = taken.get(some, {})
+        world = graph.world.get(some) or {}
+        row = {"item": name(some), "need": get + sum(held.values()),
+               "already_held": [{"where": places[at][0], "count": n} for at, n in sorted(held.items())],
+               "to_buy": get, "each": coins(each) if each is not None else None,
+               "cost_to_buy": coins(each * get) if each is not None and get else None,
+               "_held": sum(held.values()), "_where": ", ".join(f"{n} — {places[at][1]}" for at, n in sorted(held.items()) if at > 0)}   # all but the bags: to be fetched
+        if not row["already_held"]:
+            del row["already_held"]
+        if get and world.get("v"):
             row["sold_by_a_vendor"] = True
-        elif world.get("dn") or world.get("on"):
-            row["dropped_or_found"] = True
-        if each is None:
-            unpriced.append(row["item"])
-        else:
-            total += each * need
+        if get:
+            buy.append((some, name(some), get))
+            if each is None:
+                unpriced.append(row["item"])
+            else:
+                total += each * get
         rows.append(row)
-    name = graph.names.get(item, f"item {item}")
-    out = {"product": name, "quantity": quantity,
-           "crafts_in_order": [{k: v for k, v in s.items() if k[0] != "_"} for s in steps],
-           "professions_needed": sorted({s["profession"] for s in steps}),
-           "raw_materials": [{k: v for k, v in r.items() if k[0] != "_" and v is not None} for r in rows],
-           "raw_materials_cost": coins(total) if not unpriced else None}
+    product = name(item)
+    out = {"product": product, "quantity": quantity,
+           "crafts_in_order": steps, "professions_needed": sorted({s["profession"] for s in steps}),
+           "materials": [{k: v for k, v in r.items() if k[0] != "_" and v is not None} for r in rows],
+           "to_buy_in_all": coins(total) if not unpriced else None}
     if unpriced:
         out["no_auction_price_for"] = unpriced
-        out["cost_of_the_priced_ones"] = coins(total)
+        if total:
+            out["cost_of_the_priced_ones"] = coins(total)
     listed = cost_of(item)
     if listed is not None:
         out["product_listed_for"] = coins(listed * quantity)
-        if not unpriced:
-            margin = listed * quantity - total
-            out["left_after_materials"] = ("-" if margin < 0 else "") + coins(abs(margin))
     if dearer:
         out["cheaper_to_buy_than_to_make"] = dearer
+    elsewhere = [f"{r['item']}: {r['_where']}" for r in rows if r["_where"]]
+    out["_buy"] = buy
     out["_card"] = {
-        "title": t("Raw materials for {n} × {item}", n=quantity, item=name),
-        "sub": (t("about {sum} at auction", sum=coins(total)) if not unpriced else t("{sum} for what has a price", sum=coins(total)))
+        "title": t("To craft {n} × {item}", n=quantity, item=product),
+        "sub": (t("nothing to buy: you hold it all") if not buy else
+                t("to buy: about {sum}", sum=coins(total)) if not unpriced else
+                t("to buy: {sum} for what has a price", sum=coins(total)) if total else
+                tn(len(buy), "to buy: {n} item, price unknown", "to buy: {n} items, prices unknown"))
                + " · " + tn(len(steps), "{n} kind of craft", "{n} kinds of craft"),
-        "columns": [t("Item"), t("Need"), t("Have"), t("Each"), t("Cost")],
-        "rows": [[r["item"], r["need"], r["have"] or "–", r["each"] or "–", r["cost_of_all"] or "–"] for r in rows[:25]],
-        "notes": [t("In this order: {steps}", steps=" → ".join(s["craft"] for s in steps[:12])),
-                  t("Lowest listings from your own scans. Bags and bank as of your last logout.")],
+        "columns": [t("Item"), t("Need"), t("Have"), t("Buy"), t("Cost")],
+        "rows": [[r["item"], r["need"], r["_held"] or "–", r["to_buy"] or "–", r["cost_to_buy"] or "–"] for r in rows[:25]],
+        "notes": [t("In this order: {steps}", steps=" → ".join(s["craft"] for s in steps[:12]))]
+                 + ([t("Held elsewhere: {where}", where="; ".join(elsewhere[:10]))] if elsewhere else [])
+                 + [t("Lowest listings from your own scans. What you and your other characters held at each one's last logout.")],
     }
     return out
 

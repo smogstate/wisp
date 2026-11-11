@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .i18n import coin_units, t, tn
 
-REFERENCE = ("dungeons", "recipes", "prices", "market", "gather", "sources", "available", "auctionMail", "loot", "ownAuctions", "xp", "vendor", "listings", "bank")   # large; prices have their own store (market.py)
+REFERENCE = ("dungeons", "recipes", "prices", "market", "gather", "sources", "available", "auctionMail", "loot", "ownAuctions", "xp", "vendor", "listings", "bank", "alts")   # large; prices have their own store (market.py)
 
 
 def character_key(snapshot: dict) -> str:

@@ -626,7 +626,11 @@ end
 
 if flags:find("alts") then   -- what an alt left in the saved data at its own logout: a cook, and a second tailor
   WispData = WispData or {}
-  WispData.chars = { ["Test Realm-Cook"] = { class = "WARRIOR", level = 30 } }
+  WispData.chars = { ["Test Realm-Cook"] = { class = "WARRIOR", level = 30, name = "Кук",   -- and what the cook carries and keeps
+    bags = { { id = 6260, name = "Blue Dye", count = 4 }, { id = 4306, name = "Silk Cloth", count = 7, bound = true } } } }
+  WispData.bank = { ["Test Realm-Cook"] = { seenAt = os.time() - 3600, items = {
+    { id = 4305, name = "Bolt of Silk Cloth", count = 1 }, { id = 2321, name = "Fine Thread", count = 5 },
+    { id = 6260, name = "Blue Dye", count = 1, shared = true } } } }
   WispData.recipes = {
     ["Test Realm-Cook"] = { Cooking = { seenAt = os.time() - 86400, skill = 75, max = 150, recipes = {
       r2538 = { id = 2538, name = "Charred Wolf Meat", learned = true, colour = "green", greyAt = 85, skill = 75, makes = 2679,

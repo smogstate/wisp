@@ -37,6 +37,8 @@ class Crafting:
         self.bags: dict[int, int] = {}                  # item id -> how many are carried
         self.bound: set[int] = set()                    # carried or banked items that are bound: not for sale
         self.bank: dict[int, int] = {}                  # item id -> how many are in the bank, as it was when last open
+        self.alts: list[dict] = []                      # the account's other characters: what each holds
+        self.shared: dict[int, int] = {}                # the bank shared by the account, when only another character has seen it
         self.bank_seen = None                           # when that was
         self.prices: dict[int, tuple[int, int | None]] = {}   # item id -> (copper, days since seen)
         self.recipes: dict[int, dict] = {}              # recipe id -> recipe
@@ -63,6 +65,32 @@ class Crafting:
                 self._name(item, line.get("name"))
                 if line.get("bound"):
                     self.bound.add(item)
+        seen_here = any(isinstance(l, dict) and l.get("shared") for l in _list(banked.get("items")))   # this character's own look at the shared bank
+        newest = 0
+        for alt in (a for a in _list(snapshot.get("alts")) if isinstance(a, dict)):
+            level = _int(alt.get("level"), 1, 200)
+            label = (_text(alt.get("class"), 20).capitalize() or "?") + (f", level {level}" if level else "")
+            holds = {"label": "another character of yours: " + label, "name": _text(alt.get("name"), 30) or label, "bags": {}, "bank": {}}
+            for line in _list(alt.get("bags")):
+                item = _int(line.get("id"), 1, 10**9) if isinstance(line, dict) else None
+                count = _int(line.get("count"), 1, 10**7) if item is not None else None
+                if count and not line.get("bound"):
+                    holds["bags"][item] = holds["bags"].get(item, 0) + count
+                    self._name(item, line.get("name"))
+            theirs = alt.get("bank") if isinstance(alt.get("bank"), dict) else {}
+            seen = theirs.get("seenAt") if isinstance(theirs.get("seenAt"), (int, float)) else 0
+            shared = {}
+            for line in _list(theirs.get("items")):
+                item = _int(line.get("id"), 1, 10**9) if isinstance(line, dict) else None
+                count = _int(line.get("count"), 1, 10**7) if item is not None else None
+                if count and not line.get("bound"):
+                    into = shared if line.get("shared") else holds["bank"]   # the shared bank is one bank: counted once
+                    into[item] = into.get(item, 0) + count
+                    self._name(item, line.get("name"))
+            if shared and not seen_here and seen > newest:
+                self.shared, newest = shared, seen   # nobody's own look here: the newest look any character had
+            if holds["bags"] or holds["bank"]:
+                self.alts.append(holds)
         for row in _list(snapshot.get("prices")):   # rows of [item id, copper, days since seen or -1, name or ""]
             if not isinstance(row, list) or len(row) < 4:
                 continue
@@ -92,6 +120,15 @@ class Crafting:
                     if known is None or (recipe["learned"], not owner) > (known["learned"], not known["owner"]):
                         self.recipes[recipe["id"]] = recipe
             self.books.append(entry)
+
+    def stock(self) -> list[tuple[str, str, dict]]:
+        """Everything held that could go into a craft, nearest first: (what the model is told, what the card says, item -> count)."""
+        places = [("your bags", t("bags"), self.bags), ("your bank", t("bank"), self.bank),
+                  ("the bank your characters share", t("shared bank"), self.shared)]
+        for alt in self.alts:
+            places.append((alt["label"] + ", bags", t("{who}: bags", who=alt["name"]), alt["bags"]))
+            places.append((alt["label"] + ", bank", t("{who}: bank", who=alt["name"]), alt["bank"]))
+        return [(told, shown, {i: n for i, n in held.items() if i not in self.bound}) for told, shown, held in places]
 
     def add_world(self, index: dict | None) -> list[dict]:
         """Every recipe in the game, as the addon read them from the client: those no book of the player's

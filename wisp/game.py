@@ -1617,13 +1617,22 @@ class Game:
         if out.get("error") == "no recipe":
             return {"error": f"No recipe known to Wisp makes {self.graph.names[item]}: it is a raw material, or its recipe is not known. "
                              + self._recipes_note() + " For where it comes from, use item_links."}
-        card = out.pop("_card")
+        card, buy = out.pop("_card"), out.pop("_buy")
         if args.get("show") is True:
-            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Crafting, down to raw materials"), "table": card})
-            out["shown"] = "a card with the raw materials and the order of crafts is now shown to the player: do not repeat them in your text"
-        out["note"] = ("Worked out in code. Each intermediate is made by the recipe the player can best use (their own, then another "
-                       "character's, then any); who_can says who. Prices are the lowest listings from the player's own scans; have "
-                       "counts bags and bank at the last logout. A craft that makes several at once may leave some over. "
+            shown = {"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Shopping list, down to raw materials"), "table": card}
+            if buy:   # the same card creates the shopping list for exactly what is still missing
+                shown["wisp"] = encode_wisp1([{"do": "auctionator.shopping_list", "name": _clean(out["product"], 40).replace(";", "") or "Wisp",
+                                               "items": [{"name": name, "quantity": count, "id": item} for item, name, count in buy[:60]]}])
+                shown["hint"] = t("Shopping list for Auctionator: Copy, then in the game Ctrl+V twice")
+            self.cards.append(shown)
+            out["shown"] = ("a card is now shown to the player: every material with what is needed, what is already held and what to buy, "
+                            "the order of crafts, and" + (" a button that creates the shopping list for the rest in Auctionator" if buy
+                                                          else " no button, since nothing needs buying") + ". Do not repeat its rows in your text")
+        out["note"] = ("Worked out in code. What the player already holds is taken first, parts included (a held intermediate needs "
+                       "neither making nor buying): their bags and bank, the bank their characters share, then each other character's "
+                       "bags and bank, as each was at its own last logout; already_held says where. to_buy is what is left. who_can is "
+                       "information only: another player can do a craft for them, so a missing profession is no obstacle. Prices "
+                       "are the lowest listings from the player's own scans. A craft that makes several at once may leave some over. "
                        + self._recipes_note())
         return out
 
@@ -2079,11 +2088,13 @@ TOOLS = [
     {
         "name": "craft_tree",
         "description": "A craftable item broken all the way down to raw materials, through every recipe on the way, "
-                       "whatever profession each needs: the crafts in order and who of the player's characters can do "
-                       "each, every raw material with how many are needed, how many the player has, and what they cost "
-                       "at auction, the total, what the product is listed for, and which intermediates are cheaper to "
-                       "buy than to make. Use it for 'what do I need in all to make X', 'what does X cost to craft from "
-                       "scratch', 'is crafting X worth it'. With show true the player sees it as a card.",
+                       "whatever profession each needs, and checked against everything the player holds: their bags "
+                       "and bank and those of their other characters. For every material: how many are needed, how "
+                       "many are already held and where, how many to buy and what that costs; the crafts in order; "
+                       "what the product is listed for; intermediates cheaper to buy than to make. Use it for 'what "
+                       "do I need to make X', 'make me a shopping list for X', 'what does X cost to craft'. With show "
+                       "true the player sees it as a card whose button creates the shopping list for exactly what is "
+                       "missing in Auctionator: use that whenever they ask for a list.",
         "input_schema": {
             "type": "object",
             "properties": {"item": {"type": "string"}, "quantity": {"type": "integer", "minimum": 1, "maximum": 10000},

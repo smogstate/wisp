@@ -52,6 +52,7 @@ def coin_units() -> tuple[str, str, str]:
 
 
 RU_COUNTED = {
+    "to buy: {n} items, prices unknown": ("купить: {n} предмет, цена неизвестна", "купить: {n} предмета, цены неизвестны", "купить: {n} предметов, цены неизвестны"),
     "{n} kinds of craft": ("{n} вид изготовления", "{n} вида изготовления", "{n} видов изготовления"),
     "{n} recipes use it directly": ("{n} рецепт использует напрямую", "{n} рецепта используют напрямую", "{n} рецептов используют напрямую"),
     "{n} products in all": ("всего {n} изделие", "всего {n} изделия", "всего {n} изделий"),
@@ -146,7 +147,12 @@ RU = {
     "Every recipe in the game": "Все рецепты игры", "{n} recipes beyond your own professions": "рецептов сверх ваших профессий: {n}",
     "the game gave none: tell Wisp's author": "игра не выдала ни одного: сообщите автору Wisp",
     "not yet: Wisp's addon reads them in the background about a minute after login; then /wisp sync": "пока нет: аддон Wisp читает их в фоне примерно через минуту после входа; затем /wisp sync",
-    "Crafting, down to raw materials": "Изготовление: до сырья", "Where it is used": "Где используется",
+    "Shopping list, down to raw materials": "Список покупок: до сырья", "Buy": "Купить",
+    "bags": "сумки", "bank": "банк", "shared bank": "общий банк", "{who}: bags": "{who}: сумки", "{who}: bank": "{who}: банк",
+    "To craft {n} × {item}": "Чтобы изготовить {n} × {item}", "nothing to buy: you hold it all": "покупать нечего: всё уже есть",
+    "to buy: about {sum}": "купить: около {sum}", "to buy: {sum} for what has a price": "купить: {sum} за то, что имеет цену",
+    "Held elsewhere: {where}": "Лежит в других местах: {where}",
+    "Lowest listings from your own scans. What you and your other characters held at each one's last logout.": "Минимальные цены из ваших сканирований. Запасы — ваши и других ваших персонажей, на момент последнего выхода каждого.", "Where it is used": "Где используется",
     "Raw materials for {n} × {item}": "Сырьё для {n} × {item}", "about {sum} at auction": "около {sum} на аукционе",
     "{sum} for what has a price": "{sum} за то, что имеет цену", "Need": "Нужно", "Cost": "Цена",
     "In this order: {steps}": "По порядку: {steps}",
