@@ -879,6 +879,7 @@ def test_gathering(wow: Path, tmp: Path):
                                             {"x": 60.5, "y": 40.5, "nodes": 2}, {"x": 75.0, "y": 70.0, "nodes": 1}], walk["route"]["first_stops"]
     assert gather(what="Peacebloom", zone="Westfall")["route"]["starts"] == "at the richest spot"
     shown = run_tool(game, "waypoint", {"refs": [walk["route"]["ref"], "q33.end.1.1"]})
+    assert run_tool(Game.load(wow), "waypoint", {"refs": [walk["route"]["ref"]]})["shown"] == 1, "a route's ref stays good in the next question"
     assert shown["shown"] == 2 and game.cards[-1]["lines"][0] == {
         "addon": "TomTom", "text": "Route: Peacebloom, 4 stops", "detail": "Elwynn Forest · 7 known nodes"}
     ways = [l for l in stub("paste", game.cards[-1]["wisp"]) if l.startswith("WAY ")]
@@ -1582,6 +1583,16 @@ def test_quest_search(tmp: Path):
     assert link["item"] == "Pattern: Not Learned Yet" and link["sold_by"][0]["name"] == "Alexandra Bolero"
     assert link["teaches"] == {"recipe_id": 8791, "recipe": "Not Learned Yet", "profession": "Tailoring", "already_learned": False}
     assert checked["Every item from Questie"] == ("ok", "3 items with who sells or drops them")
+
+    # a ref stays good in the next question, when everything has been read afresh: the seller of a recipe, a quest giver
+    later = Game.load(wow)
+    seller, giver = scroll["sold_by"][0]["where"][0]["ref"], first["starts"][0]["where"]["ref"]
+    assert seller not in later.places and giver not in later.places, "not looked up yet in this new reading"
+    assert run_tool(later, "waypoint", {"refs": [seller, giver]})["shown"] == 2, "looked up again when asked for"
+    lines = later.cards[-1]["lines"]
+    assert lines[0]["text"] == "Waypoint: Alexandra Bolero (sells Pattern: Not Learned Yet)" and lines[1]["detail"].startswith("Westfall")
+    assert "unknown refs: w999999.vendor.1.1" in run_tool(later, "waypoint", {"refs": ["w999999.vendor.1.1"]})["error"]
+    assert "error" in run_tool(later, "waypoint", {"refs": ["qdb9001.start.1"]}), "a quest that is not this character's stays unknown"
 
     plain = Game.load(make_wow_dir(tmp / "plain"))   # not read yet: says how it comes
     assert "about a minute after login" in run_tool(plain, "item_links", {"item": "Pattern: Not Learned Yet"})["error"]

@@ -1144,13 +1144,52 @@ class Game:
                 "note": "Worked out from two saved snapshots: 'from' and 'to' are when each was taken (Unix time). "
                         "Only quests that were in the quest log at some point have names; the count is exact."}
 
+    @staticmethod
+    def _slug(name: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+    def _gather_route(self, name: str, map_id: int):
+        """Lay a walk through one kind of node in one zone and register it under a ref the waypoint tool takes."""
+        gather, me = self.gathering, self.snapshot.get("character") or {}
+        place = gather.nodes[name]["zones"][map_id]
+        start = (me["x"], me["y"]) if me.get("map") == map_id and isinstance(me.get("x"), (int, float)) and isinstance(me.get("y"), (int, float)) else None
+        stops = gather.route(name, map_id, start)
+        ref = f"g{map_id}." + self._slug(name)
+        self.routes[ref] = {"title": t("{name}, {stops}", name=name, stops=tn(len(stops), "{n} stop", "{n} stops")),
+                            "detail": t("{zone} · {nodes}", zone=place["zone"], nodes=tn(len(place["at"]), "{n} known node", "{n} known nodes")),
+                            "stops": [{"map": map_id, "zone": place["zone"], "x": s["x"], "y": s["y"], "title": f"{name} {i + 1}"}
+                                      for i, s in enumerate(stops)]}
+        return ref, stops, start
+
+    def _revive(self, ref: str):
+        """A ref from an earlier answer. The snapshot is read afresh for every question, and some places are only
+        registered when a tool looks them up (any item's sellers, any quest's givers, a gathering route): look
+        the same thing up again, so that a ref a tool once gave stays good."""
+        try:
+            if m := re.fullmatch(r"w(\d+)\.(vendor|drop|object)\.\d+\.\d+", ref):
+                self.graph._from_world(int(m.group(1)))
+            elif m := re.fullmatch(r"qdb(\d+)\.(start|end|kill|use)\.\d+", ref):
+                db = self.questdb()
+                if db is not None and int(m.group(1)) in db.quests:
+                    db.detail(int(m.group(1)))
+            elif m := re.fullmatch(r"g(\d+)\.([a-z0-9-]+)", ref):
+                for name, node in self.gathering.nodes.items():
+                    if self._slug(name) == m.group(2) and int(m.group(1)) in node["zones"]:
+                        self._gather_route(name, int(m.group(1)))
+        except Exception:   # whatever is wrong with an old ref, it is simply unknown
+            pass
+
     def tool_waypoint(self, args: dict) -> dict:
         refs = args.get("refs")
         if not isinstance(refs, list) or not refs or len(refs) > 20 or not all(isinstance(r, str) for r in refs):
             return {"error": "refs must be a list of 1 to 20 location refs from the quests or dungeon tools"}
+        for ref in refs:
+            if ref not in self.places and ref not in self.routes:
+                self._revive(ref)
         unknown = [r for r in refs if r not in self.places and r not in self.routes]
         if unknown:
-            return {"error": f"unknown refs: {', '.join(unknown[:5])}. Use refs exactly as a tool returned them."}
+            return {"error": f"unknown refs: {', '.join(unknown[:5])}. Use refs exactly as a tool returned them; if it came from an "
+                             "earlier answer and is not known any more, call that tool again and use the ref it gives now."}
         shown, points = [], []
         for ref in dict.fromkeys(refs):
             if ref in self.routes:   # a route is one line on the card and a waypoint for each of its stops
@@ -1507,14 +1546,7 @@ class Game:
         if map_id not in gather.nodes[name]["zones"]:
             return {"error": f"no {name} is on record in that zone", "zones_with_it": [z["zone"] for z in zones[:8]]}
         place = gather.nodes[name]["zones"][map_id]
-        me = self.snapshot.get("character") or {}
-        start = (me["x"], me["y"]) if me.get("map") == map_id and isinstance(me.get("x"), (int, float)) and isinstance(me.get("y"), (int, float)) else None
-        stops = gather.route(name, map_id, start)
-        ref = f"g{map_id}." + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-        self.routes[ref] = {"title": t("{name}, {stops}", name=name, stops=tn(len(stops), "{n} stop", "{n} stops")),
-                            "detail": t("{zone} · {nodes}", zone=place["zone"], nodes=tn(len(place["at"]), "{n} known node", "{n} known nodes")),
-                            "stops": [{"map": map_id, "zone": place["zone"], "x": s["x"], "y": s["y"], "title": f"{name} {i + 1}"}
-                                      for i, s in enumerate(stops)]}
+        ref, stops, start = self._gather_route(name, map_id)
         return {"node": name, "zone": place["zone"], "known_nodes": len(place["at"]),
                 "route": {"ref": ref, "stops": len(stops), "starts": "from where the character stands" if start else "at the richest spot",
                           "first_stops": [{"x": s["x"], "y": s["y"], "nodes": s["nodes"]} for s in stops[:5]]},
