@@ -108,6 +108,9 @@
   .card button.share:hover { color: var(--text); border-color: var(--line); }
   .card button.share svg { width: 15px; height: 15px; }
   .card button.share[data-state="copied"] { color: var(--accent); }
+  .card button.link { background: none; border: 0; padding: 0; min-height: 0; font: inherit; color: var(--accent); cursor: pointer;
+                      text-decoration: underline dotted; text-underline-offset: 3px; text-align: inherit; }
+  .card button.link:hover { text-decoration-style: solid; }
   .card h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
   .card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .card li { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; }
@@ -577,6 +580,7 @@ const RU = {
   "Copy, then in the game: Ctrl+V twice": "«Копировать», затем в игре: дважды Ctrl+V",
   "Send to the game": "Отправить в игру", "Sent to the game": "Отправлено в игру", "Could not send": "Не удалось отправить",
   "Sent: it appears in the game in a moment. Nothing there? Copy, then Ctrl+V twice.": "Отправлено: появится в игре через мгновение. Не появилось? «Копировать», затем дважды Ctrl+V.",
+  "Open its recipe": "Открыть его рецепт",
   "Copy for the game": "Копировать для игры", "Copy as text, to share": "Копировать текстом, чтобы поделиться",
   "Copied as text": "Скопировано текстом", "Copied": "Скопировано", "Copy failed": "Не удалось скопировать",
   "Copied. Now in the game: Ctrl+V twice": "Скопировано. Теперь в игре: дважды Ctrl+V",
@@ -725,14 +729,48 @@ const coins = c => { c = Math.round(c); const g = Math.floor(c / 10000), s = Mat
 const dayDate = day => new Date(day * 86400000).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
 // A ranking as a table: the first column is the name, the rest are figures.
-function tableBlock(t) {
+// An item's name as a link: its own card opens below, straight from Wisp's data, with no question asked of the model.
+function itemLink(text, item, live) {
+  if (!live) return el("span", "", text);
+  const link = el("button", "link", text);
+  link.type = "button";
+  link.title = T("Open its recipe");
+  link.onclick = async () => {
+    if (running) return;
+    const got = await post("/api/item-card", { item });
+    if (got.card) showCard(got.card).scrollIntoView({ block: "start" }); else add("div", "trace", got.error || T("request failed"));
+  };
+  return link;
+}
+
+function tableBlock(t, live = true) {
   const block = el("div", "plan");
   block.append(el("div", "plan-title", t.title), el("div", "plan-sub", t.sub));
+  if (t.steps && t.steps.length) {   // the crafts in order, each with what it takes; a part that is crafted itself is a link
+    const steps = el("ol", "steps");
+    steps.style.marginTop = "10px";
+    for (const step of t.steps) {
+      const li = el("li"), parts = el("span", "detail");
+      (step.parts || []).forEach((part, i) => { if (i) parts.append(", "); parts.append(part.link ? itemLink(part.text, part.item, live) : part.text); });
+      li.append(el("span", "", step.text), el("span", "detail", step.detail), parts);
+      steps.append(li);
+    }
+    block.append(steps);
+  }
   const table = el("table"), head = el("tr");
   table.style.marginTop = "8px";
   for (const name of t.columns) head.append(el("th", "", name));
   table.append(head);
-  for (const row of t.rows) { const tr = el("tr"); for (const cell of row) tr.append(el("td", "", cell)); table.append(tr); }
+  for (const row of t.rows) {
+    const tr = el("tr");
+    row.forEach((cell, i) => {
+      const linked = i === 0 && (t.links || []).includes(cell);
+      const td = el("td", "", linked ? undefined : cell);
+      if (linked) td.append(itemLink(cell, cell, live));
+      tr.append(td);
+    });
+    table.append(tr);
+  }
   block.append(table);
   for (const note of t.notes || []) block.append(el("div", "notes", note));
   return block;
@@ -898,6 +936,8 @@ function cardText(card, heading) {
   if (card.table) {
     const t = card.table;
     block(t.title, t.sub);
+    (t.steps || []).forEach((step, i) => out.push(`${i + 1}. ${step.text} (${step.detail}): ${(step.parts || []).map(p => p.text).join(", ")}`));
+    if (t.steps && t.steps.length) out.push("");
     for (const row of t.rows) out.push("- " + row[0] + ": " + row.slice(1).map((cell, i) => `${t.columns[i + 1]} ${cell}`).join(", "));
     notes(t.notes);
   }
@@ -992,7 +1032,7 @@ function showCard(card, into = log) {
   }
   foot.append(button);
   el.append(head, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
-            ...(card.table ? [tableBlock(card.table)] : []), ...(card.report ? [reportBlock(card.report)] : []),
+            ...(card.table ? [tableBlock(card.table, into === log)] : []), ...(card.report ? [reportBlock(card.report)] : []),
             ...(card.sources ? [sourcesList(card.sources)] : []), ...(card.route ? [routeBlock(card.route)] : []),
             list, ...(card.wisp ? [foot] : []));
   into.scrollTop = into.scrollHeight;

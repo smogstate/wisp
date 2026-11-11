@@ -378,6 +378,24 @@ class App:
         return (self.wow_dir is not None and bool((snapshot.get("addons") or {}).get("inbox"))
                 and inbox.installed(self.wow_dir / "Interface" / "AddOns"))
 
+    def item_card(self, name) -> dict:
+        """A link on a card: that item's own card, straight from the graph. No model is asked, so it costs nothing."""
+        game = self.load_game()
+        item, instead = game._one_item({"item": name})
+        if instead:
+            return {"error": instead.get("error") or t("Nothing can be shown for that item.")}
+        craftable = any(r["reagents"] for r in game.graph.made_by.get(item, []))
+        game.cards = []
+        (game.tool_craft_tree if craftable else game.tool_item_uses)({"item": game.graph.names[item], "show": True})
+        if not game.cards:
+            return {"error": t("Nothing can be shown for that item.")}
+        card = game.cards[-1]
+        card["id"] = f"link{int(time.time() * 1000)}"
+        if self.session["turns"]:   # kept with the conversation it was opened in
+            self.session["turns"][-1]["items"].append({"type": "card", "card": card})
+            self.sessions.save(self.session)
+        return {"card": card}
+
     def deliver(self, text) -> dict:
         if self.wow_dir is None:
             return {"error": t("Choose the game folder first.")}
@@ -829,7 +847,7 @@ def make_handler(app: App, port: int):
                 session = app.sessions.load(body.get("id"))
                 return self.send_json(200, app.view(session) if session else {"error": t("That conversation could not be opened.")})
             if self.path in ("/api/new", "/api/settings", "/api/install-addon", "/api/browse", "/api/check",
-                             "/api/sessions/open", "/api/fork"):
+                             "/api/sessions/open", "/api/fork", "/api/item-card"):
                 if app.busy.locked():
                     return self.send_json(409, {"error": t("Wait for the answer to finish.")})
                 if self.path == "/api/new":
@@ -839,6 +857,8 @@ def make_handler(app: App, port: int):
                     return self.send_json(200, app.open_session(body.get("id")))
                 if self.path == "/api/fork":
                     return self.send_json(200, app.fork(body.get("turn")))
+                if self.path == "/api/item-card":
+                    return self.send_json(200, app.item_card(body.get("item")))
                 if self.path == "/api/settings":
                     return self.send_json(200, app.save_settings(body))
                 if self.path == "/api/install-addon":

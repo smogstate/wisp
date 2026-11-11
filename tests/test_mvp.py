@@ -1857,7 +1857,7 @@ def test_alts_recipes(tmp: Path):
     assert "Кук" not in json.dumps(tree, ensure_ascii=False), "the model is told class and level"
     card = game.cards[-1]
     assert card["table"]["rows"][0] == ["Blue Dye", 6, 5, 1, "–"]
-    assert card["table"]["notes"][1] == "Held elsewhere: Blue Dye: 1 — shared bank, 4 — Кук: bags; Bolt of Silk Cloth: 1 — Кук: bank", "the card names the character"
+    assert card["table"]["notes"][0] == "Held elsewhere: Blue Dye: 1 — shared bank, 4 — Кук: bags; Bolt of Silk Cloth: 1 — Кук: bank", "the card names the character"
     assert 'LIST Azure Silk Hood = "Blue Dye";1' in stub("paste", card["wisp"]), "the list is for the one dye still missing"
     assert all(b["owner"] is None for b in Game.load(make_wow_dir(tmp / "solo")).crafting.books)
 
@@ -1883,7 +1883,20 @@ def test_whole_graph(tmp: Path):
     assert "shown" in shown and card["heading"] == "Shopping list, down to raw materials" and card["table"]["title"] == "To craft 3 × Azure Silk Hood"
     assert card["table"]["sub"] == "to buy: 1 item, price unknown · 2 kinds of craft"
     assert card["table"]["rows"] == [["Blue Dye", 6, "–", 6, "–"], ["Fine Thread", 3, 3, "–", "–"], ["Silk Cloth", 24, 24, "–", "–"]]
-    assert "6 × Bolt of Silk Cloth → 3 × Azure Silk Hood" in card["table"]["notes"][0]
+    assert card["table"]["steps"] == [
+        {"text": "6 × Bolt of Silk Cloth", "detail": "Tailoring · turns grey at skill 170", "parts": [{"text": "24 × Silk Cloth", "item": "Silk Cloth", "link": False}]},
+        {"text": "3 × Azure Silk Hood", "detail": "Tailoring · turns grey at skill 185", "parts": [
+            {"text": "6 × Bolt of Silk Cloth", "item": "Bolt of Silk Cloth", "link": True},   # crafted itself: a link to its own card
+            {"text": "6 × Blue Dye", "item": "Blue Dye", "link": False}, {"text": "3 × Fine Thread", "item": "Fine Thread", "link": False}]}]
+    assert tree["crafts_in_order"][1]["turns_grey_at_skill"] == 185 and "_parts" not in tree["crafts_in_order"][1]
+    # a link on a card opens that item's own card with no model asked: a crafted item its recipe, anything else what it goes into
+    app = App(make_wow_dir(tmp / "app", flags="questindex"), fake=True)
+    list(app.ask("anything"))
+    opened = app.item_card("Bolt of Silk Cloth")["card"]
+    assert opened["table"]["title"] == "To craft 1 × Bolt of Silk Cloth" and opened["id"].startswith("link")
+    assert app.session["turns"][-1]["items"][-1] == {"type": "card", "card": opened}, "kept with the conversation"
+    assert app.item_card("Silk Cloth")["card"]["heading"] == "Where it is used" and "error" in app.item_card("no such thing") and "error" in app.item_card(None)
+    assert app.item_card("Silk Cloth")["card"]["table"]["links"] == ["Azure Silk Hood", "Bolt of Silk Cloth", "Not Learned Yet", "Small Silk Pack"]
     # the card's button makes the shopping list for exactly what is missing
     listed = stub("paste", card["wisp"])
     assert 'LIST Azure Silk Hood = "Blue Dye";6' in listed, listed

@@ -75,7 +75,11 @@ def breakdown(game, item: int, quantity: int) -> dict:
             else:
                 total += part_cost
         steps.append({"craft": f"{crafts} × {recipe['name']}", "makes": f"{crafts * recipe['makes_count']} × {name(some)}",
-                      "profession": recipe["profession"], "who_can": _who(recipe)})
+                      "profession": recipe["profession"], "who_can": _who(recipe),
+                      **({"turns_grey_at_skill": recipe["grey_at"]} if recipe["grey_at"] else {}),
+                      # for the card: what one such craft takes; a part that is itself crafted opens its own card
+                      "_parts": [{"text": f"{crafts * count} × {name(part)}", "item": name(part),
+                                  "link": any(r["reagents"] for r in graph.made_by.get(part, []))} for part, count in recipe["reagents"]]})
         bought = cost_of(some)
         if path and known and bought is not None and bought * need < total:   # an intermediate cheaper to buy than to make
             dearer.append({"item": name(some), "need": need, "buying_costs": coins(bought * need), "making_costs": coins(total)})
@@ -107,7 +111,8 @@ def breakdown(game, item: int, quantity: int) -> dict:
         rows.append(row)
     product = name(item)
     out = {"product": product, "quantity": quantity,
-           "crafts_in_order": steps, "professions_needed": sorted({s["profession"] for s in steps}),
+           "crafts_in_order": [{k: v for k, v in s.items() if k[0] != "_"} for s in steps],
+           "professions_needed": sorted({s["profession"] for s in steps}),
            "materials": [{k: v for k, v in r.items() if k[0] != "_" and v is not None} for r in rows],
            "to_buy_in_all": coins(total) if not unpriced else None}
     if unpriced:
@@ -130,8 +135,10 @@ def breakdown(game, item: int, quantity: int) -> dict:
                + " · " + tn(len(steps), "{n} kind of craft", "{n} kinds of craft"),
         "columns": [t("Item"), t("Need"), t("Have"), t("Buy"), t("Cost")],
         "rows": [[r["item"], r["need"], r["_held"] or "–", r["to_buy"] or "–", r["cost_to_buy"] or "–"] for r in rows[:25]],
-        "notes": [t("In this order: {steps}", steps=" → ".join(s["craft"] for s in steps[:12]))]
-                 + ([t("Held elsewhere: {where}", where="; ".join(elsewhere[:10]))] if elsewhere else [])
+        "steps": [{"text": s["craft"], "parts": s["_parts"],
+                   "detail": s["profession"] + (" · " + t("turns grey at skill {n}", n=s["turns_grey_at_skill"]) if s.get("turns_grey_at_skill") else "")}
+                  for s in steps[:20]],
+        "notes": ([t("Held elsewhere: {where}", where="; ".join(elsewhere[:10]))] if elsewhere else [])
                  + [t("Lowest listings from your own scans. What you and your other characters held at each one's last logout.")],
     }
     return out
@@ -196,6 +203,7 @@ def uses(game, item: int) -> dict:
                + tn(len(products), "{n} product in all", "{n} products in all"),
         "columns": [t("Product"), t("Profession"), t("Takes"), t("Listed for")],
         "rows": [[p["product"], p["profession"], p["takes_of_this_item"], p["listed_for"] or "–"] for p in products[:20]],
+        "links": [p["product"] for p in products[:20]],   # each product opens its own card: what it is made of
         "notes": [t("Takes: how many {item} one of the product needs in all, through every craft on the way.", item=name)],
     }
     return out

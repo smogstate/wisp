@@ -147,6 +147,7 @@ RU = {
     "Every recipe in the game": "Все рецепты игры", "{n} recipes beyond your own professions": "рецептов сверх ваших профессий: {n}",
     "the game gave none: tell Wisp's author": "игра не выдала ни одного: сообщите автору Wisp",
     "not yet: Wisp's addon reads them in the background about a minute after login; then /wisp sync": "пока нет: аддон Wisp читает их в фоне примерно через минуту после входа; затем /wisp sync",
+    "turns grey at skill {n}": "серый с навыка {n}", "Nothing can be shown for that item.": "Для этого предмета показать нечего.",
     "Shopping list, down to raw materials": "Список покупок: до сырья", "Buy": "Купить",
     "bags": "сумки", "bank": "банк", "shared bank": "общий банк", "{who}: bags": "{who}: сумки", "{who}: bank": "{who}: банк",
     "To craft {n} × {item}": "Чтобы изготовить {n} × {item}", "nothing to buy: you hold it all": "покупать нечего: всё уже есть",
