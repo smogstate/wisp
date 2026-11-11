@@ -2,6 +2,6 @@
 ## Title: Wisp
 ## Notes: Game side of the Wisp assistant: saves a snapshot at logout, runs pasted commands. /wisp
 ## OptionalDeps: Questie, TomTom, Auctionator, GatherMate2, Wisp_Inbox
-## SavedVariables: WispSnapshot, WispData, WispQuests, WispQuestsKey, WispItems, WispItemsKey
+## SavedVariables: WispSnapshot, WispData, WispQuests, WispQuestsKey, WispItems, WispItemsKey, WispRecipes, WispRecipesKey
 
 Wisp.lua

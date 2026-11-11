@@ -52,6 +52,8 @@ def make_wow_dir(tmp: Path, flags="") -> Path:
     kept = f'WispQuests = "{quests[1]}"\nWispQuestsKey = "{quests[2]}"\n' if quests else ""
     items = next((l.split(" ") for l in lines if l.startswith("ITEMS ")), None)
     kept += f'WispItems = "{items[1]}"\nWispItemsKey = "{items[2]}"\n' if items else ""
+    every = next((l.split(" ") for l in lines if l.startswith("RECIPES ")), None)
+    kept += f'WispRecipes = "{every[1]}"\nWispRecipesKey = "{every[2]}"\n' if every else ""
     (saved / "Wisp.lua").write_text(f'\nWispData = {{\n["recipes"] = {{\n}},\n}}\nWispSnapshot = "{snapshot}"\n{kept}', encoding="utf-8")
     return tmp
 
@@ -1844,6 +1846,63 @@ def test_alts_recipes(tmp: Path):
     assert all(b["owner"] is None for b in Game.load(make_wow_dir(tmp / "solo")).crafting.books)
 
 
+def test_whole_graph(tmp: Path):
+    """Every recipe in the game joins the graph: an item followed up to all it becomes, a product down to its raw materials."""
+    game = Game.load(make_wow_dir(tmp, flags="questindex"))
+    assert game.recipes_read and [r["name"] for r in game.crafting.world_recipes] == ["Herb Baked Egg", "Charred Wolf Meat"], \
+        "a cook's recipes, though this character is a tailor: the tailor's own are not doubled"
+    assert game.crafting.recipes[8604]["profession"] == "Cooking" and game.crafting.recipes[8604]["learned"] is False
+
+    # down: an Azure Silk Hood is two bolts, two dyes and a thread; a bolt is four silk
+    tree = run_tool(game, "craft_tree", {"item": "Azure Silk Hood", "quantity": 3})
+    assert [s["craft"] for s in tree["crafts_in_order"]] == ["6 × Bolt of Silk Cloth", "3 × Azure Silk Hood"], "the parts first"
+    assert tree["crafts_in_order"][0]["who_can"] == "this character" and tree["professions_needed"] == ["Tailoring"]
+    raw = {r["item"]: r for r in tree["raw_materials"]}
+    assert set(raw) == {"Silk Cloth", "Blue Dye", "Fine Thread"}, raw.keys()
+    assert (raw["Silk Cloth"]["need"], raw["Silk Cloth"]["have"], raw["Silk Cloth"]["to_get"], raw["Silk Cloth"]["cost_of_all"]) == (24, 32, 0, "1g 8s")
+    assert raw["Blue Dye"]["need"] == 6 and raw["Fine Thread"]["need"] == 3 and raw["Fine Thread"]["sold_by_a_vendor"] is True
+    assert tree["no_auction_price_for"] == ["Blue Dye", "Fine Thread"] and tree["cost_of_the_priced_ones"] == "1g 8s" and tree["raw_materials_cost"] is None
+    assert tree["product_listed_for"] == "2g 70s"
+    # an intermediate cheaper to buy than to make is named: a bolt is listed at 21s, four silk cost 18s, so here making wins
+    assert "cheaper_to_buy_than_to_make" not in tree
+    shown = run_tool(game, "craft_tree", {"item": "Azure Silk Hood", "show": True})
+    card = game.cards[-1]
+    assert "shown" in shown and card["heading"] == "Crafting, down to raw materials" and card["table"]["title"] == "Raw materials for 1 × Azure Silk Hood"
+    assert card["table"]["rows"][0] == ["Silk Cloth", 8, 32, "4s 50c", "36s"] and "2 × Bolt of Silk Cloth → 1 × Azure Silk Hood" in card["table"]["notes"][0]
+    # a profession nobody of the player's has: still broken down, and it says who cannot
+    egg = run_tool(game, "craft_tree", {"item": "Herb Baked Egg"})
+    assert egg["crafts_in_order"][0]["who_can"] == "none of your characters has learned it: needs Cooking" and egg["professions_needed"] == ["Cooking"]
+    assert "raw material" in run_tool(game, "craft_tree", {"item": "Silk Cloth"})["error"]
+    assert "error" in run_tool(game, "craft_tree", {"item": "Azure Silk Hood", "quantity": 0})
+
+    # up: silk goes into bolts, and through them into everything bolts make
+    up = run_tool(game, "item_uses", {"item": "silk cloth"})
+    assert up["used_directly_in"] == 1 and up["direct_recipes"][0]["recipe"] == "Bolt of Silk Cloth" and up["direct_recipes"][0]["needs_each"] == 4
+    assert up["direct_recipes"][0]["product_listed_for"] == "21s" and up["direct_recipes"][0]["all_materials_cost"] == "18s"
+    products = {p["product"]: p for p in up["end_products"]}
+    assert set(products) == {"Bolt of Silk Cloth", "Azure Silk Hood", "Small Silk Pack", "Not Learned Yet"}
+    assert products["Azure Silk Hood"]["takes_of_this_item"] == 8 and products["Azure Silk Hood"]["through"] == "Silk Cloth → Bolt of Silk Cloth → Azure Silk Hood"
+    assert products["Small Silk Pack"]["takes_of_this_item"] == 12 and products["Not Learned Yet"]["takes_of_this_item"] == 20
+    assert up["end_products"][0]["product"] == "Azure Silk Hood", "the dearest product first"
+    assert up["where_it_comes_from"] == {"creatures_dropping_it": 7, "objects_holding_it": 1} and up["you_hold"] == 32 and up["listed_for"] == "4s 50c"
+    meat = run_tool(game, "item_uses", {"item": "Tough Wolf Meat", "show": True})
+    assert meat["direct_recipes"][0]["who_can"].startswith("none of your characters") and game.cards[-1]["heading"] == "Where it is used"
+    assert game.cards[-1]["table"]["rows"] == [["Charred Wolf Meat", "Cooking", 1.0, "–"]]
+    hood = run_tool(game, "item_uses", {"item": "Azure Silk Hood"})
+    assert hood["used_directly_in"] == 0 and hood["ends_up_in"] == 0 and hood["where_it_comes_from"] == {"made_by_recipes": 1}
+    # the recipe search reaches them too, and says nobody of the player's has the profession
+    found = run_tool(game, "recipes", {"search": "baked egg"})["recipes"][0]
+    assert found["known_by"] == "none of your characters: it is a Cooking recipe" and found["learned"] is False
+    checked = {what: (status, detail) for what, status, detail in check(make_wow_dir(tmp / "c", flags="questindex"), call_model=False)}
+    assert checked["Every recipe in the game"] == ("ok", "2 recipes beyond your own professions")
+
+    # a game that hands none over: an empty list, said plainly; and without the list at all, the tools say how it comes
+    silent = Game.load(make_wow_dir(tmp / "s", flags="questindex,norecipelist"))
+    assert silent.recipes_read and silent.crafting.world_recipes == []
+    plain = Game.load(make_wow_dir(tmp / "p"))
+    assert not plain.recipes_read and "about a minute after login" in run_tool(plain, "item_uses", {"item": "Silk Cloth"})["note"]
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -1857,6 +1916,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as wg:
+            test_whole_graph(Path(wg))
         with tempfile.TemporaryDirectory() as al:
             test_alts_recipes(Path(al))
         with tempfile.TemporaryDirectory() as oc:

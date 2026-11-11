@@ -131,6 +131,10 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 every = game.questdb()
                 add(t("Every quest from Questie"), every is not None, t("{n} quests this character could take", n=len(every.quests) if every else 0),
                     t("not yet: Wisp's addon reads them in the background about a minute after login; log out after that"), optional=True)
+            add(t("Every recipe in the game"), bool(game.crafting.world_recipes) or game.recipes_read and bool(game.crafting.recipes),
+                t("{n} recipes beyond your own professions", n=len(game.crafting.world_recipes)),
+                t("the game gave none: tell Wisp's author") if game.recipes_read else
+                t("not yet: Wisp's addon reads them in the background about a minute after login; then /wisp sync"), optional=True)
             add(t("One-click cards"), bool((game.snapshot.get("addons") or {}).get("inbox")), t("the game reads Wisp's inbox"),
                 t("not yet: restart the game once, keep its sound enabled (the volume may be zero), then /wisp sync"), optional=True)
             if (addons / "Questie").is_dir():

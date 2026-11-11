@@ -86,6 +86,7 @@ class Game:
         self.market = None                 # the auction prices kept over time, when the app has them
         self.assets = None                 # the player's investments, when the app has a place for them
         self.live = None                   # the auction house as Blizzard publishes it, when the app can reach it
+        self.recipes_read = False          # whether the addon has read every recipe in the game
         self.web_seen: dict[str, str] = {}  # url -> title of every web page this conversation was given
         self.notes_dir: Path | None = None  # where research reports are kept, when the app has a place
         self.saved_file: Path | None = None  # the addon's saved file: Questie's whole quest list is kept there too
@@ -105,6 +106,11 @@ class Game:
         game.saved_file = saved
         from .questdb import read_index
         game.graph.attach(read_index(saved, "WispItems", "items"))   # Questie's whole item list, when the addon has read it
+        every = read_index(saved, "WispRecipes", "recipes")           # every recipe in the game, when the addon has read them
+        game.recipes_read = every is not None
+        game.graph.add_recipes(game.crafting.add_world(every))
+        for item, name in game.graph.names.items():                   # a reagent nobody of the player's uses still has its name
+            game.crafting.names.setdefault(item, name)
         return game
 
     def questdb(self):
@@ -1181,13 +1187,13 @@ class Game:
             return {"error": "show must be skill_up or all"}
         if isinstance(search, str) and search.strip():   # one recipe by name, learned or not, and how to come by it
             words = _clean(search, 80).lower().split()
-            hits = [r for b in books for r in b["recipes"]
+            hits = [r for r in [r for b in books for r in b["recipes"]] + self.crafting.world_recipes   # and every other recipe in the game
                     if all(w in (r["name"] + " " + (self.crafting.name(r["makes"]) if r["makes"] else "")).lower() for w in words)]
             if not hits:
                 return {"found": 0, "note": "No recipe of the professions read so far is named like that ("
                                             + ", ".join(b["profession"] for b in books) + "). The game lists a profession's recipes, "
                                             "learned or not, while its window is open. For the recipe item itself, try item_links."}
-            hits.sort(key=lambda r: (bool(r["owner"]), not r["learned"]))   # this character's own first, then what an alt has learned
+            hits.sort(key=lambda r: (bool(r.get("world")), bool(r["owner"]), not r["learned"]))   # this character's own first, then an alt's, then the rest
             return {"found": len(hits), "recipes": [
                 {**self.crafting.describe(r), "profession": r["profession"],
                  **({} if r["learned"] else {"how_to_learn": self.graph.learn_from(r) or "not known: a trainer may teach it"})}
@@ -1576,6 +1582,70 @@ class Game:
         if args.get("show") is True and table and table["rows"]:
             self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "table": table})
             out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
+        return out
+
+    def _one_item(self, args: dict):
+        """The item a tool was asked about, or the answer to give instead."""
+        name = _clean(args.get("item"), 80) if isinstance(args.get("item"), str) else ""
+        if not name:
+            return None, {"error": "item must be an item name"}
+        found = self.graph.find(name)
+        if not found:
+            return None, {"error": f"Wisp knows no item named like '{name}'. Names are as the player's game writes them."}
+        if len(found) > 1:
+            return None, {"several_items_match": [self.graph.names[i] for i in found], "note": "Ask again with one of these names exactly."}
+        return found[0], None
+
+    def _recipes_note(self) -> str:
+        return ("Recipes are every recipe in the game, read from the client by Wisp's addon, whatever professions the player has."
+                if self.recipes_read else
+                "Only the recipes of the player's own characters' professions are known so far: Wisp's addon reads every recipe in "
+                "the game in the background about a minute after login, and they are here after the next /wisp sync or logout.")
+
+    def tool_craft_tree(self, args: dict) -> dict:
+        """Down the graph: a product broken into its raw materials through every recipe on the way."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        item, instead = self._one_item(args)
+        if instead:
+            return instead
+        quantity = args.get("quantity", 1)
+        if not isinstance(quantity, int) or isinstance(quantity, bool) or not 1 <= quantity <= 10000:
+            return {"error": "quantity must be a whole number from 1 to 10000"}
+        from .tree import breakdown
+        out = breakdown(self, item, quantity)
+        if out.get("error") == "no recipe":
+            return {"error": f"No recipe known to Wisp makes {self.graph.names[item]}: it is a raw material, or its recipe is not known. "
+                             + self._recipes_note() + " For where it comes from, use item_links."}
+        card = out.pop("_card")
+        if args.get("show") is True:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Crafting, down to raw materials"), "table": card})
+            out["shown"] = "a card with the raw materials and the order of crafts is now shown to the player: do not repeat them in your text"
+        out["note"] = ("Worked out in code. Each intermediate is made by the recipe the player can best use (their own, then another "
+                       "character's, then any); who_can says who. Prices are the lowest listings from the player's own scans; have "
+                       "counts bags and bank at the last logout. A craft that makes several at once may leave some over. "
+                       + self._recipes_note())
+        return out
+
+    def tool_item_uses(self, args: dict) -> dict:
+        """Up the graph: everything an item goes into, directly and through what is made from it."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        item, instead = self._one_item(args)
+        if instead:
+            return instead
+        from .tree import uses
+        out = uses(self, item)
+        card = out.pop("_card")
+        if args.get("show") is True and card["rows"]:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Where it is used"), "table": card})
+            out["shown"] = "a card with the products is now shown to the player: do not repeat them in your text"
+        out["note"] = ("Worked out in code. direct_recipes use the item itself; end_products are everything it ends up in, through "
+                       "what is made from it, dearest first, with how many of the item one product takes in all. To judge what the "
+                       "item is worth, set its price against what its products are listed for and what else they take, how many "
+                       "recipes and professions want it, and how easily it is come by (a vendor selling it caps its price; a drop "
+                       "from few creatures keeps it scarce); price_history and market_depth say how its market has behaved. "
+                       "Listings are not sales. " + self._recipes_note())
         return out
 
     def tool_craft_plan(self, args: dict) -> dict:
@@ -2007,6 +2077,35 @@ TOOLS = [
         },
     },
     {
+        "name": "craft_tree",
+        "description": "A craftable item broken all the way down to raw materials, through every recipe on the way, "
+                       "whatever profession each needs: the crafts in order and who of the player's characters can do "
+                       "each, every raw material with how many are needed, how many the player has, and what they cost "
+                       "at auction, the total, what the product is listed for, and which intermediates are cheaper to "
+                       "buy than to make. Use it for 'what do I need in all to make X', 'what does X cost to craft from "
+                       "scratch', 'is crafting X worth it'. With show true the player sees it as a card.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"item": {"type": "string"}, "quantity": {"type": "integer", "minimum": 1, "maximum": 10000},
+                           "show": {"type": "boolean"}},
+            "required": ["item"], "additionalProperties": False,
+        },
+    },
+    {
+        "name": "item_uses",
+        "description": "Everything an item goes into, up the whole graph: the recipes that use it directly (any "
+                       "profession, the player's or not) and every product it ends up in through what is made from "
+                       "it, with how many of the item one product takes, what the products are listed for, who can "
+                       "craft them, and where the item itself comes from (vendors, drops, recipes). Use it for 'what "
+                       "is X used for', 'is X worth keeping or buying', 'what should I invest in': reason from what "
+                       "it becomes and how scarce it is. With show true the player sees the products as a card.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"item": {"type": "string"}, "show": {"type": "boolean"}},
+            "required": ["item"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "craft_plan",
         "description": "The arithmetic of a crafting plan, done in code: for each recipe and how many times to craft "
                        "it, the total materials, what the plan's own crafts supply (a bolt made in one step and used "
@@ -2112,7 +2211,10 @@ group quests, dungeon, raid, PvP), nearest first, each with the colour the quest
 now, call questing_route: it lays the zone's hand-ins, pick-ups and quests under way out as a route card. For where to \
 level next, compare zones by their quests worth doing, the experience on offer there and their quest levels against \
 the character's level. How fast they level, and when the next level comes at that pace, is in leveling. Any \
-particular quest, or quests out of reach (a chain's later parts, a zone's elite quests at any level), is in quest_search: \
+item can be followed through the whole game's recipes: item_uses goes up (everything it becomes, any profession) and \
+craft_tree goes down (a product to its raw materials, with the cost). When asked what an item is worth, whether to keep, \
+buy or invest in it, look at both its market (price_history, market_depth) and its place in that graph, and say which \
+facts your judgement rests on. Any particular quest, or quests out of reach (a chain's later parts, a zone's elite quests at any level), is in quest_search: \
 where it starts, what must come first, and whether this character can take it yet.
 
 For earning gold at the auction house, start from the player's own things: gold shows what their bags would fetch \

@@ -161,7 +161,7 @@ def main():
         assert [t["function"]["name"] for t in sent["tools"]] == ["character", "quests", "available_quests", "leveling", "questing_route", "gold", "investments",
             "live_auctions", "market_depth", "my_auctions", "auction_ledger", "quest_search", "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "price_history",
             "market_scan", "market_query", "item_links", "gathering", "farming",
-            "craft_plan",
+            "craft_tree", "item_uses", "craft_plan",
             "shopping_list", "notes", "waypoint"]
         assert sent["tools"][12]["type"] == "function" and sent["tools"][12]["function"]["parameters"]["required"] == ["quest_ids"]
 

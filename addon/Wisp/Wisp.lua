@@ -361,12 +361,59 @@ local function buildItemIndex(DB, ZoneDB, key)
   return { v = 1, key = key, items = items, npcs = npcs, objects = objects, maps = maps }
 end
 
+-- Every recipe in the game, whatever professions this character has (WispRecipes, WispRecipesKey):
+-- what each makes and from what, so an item can be followed up to everything it goes into and a
+-- product down to its raw materials. The profession window lists only one's own professions, but
+-- the client holds every recipe and gives one by its place in the list of skill abilities: those
+-- numbers are walked once per game version, a slice per frame. A client that answers nothing
+-- leaves an empty list behind, so it is not asked again until the game changes.
+local ABILITIES, ABILITIES_PER_SLICE = 80000, 1000
+
+local function recipeIndexKey()
+  local version, build = GetBuildInfo()
+  return table.concat({ "r1", tostring(version), tostring(build), GetLocale() }, "|")
+end
+
+local function buildRecipeIndex(key)
+  local T = C_TradeSkillUI
+  local basic = Enum and Enum.CraftingReagentType and Enum.CraftingReagentType.Basic
+  local seen, recipes, professions, professionAt, found = {}, {}, {}, {}, 0
+  for ability = 1, ABILITIES do
+    if ability % ABILITIES_PER_SLICE == 0 then coroutine.yield() end
+    local ok, r = pcall(T.GetRecipeInfoForSkillLineAbility, ability)
+    if ok and type(r) == "table" and type(r.recipeID) == "number" and type(r.name) == "string" and r.name ~= "" and not seen[r.recipeID]
+       and not (r.isDummyRecipe or r.isGatheringRecipe or r.isRecraft or r.isSalvageRecipe) then
+      seen[r.recipeID] = true
+      found = found + 1
+      if found % 40 == 0 then coroutine.yield() end   -- a schematic costs more than a look
+      local okS, plan = pcall(T.GetRecipeSchematic, r.recipeID, false)
+      local reagents = {}
+      for _, slot in ipairs(okS and type(plan) == "table" and plan.reagentSlotSchematics or {}) do
+        local first = slot.reagents and slot.reagents[1]
+        if first and first.itemID and (slot.quantityRequired or 0) > 0 and slot.required ~= false
+           and (basic == nil or slot.reagentType == nil or slot.reagentType == basic) then
+          reagents[#reagents + 1] = first.itemID
+          reagents[#reagents + 1] = slot.quantityRequired
+        end
+      end
+      if #reagents > 0 then
+        local okP, info = pcall(T.GetProfessionInfoByRecipeID, r.recipeID)
+        local name = okP and type(info) == "table" and (info.parentProfessionName or info.professionName) or "?"
+        if not professionAt[name] then professions[#professions + 1] = name; professionAt[name] = #professions end
+        recipes[#recipes + 1] = { id = r.recipeID, name = r.name, p = professionAt[name], makes = plan.outputItemID,
+                                  n = plan.quantityMin, grey = r.maxTrivialLevel, r = reagents }
+      end
+    end
+  end
+  return { v = 1, key = key, professions = professions, recipes = recipes }
+end
+
 -- One index at a time, a slice per frame; what was kept before stays if anything goes wrong.
-local indexRun, indexQueue = nil, {}
+local indexRun, indexQueue, indexGoing, indexQueued = nil, {}, false, {}
 local function indexStep()
   if not indexRun then
     indexRun = table.remove(indexQueue, 1)
-    if not indexRun then return end
+    if not indexRun then indexGoing = false; return end
   end
   local ok, index = coroutine.resume(indexRun.run)
   if ok and coroutine.status(indexRun.run) ~= "dead" then return C_Timer.After(0, indexStep) end
@@ -379,6 +426,21 @@ local function indexStep()
   C_Timer.After(0, indexStep)   -- the next one, if any
 end
 
+local function queueIndex(name, build, keep)   -- each index once per session
+  if indexQueued[name] or not (E and E.SerializeJSON and E.EncodeBase64) then return end
+  indexQueued[name] = true
+  indexQueue[#indexQueue + 1] = { run = coroutine.create(build), keep = keep }
+  if not indexGoing then indexGoing = true; indexStep() end
+end
+
+local function startRecipeIndex()
+  local T = C_TradeSkillUI
+  if not (T and T.GetRecipeInfoForSkillLineAbility and T.GetRecipeSchematic and T.GetProfessionInfoByRecipeID) then return end
+  local key = recipeIndexKey()
+  if key == WispRecipesKey and type(WispRecipes) == "string" then return end
+  queueIndex("recipes", function() return buildRecipeIndex(key) end, function(text, built) WispRecipes, WispRecipesKey = text, built end)
+end
+
 local function startQuestIndex(tries)
   tries = tries or 0
   local DB, ZoneDB = questieModule("QuestieDB"), questieModule("ZoneDB")
@@ -388,20 +450,16 @@ local function startQuestIndex(tries)
     end
     return
   end
-  if indexRun or #indexQueue > 0 or not (E and E.SerializeJSON and E.EncodeBase64) then return end
   local okK, key = pcall(questIndexKey, DB)
   if okK and not (key == WispQuestsKey and type(WispQuests) == "string") then
-    indexQueue[#indexQueue + 1] = { run = coroutine.create(function() return buildQuestIndex(DB, ZoneDB, key) end),
-                                    keep = function(text, built) WispQuests, WispQuestsKey = text, built end }
+    queueIndex("quests", function() return buildQuestIndex(DB, ZoneDB, key) end, function(text, built) WispQuests, WispQuestsKey = text, built end)
   end
   if type(DB.QueryItemSingle) == "function" and type(DB.ItemPointers) == "table" then
     local okI, itemsKey = pcall(indexKey, DB, DB.ItemPointers, tostring((UnitFactionGroup("player"))))
     if okI and not (itemsKey == WispItemsKey and type(WispItems) == "string") then
-      indexQueue[#indexQueue + 1] = { run = coroutine.create(function() return buildItemIndex(DB, ZoneDB, itemsKey) end),
-                                      keep = function(text, built) WispItems, WispItemsKey = text, built end }
+      queueIndex("items", function() return buildItemIndex(DB, ZoneDB, itemsKey) end, function(text, built) WispItems, WispItemsKey = text, built end)
     end
   end
-  indexStep()
 end
 
 ----------------------------------------------------------- dungeons ----
@@ -1673,7 +1731,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
     pcall(captureRecipes)
   else
     C_Timer.After(20, function() pcall(learnNames) end)   -- once the login rush is over
-    C_Timer.After(30, function() pcall(startQuestIndex) end)
+    C_Timer.After(30, function() pcall(startQuestIndex); pcall(startRecipeIndex) end)
     pcall(startInbox)
     pcall(pruneLoot)
     pcall(xpChanged)   -- where the bar stands as the session begins

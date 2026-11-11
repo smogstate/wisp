@@ -429,6 +429,20 @@ C_TradeSkillUI = {
   GetRecipeSchematic = function(id) return recipes[id].plan end,
   GetRecipeSourceText = function(id) return id == 8791 and "|cffffd100Vendor:|r Alexandra Bolero" or nil end,
 }
+-- Every recipe in the game by its place among the skill abilities, whoever has the profession: the tailor's own
+-- above, and a cook's that this character cannot see in any window. Herb Baked Egg needs an egg and spices.
+recipes[8604] = { info = { name = "Herb Baked Egg", learned = false, maxTrivialLevel = 90 },
+                  plan = { outputItemID = 6888, quantityMin = 1, quantityMax = 1, reagentSlotSchematics = { slot(6889, 1), slot(2678, 1) } } }
+recipes[2538] = { info = { name = "Charred Wolf Meat", learned = false, maxTrivialLevel = 85 },
+                  plan = { outputItemID = 2679, quantityMin = 1, quantityMax = 1, reagentSlotSchematics = { slot(750, 1) } } }
+local abilities = { [11] = 3839, [12] = 8760, [13] = 3813, [14] = 8791, [15] = 1, [20] = 8604, [21] = 2538, [22] = 2538 }
+for id, recipe in pairs(recipes) do recipe.info.recipeID = id end
+C_TradeSkillUI.GetRecipeInfoForSkillLineAbility = function(ability) return abilities[ability] and recipes[abilities[ability]].info or nil end
+C_TradeSkillUI.GetProfessionInfoByRecipeID = function(id)
+  if id == 8604 or id == 2538 then return { professionName = "Classic Cooking", parentProfessionName = "Cooking" } end
+  return { professionName = "Tailoring" }
+end
+if flags:find("norecipelist") then C_TradeSkillUI.GetRecipeInfoForSkillLineAbility = function() return nil end end
 local bagSlots = { [0] = { { itemID = 4306, stackCount = 20, itemName = "Silk Cloth" }, { itemID = 4306, stackCount = 12, itemName = "Silk Cloth" },
                            false, { itemID = 6948, stackCount = 1, itemName = "Hearthstone", isBound = true } },
                    [1] = { { itemID = 2321, stackCount = 3 }, { itemID = 2770, stackCount = 4, itemName = "Copper Ore" } } }
@@ -667,6 +681,7 @@ if mode == "snapshot" then
   out("SNAPSHOT " .. tostring(WispSnapshot))
   if WispQuests then out("QUESTS " .. WispQuests .. " " .. WispQuestsKey) end
   if WispItems then out("ITEMS " .. WispItems .. " " .. WispItemsKey) end
+  if WispRecipes then out("RECIPES " .. WispRecipes .. " " .. (WispRecipesKey:gsub(" ", "_"))) end
   if SAVED then
     local days = {}
     for _, d in ipairs(SAVED.market.days) do days[#days + 1] = number(d.day - SAVED.market.today) .. ":" .. number(#d.rows / 4) end

@@ -52,6 +52,9 @@ def coin_units() -> tuple[str, str, str]:
 
 
 RU_COUNTED = {
+    "{n} kinds of craft": ("{n} вид изготовления", "{n} вида изготовления", "{n} видов изготовления"),
+    "{n} recipes use it directly": ("{n} рецепт использует напрямую", "{n} рецепта используют напрямую", "{n} рецептов используют напрямую"),
+    "{n} products in all": ("всего {n} изделие", "всего {n} изделия", "всего {n} изделий"),
     "{n} hours": ("{n} час", "{n} часа", "{n} часов"),
     "{n} days": ("{n} день", "{n} дня", "{n} дней"),
     "{n} quests finished": ("Выполнено {n} задание", "Выполнено {n} задания", "Выполнено {n} заданий"),
@@ -140,6 +143,16 @@ RU = {
     "none yet: open a mailbox that holds auction mail, then log out": "пока нет: откройте почтовый ящик с письмами аукциона, затем выйдите",
     "Looting measured by Wisp": "Добыча, измеренная Wisp", "{looted} corpses and nodes over {days} days": "трупов и мест сбора: {looted}, дней: {days}",
     "none yet: it starts with the first thing you loot after this update": "пока нет: начнётся с первой добычи после этого обновления",
+    "Every recipe in the game": "Все рецепты игры", "{n} recipes beyond your own professions": "рецептов сверх ваших профессий: {n}",
+    "the game gave none: tell Wisp's author": "игра не выдала ни одного: сообщите автору Wisp",
+    "not yet: Wisp's addon reads them in the background about a minute after login; then /wisp sync": "пока нет: аддон Wisp читает их в фоне примерно через минуту после входа; затем /wisp sync",
+    "Crafting, down to raw materials": "Изготовление: до сырья", "Where it is used": "Где используется",
+    "Raw materials for {n} × {item}": "Сырьё для {n} × {item}", "about {sum} at auction": "около {sum} на аукционе",
+    "{sum} for what has a price": "{sum} за то, что имеет цену", "Need": "Нужно", "Cost": "Цена",
+    "In this order: {steps}": "По порядку: {steps}",
+    "Lowest listings from your own scans. Bags and bank as of your last logout.": "Минимальные цены из ваших сканирований. Сумки и банк — на момент последнего выхода.",
+    "What {item} goes into": "Во что идёт {item}", "Product": "Изделие", "Profession": "Профессия", "Takes": "Расход", "Listed for": "Цена лота",
+    "Takes: how many {item} one of the product needs in all, through every craft on the way.": "Расход: сколько {item} нужно на одно изделие всего, через все промежуточные изготовления.",
     "One-click cards": "Карточки в один клик", "the game reads Wisp's inbox": "игра читает входящие Wisp",
     "not yet: restart the game once, keep its sound enabled (the volume may be zero), then /wisp sync": "пока нет: перезапустите игру один раз, не выключайте в ней звук (громкость может быть нулевой), затем /wisp sync",
     "Wisp added what one-click cards need. Restart the game once so it sees the new files.": "Wisp добавил то, что нужно для карточек в один клик. Перезапустите игру один раз, чтобы она увидела новые файлы.",

@@ -34,11 +34,7 @@ class ItemGraph:
         self.bosses: dict[int, list] = {}     # item -> bosses that drop it
         self.sources: dict[int, dict] = {}    # item -> who sells it, what drops it, what it is found in
 
-        for recipe in (r for book in craft.books for r in book["recipes"]):   # every book: an alt's recipes are links too
-            for item, count in recipe["reagents"]:
-                self.used_in.setdefault(item, []).append((recipe, count))
-            if recipe["makes"]:
-                self.made_by.setdefault(recipe["makes"], []).append(recipe)
+        self.add_recipes(r for book in craft.books for r in book["recipes"])   # every book: an alt's recipes are links too
 
         def name(item, text):
             text = _text(text, 80)
@@ -89,6 +85,14 @@ class ItemGraph:
                 if isinstance(total, int) and total > len(found[key]):
                     found[key + "_in_all"] = total   # Questie knows more than the few listed here
             self.sources[item] = {k: v for k, v in found.items() if v}
+
+    def add_recipes(self, recipes):
+        for recipe in recipes:
+            for item, count in recipe["reagents"]:
+                self.used_in.setdefault(item, []).append((recipe, count))
+            if recipe["makes"]:
+                self.made_by.setdefault(recipe["makes"], []).append(recipe)
+                self.names.setdefault(recipe["makes"], recipe["name"])
 
     def attach(self, index: dict | None):
         """Questie's whole item list, as the addon read it."""
@@ -168,7 +172,9 @@ class ItemGraph:
                 {"recipe_id": r["id"], "recipe": r["name"], "profession": r["profession"], "needs_each": count, "colour": r["colour"],
                  **({"makes": self.names.get(r["makes"], f"item {r['makes']}")} if r["makes"] else {}),
                  **({} if r["learned"] else {"learned": False}), **({"crafter": r["owner"]} if r["owner"] else {})}
-                for r, count in self.used_in[item]]
+                for r, count in self.used_in[item][:40]]
+            if len(self.used_in[item]) > 40:
+                out["more_recipes_use_it"] = len(self.used_in[item]) - 40   # item_uses has them all, and what they lead to
         if item in self.made_by:
             out["made_by_your_recipes"] = [
                 {"recipe_id": r["id"], "recipe": r["name"], "profession": r["profession"], "colour": r["colour"],

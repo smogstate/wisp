@@ -41,6 +41,7 @@ class Crafting:
         self.prices: dict[int, tuple[int, int | None]] = {}   # item id -> (copper, days since seen)
         self.recipes: dict[int, dict] = {}              # recipe id -> recipe
         self.books: list[dict] = []                     # one per profession whose window was opened
+        self.world_recipes: list[dict] = []             # every other recipe in the game, where the addon could read them
 
         for line in _list(snapshot.get("bags")):
             item, count = _int(line.get("id"), 1, 10**9) if isinstance(line, dict) else None, None
@@ -91,6 +92,34 @@ class Crafting:
                     if known is None or (recipe["learned"], not owner) > (known["learned"], not known["owner"]):
                         self.recipes[recipe["id"]] = recipe
             self.books.append(entry)
+
+    def add_world(self, index: dict | None) -> list[dict]:
+        """Every recipe in the game, as the addon read them from the client: those no book of the player's
+        characters holds are added, as recipes nobody of theirs has learned. Returns the ones added."""
+        added = []
+        if not index:
+            return added
+        professions = [_text(p, 40) or "?" for p in _list(index.get("professions"))]
+        for raw in _list(index.get("recipes")):
+            recipe_id = _int(raw.get("id"), 1, 10**9) if isinstance(raw, dict) else None
+            name = _text(raw.get("name"), 80) if recipe_id else None
+            if not name or recipe_id in self.recipes:
+                continue
+            flat = [_int(v, 1, 10**9) for v in _list(raw.get("r"))]
+            reagents = [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2) if flat[i] and flat[i + 1]]
+            if not reagents:
+                continue
+            makes, at = _int(raw.get("makes"), 1, 10**9), _int(raw.get("p"), 1, 1000)
+            if makes is not None:
+                self._name(makes, name)
+            recipe = {"id": recipe_id, "name": name, "profession": professions[at - 1] if at and at <= len(professions) else "?",
+                      "learned": False, "colour": None, "colour_read_at_skill": None, "grey_at": _int(raw.get("grey"), 1, 10000),
+                      "makes": makes, "makes_count": _int(raw.get("n"), 1, 10000) or 1, "reagents": reagents, "owner": None,
+                      "source": None, "world": True}
+            self.recipes[recipe_id] = recipe
+            added.append(recipe)
+        self.world_recipes = added
+        return added
 
     def _name(self, item: int, name) -> None:
         if _text(name, 80):
@@ -167,6 +196,8 @@ class Crafting:
             out["colour_read_at_skill"] = recipe["colour_read_at_skill"]
         if not recipe["learned"]:
             out["learned"] = False
+        if recipe.get("world"):
+            out["known_by"] = "none of your characters: it is a " + recipe["profession"] + " recipe"
         if recipe["owner"]:
             out["crafter"] = recipe["owner"]   # not the character played last: bags and bank counted here are not theirs
         if recipe["reagents"]:
