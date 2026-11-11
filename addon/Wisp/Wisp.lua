@@ -193,7 +193,7 @@ local function indexKey(DB, pointers, ...)
   local okV, version = pcall(meta, "Questie", "Version")
   local count = 0
   for _ in pairs(pointers) do count = count + 1 end
-  return table.concat({ okV and tostring(version) or "?", GetLocale(), count, ... }, "|")
+  return table.concat({ "f2", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f2: how places are chosen
 end
 
 local function questIndexKey(DB)
@@ -215,6 +215,41 @@ local function ids(list)
   return #out > 0 and out or nil
 end
 
+-- Where best to look for a creature or an object, from all the points Questie has for it: the zone that
+-- has most of them and, there, the real point nearest their middle (a waypoint in the thick of them, not
+-- on a stray one at the edge). Returns the place and how many points that zone has; for something found
+-- only inside an instance, no place and that instance's name.
+local function bestPlace(spawns, ZoneDB)
+  local best, bestCount, bestZone, inside = nil, 0, nil, nil
+  for zone, points in pairs(type(spawns) == "table" and spawns or {}) do
+    local open, sx, sy = {}, 0, 0
+    for _, p in ipairs(type(points) == "table" and points or {}) do
+      if type(p) == "table" and type(p[1]) == "number" and type(p[2]) == "number" then
+        if p[1] >= 0 then   -- Questie marks "inside an instance" as -1
+          open[#open + 1] = p
+          sx, sy = sx + p[1], sy + p[2]
+        elseif type(zone) == "number" and (inside == nil or zone < inside) then
+          inside = zone
+        end
+      end
+    end
+    if #open > bestCount or (#open > 0 and #open == bestCount and type(zone) == "number" and zone < bestZone) then
+      local ok, map = pcall(ZoneDB.GetUiMapIdByAreaId, ZoneDB, zone)
+      if ok and map then
+        local mx, my, near, nearest = sx / #open, sy / #open, nil, nil
+        for _, p in ipairs(open) do
+          local d = (p[1] - mx) ^ 2 + (p[2] - my) ^ 2
+          if not nearest or d < nearest then near, nearest = p, d end
+        end
+        best, bestCount, bestZone = { map = map, zone = mapName(map), x = round1(near[1]), y = round1(near[2]) }, #open, zone
+      end
+    end
+  end
+  if best then return best, bestCount end
+  local okA, area = pcall(C_Map.GetAreaInfo, inside)
+  return nil, 0, inside and okA and type(area) == "string" and area or nil
+end
+
 -- Names for a set of ids, each with one place where Questie has one, and the maps those places are on.
 local function namer(ZoneDB)
   local maps, mapSeen = {}, {}
@@ -226,12 +261,12 @@ local function namer(ZoneDB)
       local name = ask(fn, id, "name")
       if type(name) == "string" and name ~= "" then
         local entry = { id = id, name = name }
-        local spawns = located and ask(fn, id, "spawns")
-        local okP, found = pcall(places, { spawns = type(spawns) == "table" and spawns or nil }, ZoneDB)
-        local p = okP and found[1]
-        if p then
-          entry.map, entry.x, entry.y = p.map, p.x, p.y
+        local okP, p, points, inside = pcall(bestPlace, located and ask(fn, id, "spawns"), ZoneDB)
+        if okP and p then
+          entry.map, entry.x, entry.y, entry.n = p.map, p.x, p.y, points
           if not mapSeen[p.map] then mapSeen[p.map] = true; maps[#maps + 1] = { id = p.map, name = p.zone } end
+        elseif okP and inside then
+          entry.at = inside   -- only inside an instance: its name, and no point on a map
         end
         out[#out + 1] = entry
       end
@@ -325,9 +360,24 @@ local function buildItemIndex(DB, ZoneDB, key)
     end
     return friendly[npc]
   end
-  local function first(list, most)
-    local out = {}
-    for i = 1, math.min(#list, most) do out[i] = list[i] end
+  local walkable = {}
+  local function reachable(fn, id)   -- has a point on a map one can walk to
+    local key = (fn == DB.QueryNPCSingle and "n" or "o") .. id
+    if walkable[key] == nil then
+      local ok, place = pcall(bestPlace, ask(fn, id, "spawns"), ZoneDB)
+      walkable[key] = ok and place ~= nil
+    end
+    return walkable[key]
+  end
+  -- A few of a long list: of its first twelve, those one can walk to before those inside an instance.
+  local function first(list, most, fn)
+    local out, rest = {}, {}
+    for i = 1, math.min(#list, 12) do
+      if #out < most and reachable(fn, list[i]) then out[#out + 1] = list[i] else rest[#rest + 1] = list[i] end
+    end
+    for _, id in ipairs(rest) do
+      if #out < most then out[#out + 1] = id end
+    end
     return out
   end
   local order = {}
@@ -346,8 +396,8 @@ local function buildItemIndex(DB, ZoneDB, key)
       if #vendors + #drops + #objects > 0 then
         local entry = { id = id, name = name }
         if #vendors > 0 then entry.v = vendors end
-        if #drops > 0 then entry.d, entry.dn = first(drops, 3), #drops end
-        if #objects > 0 then entry.o, entry.on = first(objects, 2), #objects end
+        if #drops > 0 then entry.d, entry.dn = first(drops, 3, DB.QueryNPCSingle), #drops end
+        if #objects > 0 then entry.o, entry.on = first(objects, 2, DB.QueryObjectSingle), #objects end
         for _, npc in ipairs(vendors) do wantNpc[npc] = true end
         for _, npc in ipairs(entry.d or {}) do wantNpc[npc] = true end
         for _, object in ipairs(entry.o or {}) do wantObject[object] = true end

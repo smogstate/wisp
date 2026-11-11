@@ -116,17 +116,19 @@ class ItemGraph:
         if not entry:
             return {}
 
-        def people(kind, ids):
-            out = []
-            for some in _list(ids):
-                known = self.people[kind].get(some)
-                if known and _text(known.get("name"), 80):
-                    spot = [{"map": known["map"], "zone": self.maps.get(known["map"]), "x": known.get("x"), "y": known.get("y")}] if known.get("map") else []
-                    out.append({"kind": kind, "name": known["name"], "places": spot})
+        def people(kind, ids, prefix, role):
+            known = [k for k in (self.people[kind].get(some) for some in _list(ids)) if k and _text(k.get("name"), 80)]
+            out = self.game._who(prefix, [{"kind": kind, "name": k["name"], "places": [
+                {"map": k["map"], "zone": self.maps.get(k["map"]), "x": k.get("x"), "y": k.get("y")}] if k.get("map") else []} for k in known], role)
+            for person, k in zip(out, known):   # the point is the thick of its spawn points; one found only in an instance has none
+                if isinstance(k.get("n"), int) and k["n"] > 1 and person["where"]:
+                    person["spawn_points_in_that_zone"] = k["n"]
+                if not person["where"] and _text(k.get("at"), 60):
+                    person["inside"] = _text(k["at"], 60) + ": an instance, so no point on the map"
             return out
-        found = {"sold_by": self.game._who(f"w{item}.vendor", people("npc", entry.get("v")), t("sells {item}", item=label)),
-                 "dropped_by": self.game._who(f"w{item}.drop", people("npc", entry.get("d")), t("drops {item}", item=label)),
-                 "found_in": self.game._who(f"w{item}.object", people("object", entry.get("o")), t("holds {item}", item=label))}
+        found = {"sold_by": people("npc", entry.get("v"), f"w{item}.vendor", t("sells {item}", item=label)),
+                 "dropped_by": people("npc", entry.get("d"), f"w{item}.drop", t("drops {item}", item=label)),
+                 "found_in": people("object", entry.get("o"), f"w{item}.object", t("holds {item}", item=label))}
         for key, total in (("dropped_by", entry.get("dn")), ("found_in", entry.get("on"))):
             if isinstance(total, int) and total > len(found[key]):
                 found[key + "_in_all"] = total

@@ -142,7 +142,8 @@ class QuestDB:
                     seen = self.game._place(f"qdb{qid}.{role}.{len(out) + 1}",
                                             {"map": entry.get("map"), "zone": self.maps.get(entry.get("map")), "x": entry.get("x"),
                                              "y": entry.get("y")}, f"{person['name']}")
-                    person["where"] = seen or "no place known: inside an instance, or Questie has none"
+                    person["where"] = seen or (f"inside {self.clean(entry['at'], 60)}: an instance, so no point on the map"
+                                               if isinstance(entry.get("at"), str) else "no place known: Questie has none")
                 out.append(person)
                 if len(out) >= 4:
                     return out

@@ -1541,7 +1541,7 @@ def test_quest_search(tmp: Path):
     assert first["starts"][0]["name"] == "Gryan Stoutmantle" and first["starts"][0]["where"]["zone"] == "Westfall"
     assert second["state"] == "not yet" and second["why_not_open"] == ["needs level 14", "first: The Defias Brotherhood (id 155)"]
     assert second["kind"] == "dungeon" and second["colour"] == "red"
-    assert second["kill"] == [{"name": "Edwin VanCleef", "kind": "npc", "where": "no place known: inside an instance, or Questie has none"}]
+    assert second["kill"] == [{"name": "Edwin VanCleef", "kind": "npc", "where": "inside The Deadmines: an instance, so no point on the map"}]
     assert [(c["id"], c["state"]) for c in second["chain"]] == [(7, "done"), (155, "open by its requirements"), (166, "not yet")] and second["chain"][2]["this_one"]
 
     wolves = run_tool(game, "quest_search", {"name": "Wolfs Across the Border"})["quests"]   # misspelt: the closest name
@@ -1568,7 +1568,15 @@ def test_quest_search(tmp: Path):
     assert checked["Every quest from Questie"] == ("ok", f"{len(db.quests)} quests this character could take")
 
     # every item, too: who sells a recipe the character has never held
-    assert sorted(game.graph.world) == [2321, 4306, 7090], "items that come from nowhere, or only from the other faction's vendors, are left out"
+    assert sorted(game.graph.world) == [2321, 4306, 6325, 7090], "items that come from nowhere, or only from the other faction's vendors, are left out"
+    # a recipe that only drops: the creatures one can walk to come first, each with a point in the thick of its spawn points
+    drops = run_tool(game, "recipes", {"search": "baked egg"})["recipes"][0]["how_to_learn"]["recipe_items"][0]["dropped_by"]
+    assert [d["name"] for d in drops] == ["Roaming Mob", "Prowler", "Edwin VanCleef"], "the boss inside an instance last, though Questie lists it first"
+    assert drops[0]["where"] == [{"ref": "w6325.drop.1.1", "zone": "Westfall", "x": 51.0, "y": 52.0}] and drops[0]["spawn_points_in_that_zone"] == 4, \
+        "the zone with most of its points, and the real point nearest their middle: not the stray one at 90, 90, nor the lone one in Elwynn"
+    assert drops[2] == {"name": "Edwin VanCleef", "kind": "npc", "where": [], "inside": "The Deadmines: an instance, so no point on the map"}
+    marked = run_tool(Game.load(wow), "waypoint", {"refs": [drops[0]["where"][0]["ref"], drops[1]["where"][0]["ref"]]})
+    assert marked["shown"] == 2, "and the waypoint tool takes them, in a later question too"
     found = run_tool(game, "recipes", {"search": "learned yet"})
     assert found["found"] == 1 and found["recipes"][0]["learned"] is False
     how = found["recipes"][0]["how_to_learn"]
@@ -1582,7 +1590,7 @@ def test_quest_search(tmp: Path):
     link = run_tool(game, "item_links", {"item": "pattern not learned"})   # no colon typed: found all the same
     assert link["item"] == "Pattern: Not Learned Yet" and link["sold_by"][0]["name"] == "Alexandra Bolero"
     assert link["teaches"] == {"recipe_id": 8791, "recipe": "Not Learned Yet", "profession": "Tailoring", "already_learned": False}
-    assert checked["Every item from Questie"] == ("ok", "3 items with who sells or drops them")
+    assert checked["Every item from Questie"] == ("ok", "4 items with who sells or drops them")
 
     # a ref stays good in the next question, when everything has been read afresh: the seller of a recipe, a quest giver
     later = Game.load(wow)

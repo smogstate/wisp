@@ -319,8 +319,12 @@ QuestieDB.QueryNPCSingle = function(id, key) return npcs[id] and npcs[id][key] e
 QuestieDB.QueryObjectSingle = function(id, key) return objects[id] and objects[id][key] end
 -- its whole item list, a field at a time: a recipe scroll nobody here owns, sold by one vendor of each faction
 npcs[3005] = { name = "Horde Vendor", friendlyToFaction = "H", spawns = { [12] = { { 10, 10 } } } }
+npcs[900] = { name = "Roaming Mob", spawns = { [12] = { { 10, 10 } }, [40] = { { 50, 50 }, { 52, 50 }, { 51, 52 }, { 90, 90 } } } }
+C_Map.GetAreaInfo = function(area) return ({ [1581] = "The Deadmines", [1519] = "Stormwind City" })[area] end
 local rawItems = {
   [7090] = { name = "Pattern: Not Learned Yet", vendors = { 3005, 1347 } },
+  -- a recipe that only drops: from a boss inside an instance, from a mob that roams two zones, from a wolf
+  [6325] = { name = "Recipe: Herb Baked Egg", npcDrops = { 639, 900, 118 } },
   [2321] = { name = "Fine Thread", vendors = { 1347 } },
   [4306] = { name = "Silk Cloth", npcDrops = { 100, 101, 102, 103, 104, 105, 106 }, objectDrops = { 77 } },
   [6948] = { name = "Hearthstone" },                              -- comes from nowhere: left out
