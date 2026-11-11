@@ -302,7 +302,8 @@
     <option value="auto">Same as the game / Как в игре</option><option value="ru">Русский</option><option value="en">English</option>
   </select></div>
   <label class="check"><input id="auto-update" type="checkbox"> Keep Wisp up to date by itself</label>
-  <div class="hint" id="version"></div>
+  <div class="row"><span class="hint" id="version" style="flex:1;margin:0"></span>
+    <button id="check-update" type="button">Check for updates</button></div>
   <div class="problem" id="settings-problem" role="alert"></div>
   <div class="actions">
     <button id="check" type="button">Check setup</button>
@@ -663,7 +664,7 @@ const RU = {
   "This is version {version}": "Это версия {version}", " of {date}": " от {date}", "It is the newest.": "Она последняя.",
   "Fetching version {new}…": "Загружается версия {new}…", "Version {new} is ready: it starts the next time Wisp does.": "Версия {new} готова: она запустится при следующем старте Wisp.",
   "A newer one could not be fetched; Wisp will try again.": "Новую версию загрузить не удалось; Wisp попробует ещё раз.",
-  "It looks for a newer one only when this is ticked.": "Новая версия ищется, только когда стоит эта галочка.",
+  "It looks for a newer one only when this is ticked.": "Сама новая версия ищется, только когда стоит эта галочка.", "Check for updates": "Проверить обновления",
   " (no key yet)": " (ключа пока нет)", "{company} API key": "Ключ API {company}", "saved on this PC": "сохранён на этом ПК", "environment": "из переменной окружения",
   "Changing the provider starts a new conversation; the earlier one is kept.": "Смена провайдера начинает новый разговор; прежний сохраняется.",
   "Paste a key for this provider below to see all its models.": "Вставьте ниже ключ этого провайдера, чтобы увидеть все его модели.",
@@ -1263,11 +1264,7 @@ function showSettings(s) {
   $("bnet-secret").placeholder = s.battlenet ? "•••••••• (" + T(s.battlenet === "saved" ? "saved on this PC" : s.battlenet) + ")" : T("Client secret");
   $("cap").value = s.spend.cap;
   $("cap-hint").textContent = T("Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.", { spent: dollars(s.spend.today) });
-  const up = s.update || {};
-  $("version").textContent = !up.version ? T("This copy runs from source and does not update itself.")
-    : T("This is version {version}", up) + (up.built ? T(" of {date}", { date: up.built.slice(0, 10) }) : "") + ". "
-      + ({ current: T("It is the newest."), downloading: T("Fetching version {new}…", up), ready: T("Version {new} is ready: it starts the next time Wisp does.", up),
-           failed: T("A newer one could not be fetched; Wisp will try again."), off: T("It looks for a newer one only when this is ticked.") }[up.state] || "");
+  showVersion(s.update || {});
   // who answers: a provider and one of its models; and a key for each provider
   const provider = $("provider");
   provider.textContent = "";
@@ -1288,6 +1285,19 @@ function showSettings(s) {
   provider.value = s.provider;
   showModels(s.provider);
   return true;
+}
+
+// Which version this is and where a newer one stands; the button looks now, and restarts into one that is ready.
+function showVersion(up) {
+  const button = $("check-update");
+  button.hidden = !up.version;
+  button.disabled = false;
+  button.dataset.ready = up.state === "ready" ? "1" : "";
+  button.textContent = T(up.state === "ready" ? "Restart" : "Check for updates");
+  $("version").textContent = !up.version ? T("This copy runs from source and does not update itself.")
+    : T("This is version {version}", up) + (up.built ? T(" of {date}", { date: up.built.slice(0, 10) }) : "") + ". "
+      + ({ current: T("It is the newest."), downloading: T("Fetching version {new}…", up), ready: T("Version {new} is ready: it starts the next time Wisp does.", up),
+           failed: T("A newer one could not be fetched; Wisp will try again."), off: T("It looks for a newer one only when this is ticked.") }[up.state] || "");
 }
 
 // The models of one provider, from its own catalogue once it has a key.
@@ -1455,6 +1465,18 @@ refresh().then(async () => {
   if (s.needs_setup) openSettings();   // first run: nothing is configured yet
 });
 setInterval(refresh, 30000);
+$("check-update").onclick = async () => {
+  const button = $("check-update");
+  if (button.dataset.ready) {   // a newer version is downloaded: start again as it
+    const done = await post("/api/update", {});
+    if (done.error) $("settings-problem").textContent = done.error; else button.textContent = T("Restarting…");
+    return;
+  }
+  button.disabled = true; button.textContent = T("Checking…");
+  const answer = await post("/api/check-update", {});
+  if (answer.error) { $("settings-problem").textContent = answer.error; button.disabled = false; button.textContent = T("Check for updates"); return; }
+  showVersion(answer.update || {});
+};
 $("restart").onclick = async () => {
   const done = await (await api("/api/update", {})).json();
   if (done.error) add("div", "msg error", done.error);

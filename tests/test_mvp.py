@@ -1164,6 +1164,13 @@ def test_update(tmp: Path):
             update.current = lambda: {"commit": old, "runtime": "r1"}
             app.prefs["auto_update"] = False
             assert app.check_update(base) == "off", "switched off in Settings: it does not even look"
+            app.updating.acquire()
+            assert app.check_update(base, asked=True) == "off", "a look already under way: this one changes nothing"
+            app.updating.release()
+            assert app.check_update(base, asked=True) == "ready", "but the button in Settings looks all the same"
+            import shutil
+            shutil.rmtree(root)
+            tried.clear()
             app.prefs["auto_update"] = True
 
             # the usual update: the code alone, into Wisp's own folder, tried before it is trusted

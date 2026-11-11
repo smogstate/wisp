@@ -185,6 +185,7 @@ class App:
         self.persist = persist                   # False in tests and --fake: never touch real settings or keys
         self.token = secrets.token_urlsafe(16)   # only our own page may call the API
         self.busy = threading.Lock()             # one question at a time
+        self.updating = threading.Lock()         # one look for a newer version at a time
         self.stop = threading.Event()
         self.chat = None
         self.problem = None                      # why the model cannot be used, in words
@@ -235,12 +236,21 @@ class App:
         self.notes = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-notes-"))) / "notes"   # research reports
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
 
-    def check_update(self, base: str = update.RELEASE) -> str:
+    def check_update(self, base: str = update.RELEASE, asked: bool = False) -> str:
         """Look for a newer build and fetch it. Returns the state it left.
         Nearly always that is Wisp's code alone, into Wisp's own folder; the exe is
-        fetched only when the newer build needs a different one."""
+        fetched only when the newer build needs a different one. `asked`: the player
+        pressed the button, so it looks even when updating by itself is switched off."""
+        if not self.updating.acquire(blocking=False):   # the look every six hours and the button, never both at once
+            return self.update["state"]
+        try:
+            return self._check_update(base, asked)
+        finally:
+            self.updating.release()
+
+    def _check_update(self, base: str, asked: bool) -> str:
         mine, state = update.current(), self.update
-        if not mine or self.exe is None or not self.prefs["auto_update"]:
+        if not mine or self.exe is None or not (asked or self.prefs["auto_update"]):
             state["state"] = "off"
             return "off"
         info = update.latest(base)
@@ -774,6 +784,9 @@ def make_handler(app: App, port: int):
                 return self.send_json(200, {})
             if self.path == "/api/update":
                 return self.send_json(200, app.restart_updated())
+            if self.path == "/api/check-update":   # the button in Settings: look now, fetch what there is
+                app.check_update(asked=True)
+                return self.send_json(200, {"update": dict(app.update)})
             if self.path == "/api/open":
                 return self.send_json(200, app.open_outside(body.get("url")))
             if self.path == "/api/copy":
