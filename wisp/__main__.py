@@ -45,7 +45,7 @@ NO_FOLDER = "That folder has no Interface\\AddOns inside. Choose the World of Wa
 
 
 def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthropic",
-          model: str | None = None, battlenet=None) -> list[tuple[str, str, str]]:
+          model: str | None = None, battlenet=None, found_house=None) -> list[tuple[str, str, str]]:
     """Everything a first run depends on, as (what, "ok" | "FAIL" | "note", detail).
     A "note" is something optional that is missing. Makes one small real model call."""
     out = []
@@ -140,7 +140,7 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 add(t("Blizzard API"), False, bad=t("not set up: optional, in Settings"), optional=True)
             elif battlenet is not None:   # the player's own developer client: try Blizzard's data for real
                 from .blizzard import probe
-                for what, worked, detail in probe(battlenet, game.snapshot):
+                for what, worked, detail in probe(battlenet, game.snapshot, remember=found_house):
                     add(what, worked, detail, detail)
     return _key_checks(out, add, call_model, provider, model)
 
@@ -226,6 +226,12 @@ class App:
         self.history = History(local.APP_DIR / "snapshots" if persist else Path(tempfile.mkdtemp(prefix="wisp-snapshots-")))
         self.market = Market((local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-market-"))) / "market.sqlite")
         self.assets = Assets(self.market.file)   # investments live in the same file as the prices
+        from .blizzard import Live   # the auction house as Blizzard publishes it, when the player has set a client up
+
+        def remember_house(where):
+            if self.persist:
+                local.save_config({**local.load_config(), "bnet_house": where})
+        self.live = Live(lambda: None if self.battlenet() in (None, "missing") else self.battlenet(), saved.get("bnet_house"), remember_house)
         self.notes = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-notes-"))) / "notes"   # research reports
         self.addon_note = None                   # what Wisp just did to the addon, for Settings to show
 
@@ -383,6 +389,7 @@ class App:
             game.history = self.history
             game.notes_dir = self.notes
             game.assets = self.assets
+            game.live = self.live
             try:   # what the auction house's mail said, kept beyond the addon's sixty days
                 from .history import character_key
                 from .market import market_key
@@ -803,7 +810,7 @@ def make_handler(app: App, port: int):
                 if self.path == "/api/browse":
                     return self.send_json(200, app.browse())
                 results = check(app.wow_dir, call_model=not app.fake, provider=app.provider, model=app.models[app.provider],
-                                battlenet=app.battlenet())
+                                battlenet=app.battlenet(), found_house=app.live.found)
                 return self.send_json(200, {"results": [{"what": w, "status": s, "detail": d} for w, s, d in results]})
             if self.path != "/api/ask":
                 return self.send_json(404, {"error": "not found"})

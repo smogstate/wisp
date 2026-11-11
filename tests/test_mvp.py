@@ -1683,6 +1683,33 @@ def test_blizzard(wow: Path):
         bare = dict(snapshot, ownAuctions=None)
         assert run(snap=bare)["Blizzard API: your auction house"][0] is False, "with no auction of the player's up, it says how to find out"
         assert Blizzard.from_saved("id:secret").client_id == "id" and Blizzard.from_saved("nonsense") is None and Blizzard.from_saved(None) is None
+        # the same data for the assistant: one item's listings, the house found by itself and remembered
+        from wisp.blizzard import Live
+        stack["on"], kept = True, []
+        client = Blizzard("good-id", "good-secret", "eu", oauth=base + "/token", api=base)
+        game = Game.load(wow)
+        assert "has not set this up yet" in run_tool(game, "live_auctions", {"item": "Silk Cloth"})["error"] or game.live is None
+        game.live = Live(lambda: None)
+        told = run_tool(game, "live_auctions", {"item": "Silk Cloth"})["error"]
+        assert "has not set this up yet" in told and "develop.battle.net" in told, "no client: the assistant can say how to set it up"
+        game.live = Live(lambda: client, None, kept.append)
+        silk = run_tool(game, "live_auctions", {"item": "silk cloth"})
+        assert silk["auction_house"] == "Alliance Auction House 2" and kept[0]["house"] == 111 and kept[0]["each"] is False
+        assert (silk["lowest"], silk["auctions"], silk["listed_in_all"]) == ("22c", 2, 60), "a stack's buyout, divided by its size"
+        assert silk["price_ladder"] == [{"each": "22c", "listed": 20, "listed_up_to_here": 20}, {"each": "5s", "listed": 40, "listed_up_to_here": 60}]
+        assert silk["you_hold"] == 32
+        thread = run_tool(game, "live_auctions", {"item": "Fine Thread"})
+        assert thread["lowest"] == "50c" and thread["listed_in_all"] == 10, "a trade good: priced for one as it is"
+        assert "nothing_listed" in run_tool(game, "live_auctions", {"item": "Hearthstone"})
+        again = Live(lambda: client, kept[0])   # the next start: the house is remembered, nothing is searched for
+        again_game = Game.load(wow)
+        again_game.live = again
+        assert run_tool(again_game, "live_auctions", {"item": "Silk Cloth"})["lowest"] == "22c"
+        bare_game = Game(dict(snapshot, ownAuctions=None))
+        bare_game.live = Live(lambda: client)
+        assert "puts one auction up" in run_tool(bare_game, "live_auctions", {"item": "Silk Cloth"})["error"]
+        stack["on"] = False
+
         checked = {what: status for what, status, _ in check(wow, call_model=False, battlenet="missing")}
         assert checked["Blizzard API"] == "note", "not set up: an optional line, not a failure"
     finally:

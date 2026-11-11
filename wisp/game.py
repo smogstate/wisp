@@ -85,6 +85,7 @@ class Game:
         self.history = None                # the snapshot history, when the app has one
         self.market = None                 # the auction prices kept over time, when the app has them
         self.assets = None                 # the player's investments, when the app has a place for them
+        self.live = None                   # the auction house as Blizzard publishes it, when the app can reach it
         self.web_seen: dict[str, str] = {}  # url -> title of every web page this conversation was given
         self.notes_dir: Path | None = None  # where research reports are kept, when the app has a place
         self.saved_file: Path | None = None  # the addon's saved file: Questie's whole quest list is kept there too
@@ -566,6 +567,53 @@ class Game:
         """How many are listed for less than a price, from a ladder. A step holds everything up to
         its price, so this counts the steps that end below the price: never too many."""
         return max((listed for up_to, listed in steps if up_to < price), default=0)
+
+    def tool_live_auctions(self, args: dict) -> dict:
+        """Every listing of one item in the player's auction house, straight from Blizzard: no scan needed."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        setup = ("Blizzard publishes every auction of every WoW Forever auction house, refreshed about hourly, and Wisp can read "
+                 "it with the player's own free developer client: create one at develop.battle.net (API Access, Create Client, any "
+                 "unique name), then paste its Client ID and secret into Wisp's Settings under Blizzard auction data.")
+        name = _clean(args.get("item"), 80) if isinstance(args.get("item"), str) else ""
+        if not name:
+            return {"error": "item must be an item name"}
+        if self.live is None:
+            return {"error": "Live auction data is not available in this run of Wisp. " + setup}
+        found = self.graph.find(name)
+        if not found:
+            return {"error": f"Wisp knows no item named like '{name}'. Names are as the player's game writes them."}
+        if len(found) > 1:
+            return {"several_items_match": [self.graph.names[i] for i in found], "note": "Ask again with one of these names exactly."}
+        seen = self.live.item(found[0], self.snapshot)
+        if seen.get("error") == "not_set_up":
+            return {"error": "The player has not set this up yet. " + setup + " Until then, prices come from the player's own "
+                             "Auctionator scans (auction_prices, market_depth)."}
+        if seen.get("error") == "house_unknown":
+            return {"error": "Blizzard's data is reachable, but which of its auction houses is this character's is not known yet. "
+                             "Wisp finds it by the character's own auctions: the player puts one auction up, looks at the Auctions "
+                             "tab, logs out, and asks again. Until then use auction_prices and market_depth."}
+        if "error" in seen:
+            return {"error": "Blizzard's auction data could not be read: " + seen["error"]}
+        out = {"item": self.graph.names[found[0]], "auction_house": seen["house"], "data_minutes_old": seen["minutes_old"],
+               "auctions": seen["auctions"], "listed_in_all": seen["listed"],
+               "note": "Straight from Blizzard, as of its last refresh (about hourly) plus data_minutes_old: every buyout listing of "
+                       "this item in the player's auction house, the player's own included. Listings, not sales. Prices are for one."}
+        if not seen["steps"]:
+            out["nothing_listed"] = "No buyout listing of this item right now."
+            return out
+        below = 0
+        ladder = []
+        for each, qty in seen["steps"][:12]:
+            below += qty
+            ladder.append({"each": coins(each), "listed": qty, "listed_up_to_here": below})
+        out.update(lowest=coins(seen["steps"][0][0]), price_ladder=ladder)
+        if len(seen["steps"]) > 12:
+            out["dearer_steps_left_out"] = len(seen["steps"]) - 12
+        mine = self.crafting.bags.get(found[0], 0) + self.crafting.bank.get(found[0], 0)
+        if mine:
+            out["you_hold"] = mine
+        return out
 
     def tool_market_depth(self, args: dict) -> dict:
         """How deep an item's market is: how many are listed at each price above the lowest."""
@@ -1710,6 +1758,19 @@ TOOLS = [
         },
     },
     {
+        "name": "live_auctions",
+        "description": "Every listing of one item in the player's auction house right now, straight from Blizzard's own "
+                       "published auction data (refreshed about hourly): the lowest price, how many are listed, and the "
+                       "price ladder. Needs no scan in the game. It works once the player has entered their own free "
+                       "Blizzard developer client in Settings; if they have not, it says how, and you pass that on. "
+                       "Prefer it over auction_prices for 'what does X cost now' when it works; use it too when the "
+                       "player asks about the Blizzard API or live auction data.",
+        "input_schema": {
+            "type": "object", "properties": {"item": {"type": "string"}},
+            "required": ["item"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "market_depth",
         "description": "How deep an item's market is: how many are listed at each price above the lowest, the "
                        "biggest block of listings, and where the player's own auctions stand. With quantity: what "
@@ -2070,8 +2131,10 @@ order or what is uncertain; never repeat its steps or numbers. Prices are the pl
 scans and skill is as of the last logout, so say how old they are when it matters. Wisp only knows the recipes the \
 character's profession window listed; for a path beyond those, say what is missing rather than fill it in from memory.
 
-The price of anything at the auction house comes only from auction_prices, price_history, market_scan and \
-market_query, never from memory. Prices are the lowest the player's Auctionator addon saw listed on the days it scanned: a listing, not a sale, \
+The price of anything at the auction house comes only from live_auctions, auction_prices, price_history, market_scan and \
+market_query, never from memory. live_auctions is Blizzard's own published auction data, read with the player's own \
+developer client: if the player asks about the Blizzard API, live prices, or prices without scanning, call it; when it is \
+not set up, pass on what it says about setting it up instead of saying you have no access. Prices are the lowest the player's Auctionator addon saw listed on the days it scanned: a listing, not a sale, \
 and before the auction house's cut. Wisp keeps every scan day, so for questions about earning gold, good prices or \
 where a price is heading, look there first; say how many scan days an answer rests on, and give any estimate of a \
 future price as a range with its confidence, never as a certainty. When your answer rests on a price_history or \
