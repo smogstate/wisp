@@ -1955,6 +1955,34 @@ def test_whole_graph(tmp: Path):
     assert not plain.recipes_read and "about a minute after login" in run_tool(plain, "item_uses", {"item": "Silk Cloth"})["note"]
 
 
+def test_built_once(tmp: Path):
+    """Everything built on the game's file is built once and kept; a change in that file, or of language, builds it again."""
+    from wisp import i18n
+    wow = make_wow_dir(tmp, flags="questindex")
+    app = App(wow, fake=True)
+    first = app.load_game()
+    assert app.load_game() is first and app.state()["quests"] == 2 and app.load_game() is first, "the same file: nothing is read again"
+    list(app.ask("anything"))
+    assert app.load_game() is first, "a question does not build it again either"
+    ref = run_tool(first, "recipes", {"search": "learned yet"})["recipes"][0]["how_to_learn"]["recipe_items"][0]["sold_by"][0]["where"][0]["ref"]
+    assert ref in app.load_game().places, "and a place looked up in one question is still there in the next"
+    saved = next(wow.rglob("Wisp.lua"))
+    saved.write_text(saved.read_text(encoding="utf-8") + "\n-- the game wrote the file again\n", encoding="utf-8")
+    second = app.load_game()
+    assert second is not first and app.load_game() is second, "the game saved again: built anew, once"
+    try:
+        app.save_settings({"language": "ru"})
+        third = app.load_game()
+        assert third is not second and i18n.LANG == "ru" and third.places["q33.end.1.1"]["title"].endswith("(принимает задание)")
+        assert app.load_game() is third
+    finally:
+        app.save_settings({"language": "en"})
+        app.load_game()
+        i18n.set_language("en")
+    empty = App(None, fake=True)
+    assert empty.load_game() is not empty.load_game() and empty.load_game().problem, "no game folder: nothing to keep"
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -1968,6 +1996,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as bo:
+            test_built_once(Path(bo))
         with tempfile.TemporaryDirectory() as wg:
             test_whole_graph(Path(wg))
         with tempfile.TemporaryDirectory() as al:

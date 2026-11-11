@@ -192,6 +192,7 @@ class App:
         self.token = secrets.token_urlsafe(16)   # only our own page may call the API
         self.busy = threading.Lock()             # one question at a time
         self.updating = threading.Lock()         # one look for a newer version at a time
+        self._game = None                        # (what the game's file looked like, the Game built from it)
         self.stop = threading.Event()
         self.chat = None
         self.problem = None                      # why the model cannot be used, in words
@@ -425,13 +426,29 @@ class App:
         except Exception as e:
             self.problem = t("Cannot start the model: {why}", why=e)
 
+    def _stamp(self):
+        """What the game last wrote, by which a change is told: the saved file, when it was written, its size."""
+        try:
+            saved = find_saved_file(self.wow_dir) if self.wow_dir else None
+            stat = saved.stat() if saved else None
+            return (str(saved), stat.st_mtime_ns, stat.st_size) if stat else None
+        except OSError:
+            return None
+
     def load_game(self) -> Game:
-        """The current snapshot, filed into the history the first time it is seen."""
+        """The game as the addon last saved it, with everything built on it: quests, items, recipes and how they
+        hang together. Built once and kept; built again only when the game has written its file anew (a logout,
+        a /wisp sync) or Wisp's language has changed. A new snapshot is filed into the history as it is first seen."""
+        stamp = self._stamp()
+        kept = self._game
+        if kept is not None and stamp is not None and kept[0] == stamp and self.language(kept[1].snapshot) == i18n.LANG:
+            return kept[1]
         game = Game.load(self.wow_dir)
         wanted = self.language(game.snapshot)
         if wanted != i18n.LANG:
             i18n.set_language(wanted)
             game = Game.load(self.wow_dir)   # the names it gives to places are written in that language too
+        self._game = (stamp, game) if game.snapshot and stamp is not None else None
         if game.snapshot:
             self.history.ingest(game.snapshot)
             game.history = self.history
