@@ -18,6 +18,7 @@ stack. `Live` serves the model's live_auctions tool from the same data.
 import base64
 import gzip
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -41,6 +42,9 @@ class Blizzard:
         self.region = region if region in REGIONS else "eu"
         self.oauth, self.api = oauth, api or API.format(region=self.region)
         self._token, self._expires = None, 0.0
+        self.static = None    # the namespace game data answers under, once found: it may carry the data's version
+        self.tried = []       # the ones that did not answer
+        self.client = None    # the game's own version and build, a last guess at that version
 
     @classmethod
     def from_saved(cls, saved: str | None, region: str = "eu") -> "Blizzard | None":
@@ -75,9 +79,40 @@ class Blizzard:
         self._token, self._expires = answer["access_token"], time.time() + float(answer.get("expires_in") or 3600)
         return self._token
 
+    def _static_namespace(self) -> str:
+        """Game data for Forever was first seen only under a namespace that names the data's version
+        (static-1.60.1_70399-forever-eu), the plain one answering 403. Try the plain one, then any such name
+        found in what the API itself links to, then the game client's own version and build."""
+        if self.static:
+            return self.static
+        plain, self.tried = f"static-forever-{self.region}", []
+        candidates = [plain]
+        try:   # what the API links to from its ruleset pages
+            index = self._get_ns("/data/wow/ruleset/index", f"dynamic-forever-{self.region}", 30)
+            text = json.dumps(index)
+            first = next((r.get("id") for r in index.get("rulesets") or [] if isinstance(r, dict) and isinstance(r.get("id"), int)), None)
+            if first is not None:
+                text += json.dumps(self._get_ns(f"/data/wow/ruleset/{first}", f"dynamic-forever-{self.region}", 30))
+            candidates += re.findall(rf"static-[0-9A-Za-z._]+-forever-{self.region}", text)
+        except BlizzardError:
+            pass
+        if self.client:
+            candidates.append(f"static-{self.client}-forever-{self.region}")
+        for namespace in dict.fromkeys(candidates):
+            try:
+                self._get_ns("/data/wow/playable-class/index", namespace, 30)   # small, and there in every version of the game
+                self.static = namespace
+                return namespace
+            except BlizzardError as e:
+                self.tried.append(f"{namespace}: {e}")
+        raise BlizzardError(t("game data answers under none of: {tried}", tried="; ".join(self.tried)))
+
     def get(self, path: str, kind: str, timeout: float = 90) -> dict:
         """One API document. kind: static, dynamic or profile."""
-        query = urllib.parse.urlencode({"namespace": f"{kind}-forever-{self.region}", "locale": "en_US"})
+        return self._get_ns(path, self._static_namespace() if kind == "static" else f"{kind}-forever-{self.region}", timeout)
+
+    def _get_ns(self, path: str, namespace: str, timeout: float) -> dict:
+        query = urllib.parse.urlencode({"namespace": namespace, "locale": "en_US"})
         request = urllib.request.Request(f"{self.api}{path}?{query}", headers={"Authorization": "Bearer " + self.token()})
         try:
             data = json.loads(self._open(request, timeout))
@@ -113,12 +148,23 @@ def probe(api: Blizzard, snapshot: dict, remember=None) -> list[tuple[str, bool,
         out.append((t("Blizzard API: auction houses"), True, ", ".join(f"{h['id']} {h.get('name') or ''}".strip() for h in houses)))
     except BlizzardError as e:
         return out + [(t("Blizzard API: WoW Forever"), False, str(e))]
+    client = snapshot.get("client") if isinstance(snapshot.get("client"), dict) else {}
+    if isinstance(client.get("version"), str) and client.get("build"):
+        api.client = f"{client['version']}_{client['build']}"
     try:
-        item = api.get("/data/wow/item/4306", "static")
-        out.append((t("Blizzard API: items"), True, t("item 4306 is {name}", name=item.get("name") or "?")))
-    except BlizzardError as e:
-        out.append((t("Blizzard API: items"), False, str(e)))
-    out.extend(recipes_probe(api))
+        out.append((t("Blizzard API: game data"), True, t("answers as {namespace}", namespace=api._static_namespace())))
+        static = True
+    except BlizzardError as e:   # no items, professions or recipes without it; the auction house does not need it
+        out.append((t("Blizzard API: game data"), False, str(e)))
+        static = False
+    if static:
+        try:
+            item = api.get("/data/wow/item/4306", "static")
+            out.append((t("Blizzard API: items"), True, t("item 4306 is {name}; an item has: {fields}", name=item.get("name") or "?",
+                                                          fields=", ".join(sorted(item))[:300])))
+        except BlizzardError as e:   # many items are missing from Blizzard's data: not the end of the check
+            out.append((t("Blizzard API: items"), False, str(e)))
+        out.extend(recipes_probe(api))
 
     if not own_auctions(snapshot):
         try:
@@ -184,6 +230,12 @@ def recipes_probe(api: Blizzard) -> list[tuple[str, bool, str]]:
                       t("{profession}: {tiers} tiers, {n} recipes in the first; {recipe} needs {needs}; a recipe has: {fields}",
                         profession=pick.get("name") or pick["id"], tiers=len(tiers), n=len(recipes), recipe=recipe.get("name") or recipes[0]["id"],
                         needs=", ".join(needs) or "?", fields=", ".join(sorted(recipe)))))
+        # the skill a recipe needs: nobody knows yet whether Blizzard gives it, or where. Say what looks like it.
+        skill = sorted({f"{where}.{key}" for where, doc in (("profession", detail), ("tier", tier), ("recipe", recipe))
+                        for key in doc if re.search(r"skill|rank|level|difficult|trivial|learn|source", key, re.I)})
+        lines.append((t("Blizzard API: skill a recipe needs"), bool(skill),
+                      t("fields that may hold it: {fields}", fields=", ".join(skill)) if skill else t("no such field; a tier has: {fields}",
+                                                                                                   fields=", ".join(sorted(tier)))))
     except BlizzardError as e:
         lines.append((t("Blizzard API: recipes"), False, str(e)))
     return lines

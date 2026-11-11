@@ -314,6 +314,7 @@
     <button id="save" type="button" class="primary">Save</button>
   </div>
   <ul id="results"></ul>
+  <div class="actions"><button id="copy-results" type="button" hidden>Copy the results</button></div>
 </dialog>
 <dialog id="sessions" aria-labelledby="sessions-title">
   <div class="row">
@@ -580,7 +581,7 @@ const RU = {
   "Copy, then in the game: Ctrl+V twice": "«Копировать», затем в игре: дважды Ctrl+V",
   "Send to the game": "Отправить в игру", "Sent to the game": "Отправлено в игру", "Could not send": "Не удалось отправить",
   "Sent: it appears in the game in a moment. Nothing there? Copy, then Ctrl+V twice.": "Отправлено: появится в игре через мгновение. Не появилось? «Копировать», затем дважды Ctrl+V.",
-  "Open its recipe": "Открыть его рецепт",
+  "Open its recipe": "Открыть его рецепт", "Copy the results": "Скопировать результаты",
   "Copy for the game": "Копировать для игры", "Copy as text, to share": "Копировать текстом, чтобы поделиться",
   "Copied as text": "Скопировано текстом", "Copied": "Скопировано", "Copy failed": "Не удалось скопировать",
   "Copied. Now in the game: Ctrl+V twice": "Скопировано. Теперь в игре: дважды Ctrl+V",
@@ -1426,6 +1427,17 @@ $("check").onclick = async () => {
   const { results = [], error } = await post("/api/check", {});
   $("check").disabled = false; $("check").textContent = T("Check setup");
   if (error) { $("settings-problem").textContent = error; return; }
+  $("copy-results").hidden = !results.length;
+  $("copy-results").textContent = T("Copy the results");
+  $("copy-results").onclick = async () => {
+    const text = results.map(r => `[${T(r.status)}] ${r.what}` + (r.detail ? `: ${r.detail}` : "")).join("\n");
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch {
+      const area = document.createElement("textarea");
+      area.value = text; dialog.append(area); area.select(); ok = document.execCommand("copy"); area.remove();
+    }
+    $("copy-results").textContent = T(ok ? "Copied" : "Copy failed");
+  };
   for (const r of results) {
     const li = document.createElement("li");
     const mark = document.createElement("span"); mark.className = r.status; mark.textContent = T(r.status);

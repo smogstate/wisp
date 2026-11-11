@@ -1637,6 +1637,7 @@ def test_blizzard(wow: Path):
     from wisp.blizzard import Blizzard, probe
     stack = {"on": False}   # whether the stand-in prices a listing for the whole stack
     recipes = {"on": True}   # whether the stand-in has professions at all: nobody knows yet whether Forever's does
+    static = {"ns": "static-forever-eu"}   # the name game data answers under: the plain one, or one that names the data's version
 
     def house(number):
         if number == 110:
@@ -1673,12 +1674,18 @@ def test_blizzard(wow: Path):
             ns = parse_qs(url.query).get("namespace", [""])[0]
             if self.headers.get("Authorization") != "Bearer tok":
                 return self.reply(401, {})
-            if url.path == "/data/wow/item/4306" and ns == "static-forever-eu":
-                return self.reply(200, {"id": 4306, "name": "Silk Cloth"})
-            if ns == "static-forever-eu" and recipes["on"]:   # every profession's recipes, as other versions of the game have them
+            if ns.startswith("static-") and ns != static["ns"]:   # game data answers under one name only
+                return self.reply(403, {})
+            if url.path == "/data/wow/playable-class/index" and ns == static["ns"]:
+                return self.reply(200, {"classes": [{"id": 8, "name": "Mage"}]})
+            if url.path == "/data/wow/item/4306" and ns == static["ns"]:
+                return self.reply(200, {"id": 4306, "name": "Silk Cloth", "level": 30})
+            if url.path == "/data/wow/ruleset/1" and ns == "dynamic-forever-eu":   # what it links to names the data's version
+                return self.reply(200, {"id": 1, "name": "Normal", "playable_classes": {"href": base + "/data/wow/playable-class/index?namespace=static-1.60.1_70399-forever-eu"}})
+            if ns == static["ns"] and recipes["on"]:   # every profession's recipes, as other versions of the game have them
                 book = {"/data/wow/profession/index": {"professions": [{"id": 197, "name": "Tailoring"}, {"id": 185, "name": "Cooking"}]},
                         "/data/wow/profession/185": {"id": 185, "name": "Cooking", "skill_tiers": [{"id": 2548, "name": "Classic Cooking"}]},
-                        "/data/wow/profession/185/skill-tier/2548": {"categories": [{"name": "Everyday", "recipes": [{"id": 8604, "name": "Herb Baked Egg"}, {"id": 2538, "name": "Charred Wolf Meat"}]}]},
+                        "/data/wow/profession/185/skill-tier/2548": {"minimum_skill_level": 1, "maximum_skill_level": 300, "categories": [{"name": "Everyday", "recipes": [{"id": 8604, "name": "Herb Baked Egg"}, {"id": 2538, "name": "Charred Wolf Meat"}]}]},
                         "/data/wow/recipe/8604": {"id": 8604, "name": "Herb Baked Egg", "crafted_item": {"id": 6888},
                                                   "reagents": [{"reagent": {"id": 6889, "name": "Small Egg"}, "quantity": 1}, {"reagent": {"id": 2678, "name": "Mild Spices"}, "quantity": 1}]}}
                 if url.path in book:
@@ -1710,7 +1717,22 @@ def test_blizzard(wow: Path):
         lines = run()
         assert lines["Blizzard API: the client"] == (True, "accepted (EU)")
         assert lines["Blizzard API: WoW Forever"] == (True, "2 rulesets: Normal, Hardcore")
-        assert lines["Blizzard API: items"] == (True, "item 4306 is Silk Cloth")
+        assert lines["Blizzard API: game data"] == (True, "answers as static-forever-eu")
+        assert lines["Blizzard API: items"] == (True, "item 4306 is Silk Cloth; an item has: id, level, name")
+        assert lines["Blizzard API: skill a recipe needs"] == (True, "fields that may hold it: profession.skill_tiers, tier.maximum_skill_level, tier.minimum_skill_level")
+        # game data under a name that carries its version, the plain one refused: found from what the API links to
+        static["ns"] = "static-1.60.1_70399-forever-eu"
+        versioned = run()
+        assert versioned["Blizzard API: game data"] == (True, "answers as static-1.60.1_70399-forever-eu") and versioned["Blizzard API: recipes"][0] is True
+        # ... or from the game's own version and build, when the API links to nothing
+        static["ns"] = "static-1.60.1_70862-forever-eu"
+        guessed = run()
+        assert guessed["Blizzard API: game data"] == (True, "answers as static-1.60.1_70862-forever-eu"), guessed["Blizzard API: game data"]
+        static["ns"] = "static-9.9.9_1-forever-eu"
+        nowhere = run()
+        assert nowhere["Blizzard API: game data"][0] is False and "static-forever-eu: HTTP 403" in nowhere["Blizzard API: game data"][1]
+        assert "Blizzard API: professions" not in nowhere and nowhere["Blizzard API: your auction house"][0] is True, "the auction house does not need it"
+        static["ns"] = "static-forever-eu"
         assert lines["Blizzard API: professions"] == (True, "2: Tailoring, Cooking")
         assert lines["Blizzard API: recipes"] == (True, "Cooking: 1 tiers, 2 recipes in the first; Herb Baked Egg needs 1 × Small Egg, 1 × Mild Spices; "
                                                         "a recipe has: crafted_item, id, name, reagents")

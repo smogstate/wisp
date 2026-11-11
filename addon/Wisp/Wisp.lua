@@ -1427,7 +1427,7 @@ end
 local inboxWorks = function() return false end   -- set by the one-click inbox, further down
 
 local function buildSnapshot()
-  local version, _, _, interface = GetBuildInfo()
+  local version, build, _, interface = GetBuildInfo()
   local map = C_Map.GetBestMapForUnit("player")
   local pos = map and C_Map.GetPlayerMapPosition(map, "player")
   local x, y
@@ -1483,7 +1483,7 @@ local function buildSnapshot()
   return {
     v = 1,
     takenAt = time(),
-    client = { version = version, interface = interface, locale = GetLocale() },
+    client = { version = version, build = build, interface = interface, locale = GetLocale() },
     -- who this is: only so that Wisp can keep each character's history apart on this PC.
     -- It stays out of what the model is given.
     who = { name = UnitName("player"), realm = GetRealmName() },
