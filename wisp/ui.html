@@ -356,7 +356,7 @@ const token = new URLSearchParams(location.search).get("t") || "";
 const log = document.getElementById("log"), input = document.getElementById("input");
 const send = document.getElementById("send"), statusEl = document.getElementById("status");
 let running = false, usage = null, lastCard = null, turnCount = 0, collapsed = false, glass = false, fade = false;
-let lastRecap = null, snapshotsKept = 0;
+let lastRecap = null, snapshotsKept = 0, canDeliver = false;
 
 // "Since last time": what changed between your last two logouts, worked out by Wisp itself.
 function recapBlock(recap) {
@@ -473,7 +473,7 @@ async function refresh() {
     : T("level {level}", { level: s.level ?? "?" }) + " · " + TN(s.quests, "{n} quest", "{n} quests") + " · " + age(s.snapshot_age_minutes ?? 0);
   // the line is short and may be cut: its tooltip has all of it
   statusEl.title = (s.snapshot_problem || statusEl.textContent + " · " + T("Your character as of your last logout")) + T(" · answers from {model}", { model: s.model });
-  lastRecap = s.recap; snapshotsKept = s.snapshots;
+  lastRecap = s.recap; snapshotsKept = s.snapshots; canDeliver = s.inbox === true;
   glass = s.window.glass; fade = s.window.fade;
   document.body.classList.toggle("glass", glass);
   document.body.classList.toggle("fade", fade);
@@ -575,6 +575,8 @@ const RU = {
   ": lowest listed price per scan day. ": ": минимальная цена по дням сканирования. ",
   "Next steps": "Что делать дальше",
   "Copy, then in the game: Ctrl+V twice": "«Копировать», затем в игре: дважды Ctrl+V",
+  "Send to the game": "Отправить в игру", "Sent to the game": "Отправлено в игру", "Could not send": "Не удалось отправить",
+  "Sent: it appears in the game in a moment. Nothing there? Copy, then Ctrl+V twice.": "Отправлено: появится в игре через мгновение. Не появилось? «Копировать», затем дважды Ctrl+V.",
   "Copy for the game": "Копировать для игры", "Copy as text, to share": "Копировать текстом, чтобы поделиться",
   "Copied as text": "Скопировано текстом", "Copied": "Скопировано", "Copy failed": "Не удалось скопировать",
   "Copied. Now in the game: Ctrl+V twice": "Скопировано. Теперь в игре: дважды Ctrl+V",
@@ -974,7 +976,21 @@ function showCard(card, into = log) {
     setIcon(button, ok ? "check" : "x", T(ok ? "Copied" : "Copy failed"));
     hint.textContent = T(ok ? "Copied. Now in the game: Ctrl+V twice" : "Could not reach the clipboard");
   };
-  foot.append(hint, button);
+  foot.append(hint);
+  if (canDeliver) {   // straight into the running game; Copy stays beside it for when the game is not looking
+    const sendIt = document.createElement("button");
+    sendIt.type = "button"; sendIt.className = "primary icon";
+    setIcon(sendIt, "send", T("Send to the game"));
+    button.className = "icon";
+    sendIt.onclick = async () => {
+      const done = await post("/api/deliver", { text: card.wisp });
+      sendIt.dataset.state = done.sent ? "copied" : "failed";
+      setIcon(sendIt, done.sent ? "check" : "x", T(done.sent ? "Sent to the game" : "Could not send"));
+      hint.textContent = done.sent ? T("Sent: it appears in the game in a moment. Nothing there? Copy, then Ctrl+V twice.") : done.error;
+    };
+    foot.append(sendIt);
+  }
+  foot.append(button);
   el.append(head, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
             ...(card.table ? [tableBlock(card.table)] : []), ...(card.report ? [reportBlock(card.report)] : []),
             ...(card.sources ? [sourcesList(card.sources)] : []), ...(card.route ? [routeBlock(card.route)] : []),

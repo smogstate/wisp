@@ -95,8 +95,8 @@ Read from their own pages; none was run by us.
 
 What Wisp could take, in order of value:
 
-1. **Reload instead of logout.** `PLAYER_LOGOUT` fires on a UI reload too, so `/reload` already saves Wisp's snapshot. A `/wisp sync` that reloads is a five-second refresh instead of a trip to the character screen.
-2. **The load-on-demand inbox** (wow-ai): cards reach the game at a click, no paste. Documented addon API only; what is loaded would be a data file Wisp wrote. Touches the red line about text run as Lua, so it needs Denis's decision.
+1. **Reload instead of logout.** `PLAYER_LOGOUT` fires on a UI reload too, so `/reload` already saves Wisp's snapshot. A `/wisp sync` that reloads is a five-second refresh instead of a trip to the character screen. **Built 2026-11-11.**
+2. **The load-on-demand inbox** (wow-ai): cards reach the game at a click, no paste. **Built 2026-11-11** (Denis: yes; screenshots: no). Documented addon API only; what is loaded would be a data file Wisp wrote. Touches the red line about text run as Lua, so it needs Denis's decision.
 3. **Screenshot with a question**: in the design since the start ([Architecture](Architecture.md)), never built. Watching the Screenshots folder needs no capture code at all.
 4. **Learning by playing**: vendors' stock, trainers, flight points ([Game data](Game-Data.md) already plans it).
 5. **Macros with a Create button**, **routes that advance by themselves**, **the player's Claude subscription instead of a key**, **an MCP server**.

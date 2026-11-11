@@ -62,7 +62,7 @@ def test_snapshot_and_tools(wow: Path):
     snap = game.snapshot
     assert snap["character"]["class"] == "MAGE" and snap["character"]["level"] == 12
     assert snap["character"]["gold"] == 15 and snap["character"]["x"] == 42.1
-    assert snap["addons"] == {"questie": True, "tomtom": True, "dungeonjournal": True, "auctionator": True, "gathermate": True}
+    assert snap["addons"] == {"inbox": False, "questie": True, "tomtom": True, "dungeonjournal": True, "auctionator": True, "gathermate": True}
     assert [q["id"] for q in game.quests] == [33, 76], "header and hidden entries are skipped"
 
     wolves, mine = game.quests
@@ -1723,6 +1723,88 @@ def test_blizzard(wow: Path):
         server.shutdown()
 
 
+def test_one_click_cards(wow: Path, tmp: Path):
+    """A card reaches the running game without a paste: Wisp writes files, the real addon reads them as the game does."""
+    import shutil
+    from wisp import inbox
+    addons = tmp / "AddOns"
+    assert inbox.install(addons) is True and inbox.installed(addons), "new files: the game must start again to see them"
+    assert inbox.install(addons) is False, "what is there is left alone"
+    assert len(list(addons.iterdir())) == inbox.SLOTS + 1 and (addons / "Wisp_Inbox" / "valid.wav").read_bytes()[:4] == b"RIFF"
+    assert "LoadOnDemand: 1" in (addons / "Wisp_In001" / "Wisp_In001.toc").read_text() and "LoadOnDemand" not in (addons / "Wisp_Inbox" / "Wisp_Inbox.toc").read_text()
+
+    def game(folder, later=None, flags="", delivered=None):
+        env = {**os.environ, "WISP_STUB": flags, "WISP_ADDONS": str(folder)}
+        if later:
+            env["WISP_ADDONS_LATER"] = str(later)
+        if delivered:
+            env["WISP_DELIVERED"] = str(delivered)
+        ran = subprocess.run([*LUA, "inbox"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=env)
+        assert ran.returncode == 0, ran.stderr + ran.stdout
+        return ran.stdout.splitlines()
+
+    def waypoint(title, x):
+        return encode_wisp1([{"do": "tomtom.waypoint", "map": 1429, "x": x, "y": 40.2, "title": title}])
+    quiet = game(addons)
+    assert "ATLOGIN 0" in quiet and "SLOTS 0" in quiet and not [l for l in quiet if l.startswith("WAY ")], "nothing sent: nothing loaded"
+
+    # sent while the game runs: it sees the signal within a second, loads one slot, runs the message
+    later = tmp / "later"
+    shutil.copytree(addons, later)
+    assert inbox.deliver(later, waypoint("First", 48.9)) is None
+    live = game(addons, later)
+    assert "ATLOGIN 0" in live and "WAY tomtom 1429 0.489 0.402 First" in live and "SLOTS 1" in live, live
+    assert (later / "Wisp_Inbox" / "001.wav").stat().st_size > 0 and (later / "Wisp_Inbox" / "002.wav").stat().st_size == 0
+    assert "WispCursor = 2" in (later / "Wisp_Inbox" / "Cursor.lua").read_text()
+    number = int(float(next(l for l in live if l.startswith("DELIVERED ")).split()[1]))
+
+    # sent while the game was closed: run at login, once; after a reload it is not run again
+    queued = game(later)
+    assert "ATLOGIN 1" in queued and "WAY tomtom 1429 0.489 0.402 First" in queued
+    again = game(later, delivered=number)
+    assert "ATLOGIN 0" in again and "SLOTS 0" in again, "already run: not even a slot is spent"
+
+    # two more in quick succession: one slot brings both, and the earlier one is not run twice
+    third = tmp / "third"
+    shutil.copytree(later, third)
+    assert inbox.deliver(third, waypoint("Second", 10)) is None and inbox.deliver(third, waypoint("Third", 20)) is None
+    both = game(later, third, delivered=number)
+    assert [l for l in both if l.startswith("WAY ")] == ["WAY tomtom 1429 0.1 0.402 Second", "WAY tomtom 1429 0.2 0.402 Third"], both
+    assert "SLOTS 1" in both, "the slot said where the signals stand: the second signal costs no slot"
+
+    # an old message is not run late; what is not a Wisp message is never written; the reader stays as strict as a paste
+    stale = tmp / "stale"
+    shutil.copytree(addons, stale)
+    assert inbox.deliver(stale, waypoint("Old", 30), now=time.time() - 3600) is None
+    assert not [l for l in game(stale) if l.startswith("WAY ")], "an hour old: dropped"
+    for bad in ('WISP1:abc"\nos.exit()', "print('hi')", "WISP1:", 5, None):
+        assert inbox.deliver(stale, bad) == "not a Wisp message", bad
+    unknown = encode_wisp1([{"do": "run.lua", "code": "os.exit()"}])
+    assert inbox.deliver(stale, unknown) is None
+    assert any("skipped unknown command run.lua" in l for l in game(stale)), "the same whitelist as a paste"
+    assert inbox.deliver(tmp / "nowhere", waypoint("x", 1)) == "the inbox is not installed"
+
+    # a game whose sound cannot tell an empty file from a real one: off, and Wisp is told so
+    assert "SLOTS 0" in game(later, flags="nosound")
+    def told(env_addons, flags=""):
+        lines = subprocess.run([*LUA, "snapshot"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                               env={**os.environ, "WISP_STUB": flags, "WISP_ADDONS": str(env_addons)}).stdout.splitlines()
+        return json.loads(base64.b64decode(next(l for l in lines if l.startswith("SNAPSHOT ")).split()[1]))["addons"]["inbox"]
+    assert told(addons) is True and told(addons, "nosound") is False
+
+    # the app: installs the files beside the addon, offers Send only once the game has said it reads them
+    folder = make_wow_dir(tmp / "wow")
+    (folder / "Interface" / "AddOns").mkdir(parents=True)
+    app = App(folder, fake=True)
+    app.ensure_addon()
+    assert inbox.installed(folder / "Interface" / "AddOns") and "Restart the game" in app.addon_note
+    assert app.state()["inbox"] is False, "the game has not said yet that it reads the inbox"
+    assert app.can_deliver({"addons": {"inbox": True}}) is True
+    assert app.deliver(waypoint("From the app", 5)) == {"sent": True}
+    assert "From the app" not in (folder / "Interface/AddOns/Wisp_In100/In.lua").read_text() and "WISP1:" in (folder / "Interface/AddOns/Wisp_In100/In.lua").read_text()
+    assert "error" in app.deliver("rm -rf")
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -1736,6 +1818,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as oc:
+            test_one_click_cards(wow, Path(oc))
         test_blizzard(wow)
         with tempfile.TemporaryDirectory() as sm:
             test_shared_market(Path(sm))

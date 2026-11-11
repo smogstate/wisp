@@ -30,7 +30,7 @@ from .game import Game, find_saved_file
 from .history import History, ago_words, diff, recap
 from .assets import Assets
 from .market import Market
-from . import i18n, update
+from . import i18n, inbox, update
 from .i18n import t
 from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
 from .sessions import Sessions, record
@@ -131,6 +131,8 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 every = game.questdb()
                 add(t("Every quest from Questie"), every is not None, t("{n} quests this character could take", n=len(every.quests) if every else 0),
                     t("not yet: Wisp's addon reads them in the background about a minute after login; log out after that"), optional=True)
+            add(t("One-click cards"), bool((game.snapshot.get("addons") or {}).get("inbox")), t("the game reads Wisp's inbox"),
+                t("not yet: restart the game once, keep its sound enabled (the volume may be zero), then /wisp sync"), optional=True)
             if (addons / "Questie").is_dir():
                 add(t("Every item from Questie"), bool(game.graph.world), t("{n} items with who sells or drops them", n=len(game.graph.world)),
                     t("not yet: Wisp's addon reads them in the background about a minute after login; log out after that"), optional=True)
@@ -354,15 +356,29 @@ class App:
         if self.wow_dir is None:
             return
         before = local.addon_state(self.wow_dir)
-        if before == "installed":
-            return
-        problem = local.install_addon(self.wow_dir)
-        if problem:
-            self.addon_note = problem
-        elif before == "missing":
-            self.addon_note = t("Wisp installed its addon into the game. Restart the game so it loads.")
-        else:
-            self.addon_note = t("Wisp updated its addon in the game. Restart the game so the new version loads.")
+        if before != "installed":
+            problem = local.install_addon(self.wow_dir)
+            if problem:
+                self.addon_note = problem
+                return
+            self.addon_note = (t("Wisp installed its addon into the game. Restart the game so it loads.") if before == "missing"
+                               else t("Wisp updated its addon in the game. Restart the game so the new version loads."))
+        try:   # the one-click inbox: its own folders beside the addon; the game finds new files only when it starts
+            if inbox.install(self.wow_dir / "Interface" / "AddOns") and not self.addon_note:
+                self.addon_note = t("Wisp added what one-click cards need. Restart the game once so it sees the new files.")
+        except OSError:
+            pass   # cards still go by copy and paste
+
+    def can_deliver(self, snapshot: dict) -> bool:
+        """Whether a card can be sent to the game at a click: the files are there, and the game said at its last save that it reads them."""
+        return (self.wow_dir is not None and bool((snapshot.get("addons") or {}).get("inbox"))
+                and inbox.installed(self.wow_dir / "Interface" / "AddOns"))
+
+    def deliver(self, text) -> dict:
+        if self.wow_dir is None:
+            return {"error": t("Choose the game folder first.")}
+        problem = inbox.deliver(self.wow_dir / "Interface" / "AddOns", text)
+        return {"error": t("Could not send it to the game: {why}", why=problem)} if problem else {"sent": True}
 
     def new_chat(self, session: dict | None = None):
         """Start a fresh conversation, or continue a saved one. A saved one stays with
@@ -437,6 +453,7 @@ class App:
             "level": character.get("level"),
             "questie": (game.snapshot.get("addons") or {}).get("questie"),
             "needs_setup": self.wow_dir is None or (self.chat is None and not self.fake),
+            "inbox": self.can_deliver(game.snapshot),
             "theme": self.prefs["theme"],
             "opacity": self.prefs["opacity"],
             # two ways to be see-through: the page's own background (where the system blends single pixels),
@@ -789,6 +806,8 @@ def make_handler(app: App, port: int):
                 return self.send_json(200, {"update": dict(app.update)})
             if self.path == "/api/open":
                 return self.send_json(200, app.open_outside(body.get("url")))
+            if self.path == "/api/deliver":   # a card's Send button: into the running game, no paste
+                return self.send_json(200, app.deliver(body.get("text")))
             if self.path == "/api/copy":
                 text = body.get("text")
                 # only Wisp's own messages go to the clipboard this way

@@ -19,6 +19,8 @@ local E = C_EncodingUtil
 local RU = GetLocale and GetLocale() == "ruRU" and {
   ["read %d %s recipes. They reach Wisp when you log out."] = "рецептов прочитано: %d (%s). Они попадут в Wisp, когда вы выйдете из игры.",
   ["that is not a Wisp message."] = "это не сообщение Wisp.",
+  ["one-click cards are used up for this session: /wisp sync brings them back. Copy and Ctrl+V still work."] =
+    "карточки в один клик на эту сессию закончились: /wisp sync вернёт их. «Копировать» и Ctrl+V работают как прежде.",
   ["Wisp: paste now (Ctrl+V). Esc closes."] = "Wisp: вставьте сейчас (Ctrl+V). Esc закрывает.",
   ["could not read that message."] = "не удалось прочитать это сообщение.",
   ["stopped after 50 commands."] = "остановлено после 50 команд.",
@@ -1288,6 +1290,8 @@ local function marketDays()
   return { day0 = day0, today = today, oldest = math.min(lowest, today), days = days }
 end
 
+local inboxWorks = function() return false end   -- set by the one-click inbox, further down
+
 local function buildSnapshot()
   local version, _, _, interface = GetBuildInfo()
   local map = C_Map.GetBestMapForUnit("player")
@@ -1358,7 +1362,7 @@ local function buildSnapshot()
       map = map, zone = mapName(map), subzone = GetSubZoneText(),
       x = x and round1(x * 100), y = y and round1(y * 100),
     },
-    addons = { questie = DB ~= nil, tomtom = type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function",
+    addons = { inbox = inboxWorks(), questie = DB ~= nil, tomtom = type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function",
                dungeonjournal = journal ~= nil, auctionator = auctionator() ~= nil, gathermate = nodes ~= nil },
     dungeons = journal,
     bags = carried,
@@ -1511,6 +1515,84 @@ end)
 local opener = CreateFrame("Button", "WispInboxOpener")   -- the key binding clicks this
 opener:SetScript("OnClick", openBox)
 
+------------------------------------------------------- one-click inbox ----
+-- Cards without a paste (Denis, 2026-11-11). The overlay cannot talk to the running game, but the
+-- game can look at files that were there when it started:
+--   Wisp_In001 .. Wisp_In100   load-on-demand addons holding one data file each. Loading one reads
+--                              its file from disk at that moment; each loads once per UI session.
+--   Wisp_Inbox\NNN.wav          signals: an empty sound file will not play, a real (silent) one
+--                              will, so "is there something" costs nothing and loads nothing.
+--   Wisp_Inbox\Cursor.lua       read at every UI load: which signal comes next, and the newest message.
+-- The overlay writes the same recent messages into every slot and then raises the next signal; the
+-- addon sees the signal, loads the next unused slot, and hands each message it has not run yet to
+-- receive(): the same strict reader a paste goes through, and the same whitelist. What is loaded
+-- is a data file the overlay wrote: a table of numbers and WISP1 texts, nothing that runs.
+local INBOX_SLOTS, INBOX_SIGNALS, INBOX_KEEPS = 100, 300, 900
+local INBOX = "Interface\\AddOns\\Wisp_Inbox\\"
+local inbox = { slot = 0, works = false, on = false, wasted = 0 }
+
+local function playable(file)
+  local ok, will = pcall(PlaySoundFile, INBOX .. file, "Master")
+  return ok and will and true or false
+end
+
+-- Load the next slot and run what is new in it. True when something was.
+local function inboxLoad()
+  if inbox.slot >= INBOX_SLOTS then
+    inbox.on = false
+    say(L("one-click cards are used up for this session: /wisp sync brings them back. Copy and Ctrl+V still work."))
+    return false
+  end
+  inbox.slot = inbox.slot + 1
+  WispDelivery = nil
+  pcall((C_AddOns and C_AddOns.LoadAddOn) or LoadAddOn, ("Wisp_In%03d"):format(inbox.slot))
+  local got = WispDelivery
+  if type(got) ~= "table" then return false end
+  if type(WispData) ~= "table" then WispData = {} end
+  local fresh = false
+  for _, m in ipairs(type(got.msgs) == "table" and got.msgs or {}) do
+    if type(m) == "table" and type(m.n) == "number" and type(m.text) == "string" and m.n > (WispData.delivered or 0) then
+      WispData.delivered = m.n   -- n is when it was sent, in milliseconds: an old one is not run long after
+      if time() - m.n / 1000 < INBOX_KEEPS then
+        fresh = true
+        receive(m.text)
+      end
+    end
+  end
+  if type(got.c) == "number" and got.c >= 1 and got.c <= INBOX_SIGNALS then inbox.signal = got.c end
+  return fresh
+end
+
+local function inboxTick()
+  if not inbox.on or not playable(("%03d.wav"):format(inbox.signal)) then return end
+  local was = inbox.signal
+  if inboxLoad() then
+    inbox.wasted = 0
+  else
+    inbox.wasted = inbox.wasted + 1
+    if inbox.wasted >= 3 then inbox.on = false end   -- signals that mean nothing: stop spending slots on them
+  end
+  if inbox.signal == was then inbox.signal = was % INBOX_SIGNALS + 1 end
+end
+
+inboxWorks = function() return inbox.works end
+
+local function startInbox()
+  -- the files must have been there when the game started, and its sound must tell an empty file from a real one
+  inbox.works = type(WispCursor) == "number" and not playable("empty.wav") and playable("valid.wav")
+  inbox.on, inbox.signal = inbox.works, WispCursor
+  if not inbox.on then return end
+  if type(WispLatest) == "number" and WispLatest > (type(WispData) == "table" and WispData.delivered or 0)
+     and time() - WispLatest / 1000 < INBOX_KEEPS then
+    inboxLoad()   -- sent while the game was closed or reloading
+  end
+  local waited = 0
+  CreateFrame("Frame"):SetScript("OnUpdate", function(_, elapsed)
+    waited = waited + (elapsed or 0)
+    if waited >= 1 then waited = 0; pcall(inboxTick) end
+  end)
+end
+
 ---------------------------------------------------------------- boot ----
 
 local frame = CreateFrame("Frame")
@@ -1578,6 +1660,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
   else
     C_Timer.After(20, function() pcall(learnNames) end)   -- once the login rush is over
     C_Timer.After(30, function() pcall(startQuestIndex) end)
+    pcall(startInbox)
     pcall(pruneLoot)
     pcall(xpChanged)   -- where the bar stands as the session begins
     pcall(SetOverrideBindingClick, opener, false, PASTE_KEY, "WispInboxOpener")
@@ -1586,7 +1669,9 @@ end)
 
 SLASH_WISP1 = "/wisp"
 SlashCmdList.WISP = function(msg)
-  if msg:match("save") then
+  if msg:match("sync") then   -- a fresh snapshot for Wisp without logging out: a reload saves it
+    return (C_UI and C_UI.Reload or ReloadUI)()
+  elseif msg:match("save") then
     local snapshot, why = save()
     if snapshot then
       say(L("snapshot built: %d quests, Questie %s, DungeonJournal %s. It is written to disk when you log out.")

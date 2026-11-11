@@ -11,6 +11,24 @@ local flags = os.getenv("WISP_STUB") or ""
 local here = (arg[0] or "tests/wow_stub.lua"):match("^(.*)[/\\][^/\\]*$") or "."
 
 local LOG, FRAMES, TIMERS, WAYS, LISTS = {}, {}, {}, {}, {}
+-- The AddOns folder as it is on disk, for the one-click inbox: a file is read when the addon asks, as the game does.
+local ADDONS = os.getenv("WISP_ADDONS")
+local played, loaded = {}, {}
+local function onDisk(path) return ADDONS .. "/" .. (path:gsub("^Interface\\AddOns\\", ""):gsub("\\", "/")) end
+function PlaySoundFile(path)
+  if not ADDONS or flags:find("nosound") then return false end
+  if played[path] then return true end   -- once a sound has played, the client keeps it for good
+  local real   -- an empty file is no sound
+  if FILE_HAS_BYTES then   -- under the fengari VM, which has no io library: tests/wow_stub.js lends this
+    real = FILE_HAS_BYTES(onDisk(path))
+  else
+    local f = io.open(onDisk(path), "rb")
+    real = f and f:read(1) ~= nil or false
+    if f then f:close() end
+  end
+  played[path] = real or nil
+  return real
+end
 local out = print
 print = function(s) LOG[#LOG + 1] = (s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
 local clock = os.time()   -- the game's clock, which the looting below moves forward
@@ -314,6 +332,14 @@ local QuestiePlayer = { HasRequiredRace = function(mask) return mask % 2 == 1 en
                         HasRequiredClass = function(mask) return math.floor(mask / 128) % 2 == 1 end }   -- a mage
 local QuestieCorrections = { hiddenQuests = { [9002] = true } }
 C_AddOns = { GetAddOnMetadata = function(name, field) if name == "Questie" and field == "Version" then return "11.9.0" end end }
+C_AddOns.LoadAddOn = function(name)   -- a load-on-demand addon: its file is read now, and only once per UI session
+  if not ADDONS or loaded[name] then return false end
+  loaded[name] = true
+  local chunk = loadfile(ADDONS .. "/" .. name .. "/In.lua")
+  if chunk then chunk() end
+  return chunk ~= nil
+end
+if ADDONS then local cursor = loadfile(ADDONS .. "/Wisp_Inbox/Cursor.lua"); if cursor then cursor() end end   -- read at every UI load
 -- what it draws its map icons from: quest id -> true; 34 follows a quest in the log, 9999 is one it has no record of
 local AvailableQuests = { __availableQuests = { [34] = true, [40] = true, [84] = true, [176] = true, [314] = true, [386] = true, [9999] = true } }
 if flags:find("oldquestie") then AvailableQuests = {} end
@@ -627,6 +653,24 @@ if mode == "snapshot" then
   for market, upTo in pairs(type(WispData) == "table" and WispData.marketSent or {}) do
     out("SENT " .. market .. " " .. upTo.to - upTo.from)
   end
+elseif mode == "inbox" then   -- a session: login, a few seconds, then the files change on disk, a few seconds more
+  if os.getenv("WISP_DELIVERED") then WispData = { delivered = tonumber(os.getenv("WISP_DELIVERED") .. ".0") } end
+  local boot
+  for _, f in ipairs(FRAMES) do if f.scripts.OnEvent then boot = f end end
+  boot.scripts.OnEvent(boot, "PLAYER_LOGIN")
+  local function seconds(n)
+    for _ = 1, n do
+      for _, f in ipairs(FRAMES) do if f.scripts.OnUpdate then f.scripts.OnUpdate(f, 1) end end
+    end
+  end
+  seconds(3)
+  out("ATLOGIN " .. #WAYS)
+  if os.getenv("WISP_ADDONS_LATER") then ADDONS = os.getenv("WISP_ADDONS_LATER"); seconds(3) end
+  for _, w in ipairs(WAYS) do out("WAY " .. w) end
+  local used = 0
+  for _ in pairs(loaded) do used = used + 1 end
+  out("SLOTS " .. used)
+  out("DELIVERED " .. tostring(type(WispData) == "table" and WispData.delivered))
 elseif mode == "paste" then
   SlashCmdList.WISP("")
   WispInbox.text = ARG

@@ -20,6 +20,7 @@ The lines Wisp doesn't cross. These override every UX or feature argument.
 | Python reading/writing the addon's data files | Same pattern as the TSM desktop app and WeakAuras Companion |
 | Screenshot when you ask | Passive screen capture, as OBS or Discord do. Lowest-risk category, but Blizzard has not ruled on it |
 | Commands pasted by the player | The player presses the keys; same as importing a WeakAura or a talent build |
+| Commands the game picks up from files (the one-click inbox, decided by Denis 2026-11-11) | Documented addon functions only: the addon loads a load-on-demand addon whose single file is data Wisp wrote (numbers and WISP1 texts), and tests whether a sound file will play. The text goes through the same strict reader and whitelist as a paste; nothing in it is run as Lua. No input is sent to the game and nothing is read from it |
 
 ## Policy research (2026-11-09)
 
