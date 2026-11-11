@@ -76,13 +76,20 @@ class Crafting:
                 continue
             name = _text(book["profession"], 40)
             read_at = _int(book.get("skill"), 0, 10000)
-            entry = {"profession": name, "skill": skill_now.get(name) or read_at, "max": _int(book.get("max"), 0, 10000),
-                     "seen_at": book.get("seenAt") if isinstance(book.get("seenAt"), (int, float)) else None, "recipes": []}
+            alt = book.get("alt") if isinstance(book.get("alt"), dict) else None   # another character of the account's
+            owner = None
+            if alt is not None:
+                level = _int(alt.get("level"), 1, 200)
+                owner = "another character of yours: " + (_text(alt.get("class"), 20).capitalize() or "?") + (f", level {level}" if level else "")
+            entry = {"profession": name, "skill": read_at if owner else skill_now.get(name) or read_at, "max": _int(book.get("max"), 0, 10000),
+                     "seen_at": book.get("seenAt") if isinstance(book.get("seenAt"), (int, float)) else None, "recipes": [], "owner": owner}
             for raw in _list(book.get("recipes")):
                 recipe = self._recipe(raw, entry) if isinstance(raw, dict) else None
                 if recipe:
                     entry["recipes"].append(recipe)
-                    self.recipes[recipe["id"]] = recipe
+                    known = self.recipes.get(recipe["id"])   # the same recipe in two books: whoever has learned it, this character first
+                    if known is None or (recipe["learned"], not owner) > (known["learned"], not known["owner"]):
+                        self.recipes[recipe["id"]] = recipe
             self.books.append(entry)
 
     def _name(self, item: int, name) -> None:
@@ -116,7 +123,7 @@ class Crafting:
             stale = read_at   # the colour was read at a lower skill and may have dropped since
         return {"id": recipe_id, "name": name, "profession": book["profession"], "learned": raw.get("learned") is not False,
                 "colour": colour, "colour_read_at_skill": stale, "grey_at": grey_at,
-                "makes": makes, "makes_count": _int(raw.get("makesMin"), 1, 10000) or 1, "reagents": reagents,
+                "makes": makes, "makes_count": _int(raw.get("makesMin"), 1, 10000) or 1, "reagents": reagents, "owner": book["owner"],
                 # the game's own word on how an unlearned recipe is come by; cleaned of colour codes where it is shown
                 "source": raw["source"][:400] if isinstance(raw.get("source"), str) else None}
 
@@ -160,6 +167,8 @@ class Crafting:
             out["colour_read_at_skill"] = recipe["colour_read_at_skill"]
         if not recipe["learned"]:
             out["learned"] = False
+        if recipe["owner"]:
+            out["crafter"] = recipe["owner"]   # not the character played last: bags and bank counted here are not theirs
         if recipe["reagents"]:
             out["materials_cost_per_craft"] = coins(cost) if not unpriced else None
             if unpriced:
@@ -187,7 +196,7 @@ class Crafting:
             if recipe["makes"]:
                 made[recipe["makes"]] = made.get(recipe["makes"], 0) + times * recipe["makes_count"]
                 step["makes"] = f"{times * recipe['makes_count']} × {self.name(recipe['makes'])}"
-            skill = next((b["skill"] for b in self.books if b["profession"] == recipe["profession"]), None)
+            skill = next((b["skill"] for b in self.books if b["profession"] == recipe["profession"] and b["owner"] == recipe["owner"]), None)
             if recipe["colour"] == "grey":
                 step["warning"] = t("grey: crafting it gives no skill")
             elif recipe["grey_at"] and skill is not None and times > recipe["grey_at"] - skill:

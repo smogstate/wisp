@@ -118,6 +118,7 @@ def probe(api: Blizzard, snapshot: dict, remember=None) -> list[tuple[str, bool,
         out.append((t("Blizzard API: items"), True, t("item 4306 is {name}", name=item.get("name") or "?")))
     except BlizzardError as e:
         out.append((t("Blizzard API: items"), False, str(e)))
+    out.extend(recipes_probe(api))
 
     if not own_auctions(snapshot):
         try:
@@ -150,6 +151,42 @@ def probe(api: Blizzard, snapshot: dict, remember=None) -> list[tuple[str, bool,
     if remember:
         remember(found)
     return out
+
+
+def recipes_probe(api: Blizzard) -> list[tuple[str, bool, str]]:
+    """Does Blizzard publish every profession's recipes with their ingredients for WoW Forever, as it does for
+    other versions? One profession followed all the way down: its tiers, a tier's recipes, one recipe."""
+    try:
+        professions = [p for p in api.get("/data/wow/profession/index", "static").get("professions") or [] if isinstance(p, dict) and _href_id(p)]
+        if not professions:
+            raise BlizzardError(t("no professions listed"))
+    except BlizzardError as e:
+        return [(t("Blizzard API: professions"), False, str(e))]
+    lines = [(t("Blizzard API: professions"), True, t("{n}: {names}", n=len(professions),
+                                                      names=", ".join(str(p.get("name") or p["id"]) for p in professions[:16])))]
+    try:
+        pick = next((p for p in professions if "cook" in str(p.get("name") or "").lower()), professions[0])
+        detail = api.get(f"/data/wow/profession/{pick['id']}", "static")
+        tiers = [x for x in detail.get("skill_tiers") or [] if isinstance(x, dict) and _href_id(x)]
+        if not tiers:
+            raise BlizzardError(t("{profession} has no skill tiers; it has: {fields}", profession=pick.get("name") or pick["id"],
+                                  fields=", ".join(sorted(detail))))
+        tier = api.get(f"/data/wow/profession/{pick['id']}/skill-tier/{tiers[0]['id']}", "static")
+        recipes = [r for c in tier.get("categories") or [] if isinstance(c, dict) for r in c.get("recipes") or []
+                   if isinstance(r, dict) and _href_id(r)]
+        if not recipes:
+            raise BlizzardError(t("{profession} lists no recipes; its tier has: {fields}", profession=pick.get("name") or pick["id"],
+                                  fields=", ".join(sorted(tier))))
+        recipe = api.get(f"/data/wow/recipe/{recipes[0]['id']}", "static")
+        needs = [f"{r.get('quantity')} × {(r.get('reagent') or {}).get('name') or (r.get('reagent') or {}).get('id')}"
+                 for r in recipe.get("reagents") or [] if isinstance(r, dict)]
+        lines.append((t("Blizzard API: recipes"), bool(needs),
+                      t("{profession}: {tiers} tiers, {n} recipes in the first; {recipe} needs {needs}; a recipe has: {fields}",
+                        profession=pick.get("name") or pick["id"], tiers=len(tiers), n=len(recipes), recipe=recipe.get("name") or recipes[0]["id"],
+                        needs=", ".join(needs) or "?", fields=", ".join(sorted(recipe)))))
+    except BlizzardError as e:
+        lines.append((t("Blizzard API: recipes"), False, str(e)))
+    return lines
 
 
 def _listed_line(house: dict, auctions: list, goods: list):

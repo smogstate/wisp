@@ -1003,6 +1003,7 @@ class Game:
                     continue
                 profit = sells - sum(costs)
                 rows.append({"recipe_id": recipe["id"], "recipe": recipe["name"], "profession": recipe["profession"],
+                             **({"crafter": recipe["owner"]} if recipe["owner"] else {}),
                              "materials": coins(sum(costs)), "sells_for": coins(sells),
                              "profit": ("-" if profit < 0 else "") + coins(abs(profit)), "return": f"{profit / sum(costs):+.0%}",
                              "can_make_from_bags": min(craft.bags.get(item, 0) // count for item, count in recipe["reagents"]),
@@ -1186,6 +1187,7 @@ class Game:
                 return {"found": 0, "note": "No recipe of the professions read so far is named like that ("
                                             + ", ".join(b["profession"] for b in books) + "). The game lists a profession's recipes, "
                                             "learned or not, while its window is open. For the recipe item itself, try item_links."}
+            hits.sort(key=lambda r: (bool(r["owner"]), not r["learned"]))   # this character's own first, then what an alt has learned
             return {"found": len(hits), "recipes": [
                 {**self.crafting.describe(r), "profession": r["profession"],
                  **({} if r["learned"] else {"how_to_learn": self.graph.learn_from(r) or "not known: a trainer may teach it"})}
@@ -1202,7 +1204,8 @@ class Game:
         for book in books:
             listed = [r for r in book["recipes"] if show == "all" or (r["learned"] and r["colour"] != "grey")]
             listed.sort(key=lambda r: ("orange", "yellow", "green", None, "grey").index(r["colour"]))
-            entry = {"profession": book["profession"], "skill": book["skill"], "max_skill": book["max"],
+            entry = {"profession": book["profession"], **({"character": book["owner"]} if book["owner"] else {}),
+                     "skill": book["skill"], "max_skill": book["max"],
                      "recipes_known_to_wisp": len(book["recipes"]), "recipes": [self.crafting.describe(r) for r in listed[:80]]}
             if isinstance(book["seen_at"], (int, float)):
                 entry["list_read_hours_ago"] = round(max(0, time.time() - book["seen_at"]) / 3600, 1)
@@ -1210,7 +1213,9 @@ class Game:
                 entry["left_out"] = len(listed) - 80
             out.append(entry)
         return {"professions": out,
-                "note": "Read from the game while the profession window was open. A recipe gives skill on every craft "
+                "note": "Read from the game while the profession window was open, on whichever of the player's characters has the "
+                        "profession: a book with 'character' belongs to another character of theirs (crafter on a recipe), who "
+                        "must do the crafting; bags and bank counted are the last-played character's. A recipe gives skill on every craft "
                         "while orange, less often while yellow or green, never once grey. Where colour_read_at_skill is "
                         "given the colour is older than the current skill and may have dropped. Prices are from the "
                         "player's own Auctionator scans; in_bags does not count the bank. result_listed_for is the "

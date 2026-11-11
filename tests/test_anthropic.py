@@ -288,7 +288,8 @@ def main():
         results = {what: (status, detail) for what, status, detail in check(wow)}
         assert results["Wisp addon installed"][0] == "ok" and results["Questie installed"][0] == "ok"
         assert results["TomTom installed"][0] == "note", "optional and missing: reported, not counted as a failure"
-        assert results["Snapshot readable"] == ("ok", "2 quests, saved 0 minutes ago"), results["Snapshot readable"]
+        # (the stand-in game starts its session a few hours back when run close to midnight, so the age varies)
+        assert results["Snapshot readable"][0] == "ok" and results["Snapshot readable"][1].startswith("2 quests, saved "), results["Snapshot readable"]
         assert results["Quest locations found"][0] == "ok" and results["Questie data in the snapshot"][0] == "ok"
         assert results["Anthropic key"] == ("ok", "from environment")
         assert results["Moonshot key"][0] == "note", "a provider that is not in use is optional"

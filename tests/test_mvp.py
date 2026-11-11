@@ -1615,6 +1615,7 @@ def test_blizzard(wow: Path):
     from urllib.parse import parse_qs, urlparse
     from wisp.blizzard import Blizzard, probe
     stack = {"on": False}   # whether the stand-in prices a listing for the whole stack
+    recipes = {"on": True}   # whether the stand-in has professions at all: nobody knows yet whether Forever's does
 
     def house(number):
         if number == 110:
@@ -1653,6 +1654,14 @@ def test_blizzard(wow: Path):
                 return self.reply(401, {})
             if url.path == "/data/wow/item/4306" and ns == "static-forever-eu":
                 return self.reply(200, {"id": 4306, "name": "Silk Cloth"})
+            if ns == "static-forever-eu" and recipes["on"]:   # every profession's recipes, as other versions of the game have them
+                book = {"/data/wow/profession/index": {"professions": [{"id": 197, "name": "Tailoring"}, {"id": 185, "name": "Cooking"}]},
+                        "/data/wow/profession/185": {"id": 185, "name": "Cooking", "skill_tiers": [{"id": 2548, "name": "Classic Cooking"}]},
+                        "/data/wow/profession/185/skill-tier/2548": {"categories": [{"name": "Everyday", "recipes": [{"id": 8604, "name": "Herb Baked Egg"}, {"id": 2538, "name": "Charred Wolf Meat"}]}]},
+                        "/data/wow/recipe/8604": {"id": 8604, "name": "Herb Baked Egg", "crafted_item": {"id": 6888},
+                                                  "reagents": [{"reagent": {"id": 6889, "name": "Small Egg"}, "quantity": 1}, {"reagent": {"id": 2678, "name": "Mild Spices"}, "quantity": 1}]}}
+                if url.path in book:
+                    return self.reply(200, book[url.path])
             if ns != "dynamic-forever-eu":
                 return self.reply(404, {})
             if url.path == "/data/wow/ruleset/index":
@@ -1681,6 +1690,14 @@ def test_blizzard(wow: Path):
         assert lines["Blizzard API: the client"] == (True, "accepted (EU)")
         assert lines["Blizzard API: WoW Forever"] == (True, "2 rulesets: Normal, Hardcore")
         assert lines["Blizzard API: items"] == (True, "item 4306 is Silk Cloth")
+        assert lines["Blizzard API: professions"] == (True, "2: Tailoring, Cooking")
+        assert lines["Blizzard API: recipes"] == (True, "Cooking: 1 tiers, 2 recipes in the first; Herb Baked Egg needs 1 × Small Egg, 1 × Mild Spices; "
+                                                        "a recipe has: crafted_item, id, name, reagents")
+        recipes["on"] = False
+        without = run()
+        assert without["Blizzard API: professions"] == (False, "HTTP 404") and "Blizzard API: recipes" not in without
+        assert without["Blizzard API: your auction house"][0] is True, "no professions there: the rest is checked all the same"
+        recipes["on"] = True
         assert lines["Blizzard API: listings"] == (True, "house 110: 1 auctions, 0 trade goods; fields: buyout, id, item, quantity, time_left")
         assert lines["Blizzard API: your auction house"] == (True, "house 111 Alliance Auction House 2: 3 of your 3 auctions are in it"), \
             "found by the player's own auctions, a trade good among them; the Horde house is not even fetched"
@@ -1805,6 +1822,28 @@ def test_one_click_cards(wow: Path, tmp: Path):
     assert "error" in app.deliver("rm -rf")
 
 
+def test_alts_recipes(tmp: Path):
+    """An alt's professions count too: every character's recipe books are handed over, the last-played one's first."""
+    game = Game.load(make_wow_dir(tmp, flags="alts"))
+    books = [(b["profession"], b["owner"]) for b in game.crafting.books]
+    assert books == [("Tailoring", None), ("Cooking", "another character of yours: Warrior, level 30"), ("Tailoring", "another character of yours: ?")], books
+    listed = run_tool(game, "recipes", {"show": "all"})["professions"]
+    assert "character" not in listed[0] and listed[1]["character"].endswith("Warrior, level 30") and listed[1]["skill"] == 75
+    meat = run_tool(game, "recipes", {"search": "wolf meat"})["recipes"][0]
+    assert meat["name"] == "Charred Wolf Meat" and meat["crafter"].endswith("Warrior, level 30") and "learned" not in meat
+    # the same recipe in two books: this character's own stands, unless only the alt has learned it
+    assert game.crafting.recipes[3839]["owner"] is None and game.crafting.recipes[3839]["colour"] == "yellow"
+    assert game.crafting.recipes[8791]["owner"] == "another character of yours: ?" and game.crafting.recipes[8791]["learned"], "the alt can make it"
+    first = run_tool(game, "recipes", {"search": "learned yet"})["recipes"]
+    assert [bool(r.get("crafter")) for r in first] == [False, True], "this character's own first"
+    # the graph links through an alt's recipes too
+    used = run_tool(game, "item_links", {"item": "Tough Wolf Meat"})["used_in_your_recipes"]
+    assert used == [{"recipe_id": 2538, "recipe": "Charred Wolf Meat", "profession": "Cooking", "needs_each": 1, "colour": "green",
+                     "makes": used[0]["makes"], "crafter": "another character of yours: Warrior, level 30"}]
+    assert "Realm" not in json.dumps(run_tool(game, "recipes", {"show": "all"})), "an alt is told by class and level, never by name or realm"
+    assert all(b["owner"] is None for b in Game.load(make_wow_dir(tmp / "solo")).crafting.books)
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -1818,6 +1857,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as al:
+            test_alts_recipes(Path(al))
         with tempfile.TemporaryDirectory() as oc:
             test_one_click_cards(wow, Path(oc))
         test_blizzard(wow)

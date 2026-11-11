@@ -585,11 +585,17 @@ local function bags()
   return out
 end
 
--- The kept recipes of this character, with item names, and the ids of every item they mention.
+-- The kept recipes of every character of this account, with item names, and the ids of every item
+-- they mention: an alt's professions count too. A book that is not this character's says whose it
+-- is by class and level, never by name.
 local function crafting(wanted)
-  local mine = type(WispData) == "table" and type(WispData.recipes) == "table" and WispData.recipes[myKey()]
+  local all = type(WispData) == "table" and type(WispData.recipes) == "table" and WispData.recipes or {}
+  local chars = type(WispData) == "table" and type(WispData.chars) == "table" and WispData.chars or {}
   local books = {}
-  for profession, book in pairs(mine or {}) do
+  for key, theirs in pairs(all) do
+   local alt = key ~= myKey() and { class = type(chars[key]) == "table" and chars[key].class or "?",
+                                    level = type(chars[key]) == "table" and chars[key].level or 0 } or nil
+   for profession, book in pairs(type(theirs) == "table" and theirs or {}) do
     local list = {}
     for _, r in pairs(book.recipes or {}) do
       local reagents = {}
@@ -603,9 +609,13 @@ local function crafting(wanted)
                           makesMin = r.makesMin, makesMax = r.makesMax, reagents = reagents, source = r.source }
     end
     table.sort(list, function(a, b) return a.id < b.id end)
-    books[#books + 1] = { profession = profession, seenAt = book.seenAt, skill = book.skill, max = book.max, recipes = list }
+    books[#books + 1] = { profession = profession, seenAt = book.seenAt, skill = book.skill, max = book.max, recipes = list, alt = alt }
+   end
   end
-  table.sort(books, function(a, b) return a.profession < b.profession end)
+  table.sort(books, function(a, b)   -- this character's own first
+    if (a.alt == nil) ~= (b.alt == nil) then return a.alt == nil end
+    return a.profession < b.profession
+  end)
   return books
 end
 
@@ -1618,6 +1628,10 @@ frame:RegisterEvent("LOOT_CLOSED")
 frame:RegisterEvent("UNIT_SPELLCAST_SENT")
 frame:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_LOGOUT" then
+    if type(WispData) ~= "table" then WispData = {} end
+    WispData.chars = WispData.chars or {}   -- what an alt's recipes are labelled with: class and level, no name
+    local _, classFile = UnitClass("player")
+    WispData.chars[myKey()] = { class = classFile, level = UnitLevel("player") }
     local snapshot = save()
     if snapshot and snapshot.market then   -- these days are now handed over
       if type(WispData) ~= "table" then WispData = {} end

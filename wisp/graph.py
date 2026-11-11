@@ -34,7 +34,7 @@ class ItemGraph:
         self.bosses: dict[int, list] = {}     # item -> bosses that drop it
         self.sources: dict[int, dict] = {}    # item -> who sells it, what drops it, what it is found in
 
-        for recipe in craft.recipes.values():
+        for recipe in (r for book in craft.books for r in book["recipes"]):   # every book: an alt's recipes are links too
             for item, count in recipe["reagents"]:
                 self.used_in.setdefault(item, []).append((recipe, count))
             if recipe["makes"]:
@@ -167,12 +167,14 @@ class ItemGraph:
             out["used_in_your_recipes"] = [
                 {"recipe_id": r["id"], "recipe": r["name"], "profession": r["profession"], "needs_each": count, "colour": r["colour"],
                  **({"makes": self.names.get(r["makes"], f"item {r['makes']}")} if r["makes"] else {}),
-                 **({} if r["learned"] else {"learned": False})} for r, count in self.used_in[item]]
+                 **({} if r["learned"] else {"learned": False}), **({"crafter": r["owner"]} if r["owner"] else {})}
+                for r, count in self.used_in[item]]
         if item in self.made_by:
             out["made_by_your_recipes"] = [
                 {"recipe_id": r["id"], "recipe": r["name"], "profession": r["profession"], "colour": r["colour"],
                  "from": ", ".join(f"{count} {self.names.get(i, f'item {i}')}" for i, count in r["reagents"]),
-                 **({} if r["learned"] else {"learned": False})} for r in self.made_by[item]]
+                 **({} if r["learned"] else {"learned": False}), **({"crafter": r["owner"]} if r["owner"] else {})}
+                for r in self.made_by[item]]
         if item in self.quests:
             out["asked_for_by_quests"] = self.quests[item]
         if item in self.bosses:

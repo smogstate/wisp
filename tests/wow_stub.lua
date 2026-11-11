@@ -31,8 +31,13 @@ function PlaySoundFile(path)
 end
 local out = print
 print = function(s) LOG[#LOG + 1] = (s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
-local clock = os.time()   -- the game's clock, which the looting below moves forward
-if math.floor(clock / 86400) ~= math.floor((clock + 1800) / 86400) then clock = clock - 1800 end   -- the looting never straddles midnight (UTC)
+local clock = os.time()   -- the game's clock, which the play below moves forward by up to an hour or so
+-- That play must not straddle a midnight, UTC (Wisp's days) or local (Auctionator's): start it a few hours earlier if it would.
+local function sameDay(a, b) return math.floor(a / 86400) == math.floor(b / 86400) and os.date("%d", a) == os.date("%d", b) end
+for _ = 1, 23 do
+  if sameDay(clock, clock + 7200) then break end
+  clock = clock - 3600
+end
 time = function() return clock end
 function strsplit(sep, text)
   local parts = {}
@@ -444,7 +449,7 @@ if not flags:find("noauctionator") then
   for id, row in pairs(seen) do db[tostring(id)] = { m = row[1], h = {}, l = {}, a = {} } end
   -- its day-by-day record: day numbers count from the start of 2020, as text keys
   local day0 = os.time({ year = 2020, month = 1, day = 1, hour = 0 })
-  local today = math.floor((os.time() - day0) / 86400)
+  local today = math.floor((clock - day0) / 86400)   -- by the game's clock, as Auctionator counts
   local function day(id, ago, low, high, listed)
     local row, key = db[tostring(id)], tostring(today - ago)
     row.h[key] = high
@@ -605,6 +610,23 @@ if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end
 
+if flags:find("alts") then   -- what an alt left in the saved data at its own logout: a cook, and a second tailor
+  WispData = WispData or {}
+  WispData.chars = { ["Test Realm-Cook"] = { class = "WARRIOR", level = 30 } }
+  WispData.recipes = {
+    ["Test Realm-Cook"] = { Cooking = { seenAt = os.time() - 86400, skill = 75, max = 150, recipes = {
+      r2538 = { id = 2538, name = "Charred Wolf Meat", learned = true, colour = "green", greyAt = 85, skill = 75, makes = 2679,
+                makesMin = 1, makesMax = 1, reagents = { { id = 750, count = 1 } } },
+      r8604 = { id = 8604, name = "Herb Baked Egg", learned = false, greyAt = 90, skill = 75, makes = 6888, makesMin = 1, makesMax = 1,
+                reagents = { { id = 6889, count = 1 }, { id = 2678, count = 1 } } } } } },
+    ["Other Realm-Tailor"] = { Tailoring = { seenAt = os.time() - 86400, skill = 200, max = 225, recipes = {
+      r8791 = { id = 8791, name = "Not Learned Yet", learned = true, colour = "yellow", greyAt = 200, skill = 200, makes = 7049,
+                makesMin = 1, makesMax = 1, reagents = { { id = 4305, count = 5 } } },
+      r3839 = { id = 3839, name = "Bolt of Silk Cloth", learned = true, colour = "grey", greyAt = 170, skill = 200, makes = 4305,
+                makesMin = 1, makesMax = 1, reagents = { { id = 4306, count = 4 } } } } } },
+  }
+end
+
 assert(loadfile(here .. "/../addon/Wisp/Wisp.lua"))()
 
 if mode == "snapshot" then
@@ -654,6 +676,7 @@ if mode == "snapshot" then
     out("SENT " .. market .. " " .. upTo.to - upTo.from)
   end
 elseif mode == "inbox" then   -- a session: login, a few seconds, then the files change on disk, a few seconds more
+  clock = os.time()   -- no play here to keep clear of midnight, and messages are dated by the real clock
   if os.getenv("WISP_DELIVERED") then WispData = { delivered = tonumber(os.getenv("WISP_DELIVERED") .. ".0") } end
   local boot
   for _, f in ipairs(FRAMES) do if f.scripts.OnEvent then boot = f end end
