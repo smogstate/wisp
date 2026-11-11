@@ -80,3 +80,27 @@ Whether another addon can really read Questie in the Forever client is one of th
 - **The worked scenarios get simpler.** "What am I missing for the Deadmines?" is Questie's data plus completed quests — or, with Dungeon Quests Forever installed, mostly an explanation of what that addon already shows.
 - **A limit to state plainly:** Wisp reads another addon inside the game, so the data still reaches the overlay through the saved file. The Wisp addon must copy out what a question will need ahead of time.
 - **Licences:** calling an installed addon's functions is ordinary addon interplay. Copying its data into Wisp's own files is redistribution and falls under that addon's licence; Questie is moving to GPLv3, and several Forever addons are "all rights reserved".
+
+## Other AI assistants for the game (survey 2026-11-11)
+
+Read from their own pages; none was run by us.
+
+| Project | How data leaves the game | How answers reach the game | Worth noting |
+|---|---|---|---|
+| **wow-ai** / "AI Agents Chat" on CurseForge (chelinho139, ~180 stars) | A strip of coloured pixels in a screen corner, captured four times a second by its bridge | A pool of 200 load-on-demand addons: the bridge writes a reply into a free one and the game loads it from a timer; a sound file that plays or not says "ready" | Chat inside the game; runs the player's own agent CLIs (Claude Code, Codex…); routes with an arrow; macros with a Create button, checked against the game's limits |
+| **WoW Eye** (TravinDSO) | Saved variables at reload or logout (`/eye sync`) | An inbox file read at reload | An MCP server; routes that advance by themselves on quest events; a compass bar and a beacon; learns NPCs, vendor stock, trainers and flight points as you play |
+| **wow-agent** (Oighty) | Saved variables, `/agent sync` reloads | Chat only, in its own window | Watches the Screenshots folder and attaches the newest; looks a new zone up on the web |
+| **Claude WoW Overlay** (BabyGrug) | Optional addon; screenshots by hotkey | Map marks | Runs on the Claude desktop app's CLI and the player's own subscription, no API key; remembers settled facts about the character |
+| **WoWGPT** (CurseForge) | — | In-game window | Mostly answers from the game's own API without a model; personalities, a UI editor |
+
+What Wisp could take, in order of value:
+
+1. **Reload instead of logout.** `PLAYER_LOGOUT` fires on a UI reload too, so `/reload` already saves Wisp's snapshot. A `/wisp sync` that reloads is a five-second refresh instead of a trip to the character screen.
+2. **The load-on-demand inbox** (wow-ai): cards reach the game at a click, no paste. Documented addon API only; what is loaded would be a data file Wisp wrote. Touches the red line about text run as Lua, so it needs Denis's decision.
+3. **Screenshot with a question**: in the design since the start ([Architecture](Architecture.md)), never built. Watching the Screenshots folder needs no capture code at all.
+4. **Learning by playing**: vendors' stock, trainers, flight points ([Game data](Game-Data.md) already plans it).
+5. **Macros with a Create button**, **routes that advance by themselves**, **the player's Claude subscription instead of a key**, **an MCP server**.
+
+Not taking: the pixel strip. It is the pixel beacon under another name ([Red Lines](Red-Lines.md)); the most used competitor ships it and says nothing about the game's terms.
+
+Where Wisp is ahead of all of them: auction history and forecasts, investments, crafting plans, the whole quest and item lists, measured farming, a spending cap, Russian, one exe that updates itself (the others need Node, git or a CLI).
