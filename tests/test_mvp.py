@@ -1983,6 +1983,44 @@ def test_built_once(tmp: Path):
     assert empty.load_game() is not empty.load_game() and empty.load_game().problem, "no game folder: nothing to keep"
 
 
+def test_graph_stays_out_of_context(tmp: Path):
+    """The graph is for tools to walk, not for the model to read: whatever its size, a tool hands back a bounded slice."""
+    import random
+    import re
+    from wisp.game import SYSTEM, TOOLS
+    wow = make_wow_dir(tmp, flags="questindex,alts")
+    saved = next(wow.rglob("Wisp.lua"))
+    text, rnd = saved.read_text(encoding="utf-8"), random.Random(1)
+    # a full-size game, deliberately tangled: 20,000 items, 5,000 recipes drawing on few of them, so some go into hundreds of things
+    items = {"v": 1, "key": "k", "maps": [{"id": 1429, "name": "Elwynn Forest"}], "objects": [],
+             "npcs": [{"id": i, "name": f"Creature {i}", "map": 1429, "x": 10.0, "y": 20.0, "n": 5} for i in range(1, 9001)],
+             "items": [{"id": 100000 + i, "name": f"Thing {i}", "d": rnd.sample(range(1, 9001), 3), "dn": 12, "v": [rnd.randint(1, 9000)]} for i in range(20000)]}
+    recipes = {"v": 1, "key": "k", "professions": ["Tailoring", "Cooking", "Alchemy"],
+               "recipes": [{"id": 500000 + i, "name": f"Recipe {i}", "p": 1 + i % 3, "makes": 100000 + i, "n": 1, "grey": 100,
+                            "r": [100000 + rnd.randint(0, 40), 2, 100000 + rnd.randint(0, 1999), 1, 100000 + rnd.randint(0, 1999), 3]} for i in range(5000)]}
+    for name, data in (("WispItems", items), ("WispRecipes", recipes)):
+        text = re.sub(rf'^{name} = "[^"]*"', f'{name} = "{base64.b64encode(json.dumps(data).encode()).decode()}"', text, flags=re.M)
+    saved.write_text(text, encoding="utf-8")
+    game = Game.load(wow)
+    assert len(game.graph.world) == 20000 and len(game.crafting.recipes) > 5000
+    busiest = max(game.graph.used_in, key=lambda i: len(game.graph.used_in[i]))
+    assert len(game.graph.used_in[busiest]) > 100, "an item that goes into more than a hundred recipes"
+    name = game.graph.names[busiest]
+    asked = [("item_uses", {"item": name}), ("item_links", {"item": name}), ("craft_tree", {"item": "Thing 4999", "quantity": 50}),
+             ("recipes", {"search": "recipe 1"}), ("recipes", {"show": "all"}), ("quest_search", {"zone": "here", "limit": 40}),
+             ("available_quests", {}), ("live_auctions", {"item": name})]
+    for tool, args in asked:
+        out = run_tool(game, tool, args)
+        size = len(json.dumps(out, ensure_ascii=False))
+        assert size < 12000, f"{tool} handed the model {size} characters"
+    uses = run_tool(game, "item_uses", {"item": name})
+    assert len(uses["direct_recipes"]) == 25 and uses["direct_recipes_left_out"] == uses["used_directly_in"] - 25, "a slice, and how much was left out"
+    assert len(uses["end_products"]) <= 25 and uses["end_products_left_out"] > 0
+    # what the model is always given does not grow with the game: its instructions and the tools' descriptions
+    assert len(SYSTEM) < 9000 and len(json.dumps(TOOLS)) < 30000
+    assert "Thing 12345" not in SYSTEM + json.dumps(TOOLS)
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -1996,6 +2034,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as oc2:
+            test_graph_stays_out_of_context(Path(oc2))
         with tempfile.TemporaryDirectory() as bo:
             test_built_once(Path(bo))
         with tempfile.TemporaryDirectory() as wg:

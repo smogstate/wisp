@@ -174,9 +174,9 @@ class ItemGraph:
                 {"recipe_id": r["id"], "recipe": r["name"], "profession": r["profession"], "needs_each": count, "colour": r["colour"],
                  **({"makes": self.names.get(r["makes"], f"item {r['makes']}")} if r["makes"] else {}),
                  **({} if r["learned"] else {"learned": False}), **({"crafter": r["owner"]} if r["owner"] else {})}
-                for r, count in self.used_in[item][:40]]
-            if len(self.used_in[item]) > 40:
-                out["more_recipes_use_it"] = len(self.used_in[item]) - 40   # item_uses has them all, and what they lead to
+                for r, count in self.used_in[item][:25]]
+            if len(self.used_in[item]) > 25:
+                out["more_recipes_use_it"] = len(self.used_in[item]) - 25   # a slice; item_uses ranks what they lead to
         if item in self.made_by:
             out["made_by_your_recipes"] = [
                 {"recipe_id": r["id"], "recipe": r["name"], "profession": r["profession"], "colour": r["colour"],

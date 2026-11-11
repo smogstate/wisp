@@ -16,7 +16,10 @@ from .crafting import coins
 from .i18n import t, tn
 
 DEPTH = 8       # a product, its parts, their parts...: deep enough for anything craftable
-PRODUCTS = 30   # end products named for one item
+PRODUCTS = 25   # end products named for one item: the model is handed a slice of the graph, never the graph
+DIRECT = 25     # and as many of the recipes that use it directly
+STEPS = 30      # crafts and
+MATERIALS = 40  # materials named for one product
 
 
 def _rank(recipe: dict) -> tuple:
@@ -74,18 +77,25 @@ def breakdown(game, item: int, quantity: int) -> dict:
                 known = False
             else:
                 total += part_cost
-        steps.append({"craft": f"{crafts} × {recipe['name']}", "makes": f"{crafts * recipe['makes_count']} × {name(some)}",
-                      "profession": recipe["profession"], "who_can": _who(recipe),
-                      **({"turns_grey_at_skill": recipe["grey_at"]} if recipe["grey_at"] else {}),
-                      # for the card: what one such craft takes; a part that is itself crafted opens its own card
-                      "_parts": [{"text": f"{crafts * count} × {name(part)}", "item": name(part),
-                                  "link": any(r["reagents"] for r in graph.made_by.get(part, []))} for part, count in recipe["reagents"]]})
+        if recipe["id"] in crafted:   # the same part wanted in two places of the tree: one line, the crafts added up
+            crafted[recipe["id"]]["crafts"] += crafts
+        else:
+            crafted[recipe["id"]] = {"recipe": recipe, "item": some, "crafts": crafts}
         bought = cost_of(some)
         if path and known and bought is not None and bought * need < total:   # an intermediate cheaper to buy than to make
             dearer.append({"item": name(some), "need": need, "buying_costs": coins(bought * need), "making_costs": coins(total)})
         return total if known else None
 
+    crafted = {}   # recipe id -> the recipe, what it makes, how many crafts in all; in the order they are to be done
     walk(item, quantity, ())
+    for done in crafted.values():
+        recipe, crafts = done["recipe"], done["crafts"]
+        steps.append({"craft": f"{crafts} × {recipe['name']}", "makes": f"{crafts * recipe['makes_count']} × {name(done['item'])}",
+                      "profession": recipe["profession"], "who_can": _who(recipe),
+                      **({"turns_grey_at_skill": recipe["grey_at"]} if recipe["grey_at"] else {}),
+                      # for the card: what these crafts take; a part that is itself crafted opens its own card
+                      "_parts": [{"text": f"{crafts * count} × {name(part)}", "item": name(part),
+                                  "link": any(r["reagents"] for r in graph.made_by.get(part, []))} for part, count in recipe["reagents"]]})
     if not steps:
         return {"error": "no recipe"}
     rows, total, unpriced, buy = [], 0, [], []
@@ -111,19 +121,23 @@ def breakdown(game, item: int, quantity: int) -> dict:
         rows.append(row)
     product = name(item)
     out = {"product": product, "quantity": quantity,
-           "crafts_in_order": [{k: v for k, v in s.items() if k[0] != "_"} for s in steps],
+           "crafts_in_order": [{k: v for k, v in s.items() if k[0] != "_"} for s in steps[-STEPS:]],   # the last ones lead to the product
            "professions_needed": sorted({s["profession"] for s in steps}),
-           "materials": [{k: v for k, v in r.items() if k[0] != "_" and v is not None} for r in rows],
+           "materials": [{k: v for k, v in r.items() if k[0] != "_" and v is not None} for r in rows[:MATERIALS]],
            "to_buy_in_all": coins(total) if not unpriced else None}
+    if len(steps) > STEPS:
+        out["earlier_crafts_left_out"] = len(steps) - STEPS
+    if len(rows) > MATERIALS:
+        out["cheaper_materials_left_out"] = len(rows) - MATERIALS   # the totals count them all the same
     if unpriced:
-        out["no_auction_price_for"] = unpriced
+        out["no_auction_price_for"] = unpriced[:15]
         if total:
             out["cost_of_the_priced_ones"] = coins(total)
     listed = cost_of(item)
     if listed is not None:
         out["product_listed_for"] = coins(listed * quantity)
     if dearer:
-        out["cheaper_to_buy_than_to_make"] = dearer
+        out["cheaper_to_buy_than_to_make"] = dearer[:10]
     elsewhere = [f"{r['item']}: {r['_where']}" for r in rows if r["_where"]]
     out["_buy"] = buy
     out["_card"] = {
@@ -137,7 +151,7 @@ def breakdown(game, item: int, quantity: int) -> dict:
         "rows": [[r["item"], r["need"], r["_held"] or "–", r["to_buy"] or "–", r["cost_to_buy"] or "–"] for r in rows[:25]],
         "steps": [{"text": s["craft"], "parts": s["_parts"],
                    "detail": s["profession"] + (" · " + t("turns grey at skill {n}", n=s["turns_grey_at_skill"]) if s.get("turns_grey_at_skill") else "")}
-                  for s in steps[:20]],
+                  for s in steps[-20:]],
         "notes": ([t("Held elsewhere: {where}", where="; ".join(elsewhere[:10]))] if elsewhere else [])
                  + [t("Lowest listings from your own scans. What you and your other characters held at each one's last logout.")],
     }
@@ -190,11 +204,13 @@ def uses(game, item: int) -> dict:
                                                      "objects_holding_it": world.get("on"),
                                                      "made_by_recipes": len(graph.made_by.get(item, []))}.items() if v},
            "listed_for": coins(price) if price is not None else None,
-           "direct_recipes": direct[:40],
+           "direct_recipes": direct[:DIRECT],
            "end_products": [{k: v for k, v in p.items() if k[0] != "_" and v is not None} for p in products[:PRODUCTS]]}
     held = craft.bags.get(item, 0) + craft.bank.get(item, 0)
     if held:
         out["you_hold"] = held
+    if len(direct) > DIRECT:
+        out["direct_recipes_left_out"] = len(direct) - DIRECT
     if len(products) > PRODUCTS:
         out["end_products_left_out"] = len(products) - PRODUCTS
     out["_card"] = {
