@@ -2120,6 +2120,14 @@ def test_quest_rewards(tmp: Path):
     assert quiet[0]["xp"] == 450 and "reward_items" not in quiet[1] and "money" not in quiet[1], "a silent game: Questie's experience, no rewards listed"
 
 
+def test_eval_cases():
+    """The assistant's eval (evals/) stays answerable: each case's written right answer still
+    passes on this test game, and an empty answer does not. Free: no model is asked."""
+    out = subprocess.run([sys.executable, str(ROOT / "evals" / "run.py"), "--check"], capture_output=True, text=True,
+                         encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -2184,4 +2192,5 @@ if __name__ == "__main__":
         test_localization(Path(loc))
     with tempfile.TemporaryDirectory() as u:
         test_update(Path(u))
+    test_eval_cases()
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

@@ -558,7 +558,8 @@ end
 local function bought(name, id, count, paid, days) return { "buyer", name, "Bob", paid, paid, 0, 0, count, id = id, days = days } end
 local inbox = {
   bought("Silk Cloth", 4306, 20, 6000, 29.9), bought("Silk Cloth", 4306, 20, 6000, 29.9), bought("Silk Cloth", 4306, 20, 6000, 29.9),
-  { "seller", "Bolt of Silk Cloth", "Ann", 10000, 10000, 150, 500, 5, days = 29.5 },
+  -- every auction mail is under four hours old: that far back the tests' clock keeps clear of midnight
+  { "seller", "Bolt of Silk Cloth", "Ann", 10000, 10000, 150, 500, 5, days = 29.9 },
   { "seller_temp_invoice", "Bolt of Silk Cloth", "Ann", 10000, 10000, 150, 500, 5, days = 29.9 },   -- "your money is on its way": not a sale yet
   { nil, days = 12 },                                                                              -- a letter from a friend
   bought("Strange Dust", 10940, 10, 2000, 28),

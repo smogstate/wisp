@@ -4,3 +4,6 @@ __pycache__/
 wisp/version.json
 /version.json
 /wisp-code.zip
+
+# results of the assistant eval (evals/run.py)
+.claude/hillclimb/
