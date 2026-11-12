@@ -90,6 +90,16 @@
   .msg.user { align-self: flex-end; background: var(--user); border-bottom-right-radius: 4px; }
   .msg.wisp { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; box-shadow: var(--shadow); }
   .msg.wisp:empty { display: none; }
+  /* Money as the game shows it: the amount, then a coin. The coin holds its letter (g, s, c), unseen, so that
+     selecting and copying still give "4s 50c". Drawn here, not the game's own art. */
+  .coin { display: inline-block; width: .8em; height: .8em; margin: 0 0 0 .14em; border-radius: 50%; vertical-align: -.08em;
+          overflow: hidden; white-space: nowrap; line-height: .8em; color: transparent; font-style: normal;
+          box-shadow: inset 0 0 0 1px rgb(0 0 0 / .28), inset 0 .1em .08em rgb(255 255 255 / .5); }
+  .chart circle.coin { stroke: rgb(0 0 0 / .3); stroke-width: .6; }
+  .chart circle.coin.g { fill: #e8b923; } .chart circle.coin.s { fill: #c3c8d0; } .chart circle.coin.c { fill: #c8763c; }
+  .coin.g { background: radial-gradient(circle at 35% 30%, #fff0b0, #e8b923 55%, #a87400); }
+  .coin.s { background: radial-gradient(circle at 35% 30%, #ffffff, #c3c8d0 55%, #7b828d); }
+  .coin.c { background: radial-gradient(circle at 35% 30%, #f8c9a4, #c8763c 55%, #7c4019); }
   .msg.error { align-self: flex-start; color: var(--danger); border: 1px solid var(--danger); background: transparent; }
   .trace { align-self: flex-start; color: var(--muted); font-size: 12px; padding-left: 4px; }
   .note { align-self: center; color: var(--muted); font-size: 12px; }
@@ -358,6 +368,39 @@ function setIcon(button, name, label) {
 
 const token = new URLSearchParams(location.search).get("t") || "";
 const log = document.getElementById("log"), input = document.getElementById("input");
+
+// Coins for money, everywhere in the conversation: "12g 40s" and «12з 40с» become 12 🟡 40 ⚪, as the game shows a price.
+// One place does it for every card, table and answer: whatever text lands in the log is looked at once it is there.
+// A number with the unit's letter right behind it and nothing after: so "3 s" and "5 мин" are left alone.
+const MONEY = /(?<![\p{L}\p{N}.,])(\d+)([gscзсм])(?![\p{L}\p{N}])/gu;
+const COIN = { g: "g", "з": "g", s: "s", "с": "s", c: "c", "м": "c" };   // Latin c is copper, Cyrillic с is silver
+function drawCoins(node) {
+  if (node.nodeType !== Node.TEXT_NODE) {
+    for (const child of [...node.childNodes]) drawCoins(child);
+    return;
+  }
+  const parent = node.parentElement;
+  if (!parent || parent.closest(".coin, svg, textarea, input")) return;   // done already, or no place for an element
+  const text = node.nodeValue;
+  if (text.search(MONEY) < 0) return;   // search, not test: test would move where the next look starts
+  const parts = document.createDocumentFragment();
+  let from = 0;
+  for (const found of text.matchAll(MONEY)) {
+    const coin = document.createElement("i");   // not a span: cards style their spans as small grey labels
+    coin.className = "coin " + COIN[found[2]];
+    coin.textContent = found[2];
+    parts.append(text.slice(from, found.index) + found[1], coin);
+    from = found.index + found[0].length;
+  }
+  parts.append(text.slice(from));
+  node.replaceWith(parts);
+}
+new MutationObserver(changes => {
+  for (const change of changes) {
+    if (change.type === "characterData") drawCoins(change.target);
+    else for (const added of change.addedNodes) drawCoins(added);
+  }
+}).observe(log, { childList: true, subtree: true, characterData: true });
 const send = document.getElementById("send"), statusEl = document.getElementById("status");
 let running = false, usage = null, lastCard = null, turnCount = 0, collapsed = false, glass = false, fade = false;
 let lastRecap = null, snapshotsKept = 0, canDeliver = false;
@@ -804,7 +847,8 @@ function chartBlock(c) {
     svg.textContent = "";
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
       svg.append(svgEl("line", { class: "grid", x1: L, x2: W - R, y1: yy(v), y2: yy(v) }),
-                 svgEl("text", { x: L - 6, y: yy(v) + 3, "text-anchor": "end" }, +(v / unit).toFixed(2) + letter));
+                 svgEl("text", { x: L - 15, y: yy(v) + 3, "text-anchor": "end" }, +(v / unit).toFixed(2)),
+                 svgEl("circle", { class: "coin " + COIN[letter], cx: L - 9, cy: yy(v), r: 3.5 }));   // the axis in coins too
     }
     if (est) {
       svg.append(svgEl("rect", { class: "range", x: x(last[0]), width: x(day1) - x(last[0]), y: yy(est.high), height: Math.max(2, yy(est.low) - yy(est.high)), rx: 2 }),
