@@ -456,6 +456,19 @@ if not flags:find("nojournal") then
     QUEST_START_MAPS = { [214] = { mapID = 1436, x = 0.566, y = 0.473, label = "Scout Riell — Westfall", targetName = "Scout Riell" } },
   }
 end
+-- The journal ships its own translations and gives them out through its own functions: a Russian journal
+if flags:find("russian") and ForeverDungeonJournal_NS then
+  local J = ForeverDungeonJournal_NS
+  local places = { ["The Deadmines"] = { name = "Мертвые копи", location = "Луноречье, Западный Край" } }
+  local told = { [214] = { name = "Красные шелковые банданы", objective = "Соберите 10 бандан." } }
+  local free = { ["Scout Riell"] = "Разведчик Риэлл", ["Dungeon entrance in Moonbrook"] = "Вход в подземелье в Луноречье" }
+  J.LocalizeDungeonName = function(name) return places[name] and places[name].name or name end
+  J.LocalizeDungeonField = function(name, field, fallback) return places[name] and places[name][field] or fallback end
+  J.LocalizeQuestField = function(id, field, fallback) return told[id] and told[id][field] or free[fallback] or fallback end
+  J.LocalizeBossName = function(name) return ({ ["Rhahk'Zor"] = "Рак'Зор" })[name] or name end
+  J.LocalizeItemSlot = function(text) return ({ ["Two-Hand, Axe"] = "Двуручное, Топор" })[text] or text end
+  J.LocalizeFreeText = function(text) return free[text] or text end
+end
 -- The profession window: Tailoring at 150. Made-up recipes in the shape the client gives them.
 local itemNames = { [4306] = "Silk Cloth", [4305] = "Bolt of Silk Cloth", [6260] = "Blue Dye", [2321] = "Fine Thread",
                     [7048] = "Azure Silk Hood", [6948] = "Hearthstone", [4245] = "Small Silk Pack" }   -- 4234 is not cached

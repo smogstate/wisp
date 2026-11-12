@@ -2301,6 +2301,21 @@ def test_profession_path(tmp: Path):
     assert old["trainers"] == [] and old["steps"] == [] and "names no trainer" in old["trainers_note"], "Questie without that list: none, and said so"
 
 
+def test_dungeons_in_the_journals_language(tmp: Path):
+    """The dungeon journal's tables are English; the addon translates them through its own functions, and so does Wisp."""
+    game = Game.load(make_wow_dir(tmp, flags="russian"))
+    mines = run_tool(game, "dungeon", {"name": "Мертвые копи"})["dungeon"]   # found by the name the player sees
+    assert (mines["name"], mines["location"], mines["entrance_hint"]) == ("Мертвые копи", "Луноречье, Западный Край", "Вход в подземелье в Луноречье")
+    bandanas = mines["quests"][0]
+    assert (bandanas["name"], bandanas["objective"], bandanas["turn_in"]) == ("Красные шелковые банданы", "Соберите 10 бандан.", "Разведчик Риэлл")
+    assert bandanas["pickup"] == "Scout Riell, Sentinel Hill tower", "what the journal has no translation for stays as it wrote it"
+    boss = mines["bosses"][0]
+    assert boss["name"] == "Рак'Зор" and boss["loot"][0]["slot"] == "Двуручное, Топор"
+    plain = run_tool(Game.load(make_wow_dir(tmp / "en")), "dungeon", {"name": "Deadmines"})["dungeon"]
+    assert (plain["name"], plain["quests"][0]["name"], plain["bosses"][0]["name"]) == ("The Deadmines", "Red Silk Bandanas", "Rhahk'Zor"), \
+        "a journal without those functions, or in English: its own words"
+
+
 def test_item_rarity(tmp: Path):
     """An item's rarity, learned from the game in the background, so the window can colour its name as the game does."""
     game = Game.load(make_wow_dir(tmp, flags="questindex,ranks"))
@@ -2389,6 +2404,8 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as gb:
         test_game_boundary(Path(gb))
     test_names_as_typed()
+    with tempfile.TemporaryDirectory() as dj:
+        test_dungeons_in_the_journals_language(Path(dj))
     with tempfile.TemporaryDirectory() as ir:
         test_item_rarity(Path(ir))
     with tempfile.TemporaryDirectory() as pp:

@@ -845,9 +845,22 @@ end
 -- Wisp reads the journal's own tables as they are loaded in the game; it does
 -- not carry a copy of them.
 
+-- The journal's tables are written in English; the addon translates them for the player through its own
+-- functions (it ships the translations). Wisp asks through the same functions, so a dungeon, its quests,
+-- its bosses and its places read here as they do in the journal's own window, in the journal's language.
+local function journalSays(fn, fallback, ...)
+  local J = _G.ForeverDungeonJournal_NS
+  if type(J) == "table" and type(J[fn]) == "function" then
+    local ok, text = pcall(J[fn], ...)
+    if ok and type(text) == "string" and text ~= "" then return text end
+  end
+  return fallback
+end
+local function journalText(text) return journalSays("LocalizeFreeText", text, text) end
+
 local function journalPlace(m)   -- the journal keeps positions as 0-1 on a map id
   if type(m) ~= "table" or type(m.mapID) ~= "number" or type(m.x) ~= "number" or type(m.y) ~= "number" then return nil end
-  return { map = m.mapID, zone = mapName(m.mapID), x = round1(m.x * 100), y = round1(m.y * 100), label = m.targetName or m.label }
+  return { map = m.mapID, zone = mapName(m.mapID), x = round1(m.x * 100), y = round1(m.y * 100), label = journalText(m.targetName or m.label) }
 end
 
 local function questState(id)
@@ -871,14 +884,16 @@ local function dungeons(DB)
   for _, name in ipairs(names) do
     local d = J.DB[name]
     if type(d) == "table" then
-      local dungeon = { name = name, level = d.level, location = d.location, quests = {}, bosses = {},
-                        entrance = journalPlace(d.entrance), entranceHint = type(d.entrance) == "table" and d.entrance.detail or nil }
+      local dungeon = { name = journalSays("LocalizeDungeonName", name, name), level = d.level,
+                        location = journalSays("LocalizeDungeonField", d.location, name, "location", d.location), quests = {}, bosses = {},
+                        entrance = journalPlace(d.entrance), entranceHint = type(d.entrance) == "table" and journalText(d.entrance.detail) or nil }
       for _, q in ipairs(d.quests or {}) do
         local mine = q.faction == nil or q.faction == "Both" or q.faction == faction
         if type(q.id) == "number" and mine and not q.hideFromMainList then
-          local quest = { id = q.id, name = q.name, level = q.level, requires = q.requires, class = q.classOnly,
-                          objective = q.objective, pickup = q.pickup, turnin = q.turnin,
-                          rewards = q.rewards or q.rewardSummary, state = questState(q.id),
+          local said = function(field, text) return journalSays("LocalizeQuestField", text, q.id, field, text) end
+          local quest = { id = q.id, name = said("name", q.name), level = q.level, requires = q.requires, class = q.classOnly,
+                          objective = said("objective", q.objective), pickup = said("pickup", q.pickup), turnin = said("turnin", q.turnin),
+                          rewards = journalText(q.rewards or q.rewardSummary), state = questState(q.id),
                           start = journalPlace(q.startMap or starts[q.id]), needs = {} }
           if DB then   -- the items it asks for, where Questie knows the quest
             local okQ, known = pcall(DB.GetQuest, q.id)
@@ -892,18 +907,20 @@ local function dungeons(DB)
           for _, step in ipairs(chains[q.id] or {}) do
             if type(step) == "table" and type(step.id) == "number" then
               local detail = details[step.id] or {}
-              quest.needs[#quest.needs + 1] = { id = step.id, name = step.name, state = questState(step.id),
-                                                pickup = detail.pickup, start = journalPlace(detail.map or starts[step.id]) }
+              quest.needs[#quest.needs + 1] = { id = step.id, name = journalSays("LocalizeQuestField", step.name, step.id, "name", step.name),
+                                                state = questState(step.id), pickup = journalText(detail.pickup),
+                                                start = journalPlace(detail.map or starts[step.id]) }
             end
           end
           dungeon.quests[#dungeon.quests + 1] = quest
         end
       end
       for _, b in ipairs(d.bosses or {}) do
-        local boss = { name = b.name, rare = b.rare and true or nil, loot = {} }
+        local boss = { name = journalSays("LocalizeBossName", b.name, b.name), rare = b.rare and true or nil, loot = {} }
         for _, item in ipairs(b.loot or {}) do
           if type(item) == "table" and type(item[1]) == "number" then
-            boss.loot[#boss.loot + 1] = { item[1], item[2], item[3], item[4] }   -- id, name, slot, quality
+            -- id, name (the game's own for that item where it has one), slot, quality
+            boss.loot[#boss.loot + 1] = { item[1], ownItemName(item[1]) or item[2], journalSays("LocalizeItemSlot", item[3], item[3]), item[4] }
           end
         end
         dungeon.bosses[#dungeon.bosses + 1] = boss
