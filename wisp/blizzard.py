@@ -33,6 +33,14 @@ REGIONS = ("eu", "us", "kr", "tw")
 KEY_NAME = "battlenet"   # its entry in the credential store
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None   # the 30x then arrives as an HTTP error, and nothing is sent anywhere else
+
+
+_OPEN = urllib.request.build_opener(_NoRedirect).open
+
+
 class BlizzardError(Exception):
     pass
 
@@ -57,7 +65,7 @@ class Blizzard:
     def _open(self, request: urllib.request.Request, timeout: float) -> bytes:
         request.add_header("Accept-Encoding", "gzip")
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as reply:
+            with _OPEN(request, timeout=timeout) as reply:   # a redirect would carry the client's secret to wherever it points
                 body = reply.read(200_000_000)
                 return gzip.decompress(body) if reply.headers.get("Content-Encoding") == "gzip" else body
         except urllib.error.HTTPError as e:

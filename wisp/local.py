@@ -275,7 +275,8 @@ def copy_to_clipboard(text: str) -> bool:
     """Put text on the clipboard from this side, which does not depend on what
     the web view allows. True if it worked."""
     if os.name == "nt":
-        commands = [["clip"]]   # part of Windows
+        # by its full path: a bare name is looked for beside Wisp.exe first, where any download can put a clip.exe
+        commands = [[os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "clip.exe")]]
     elif sys.platform == "darwin":
         commands = [["pbcopy"]]
     else:

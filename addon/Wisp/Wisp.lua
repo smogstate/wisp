@@ -19,6 +19,7 @@ local E = C_EncodingUtil
 local RU = GetLocale and GetLocale() == "ruRU" and {
   ["read %d %s recipes. They reach Wisp when you log out."] = "рецептов прочитано: %d (%s). Они попадут в Wisp, когда вы выйдете из игры.",
   ["that is not a Wisp message."] = "это не сообщение Wisp.",
+  ["that message is too long."] = "это сообщение слишком длинное.",
   ["one-click cards are used up for this session: /wisp sync brings them back. Copy and Ctrl+V still work."] =
     "карточки в один клик на эту сессию закончились: /wisp sync вернёт их. «Копировать» и Ctrl+V работают как прежде.",
   ["Wisp: paste now (Ctrl+V). Esc closes."] = "Wisp: вставьте сейчас (Ctrl+V). Esc закрывает.",
@@ -1607,13 +1608,14 @@ end
 local commands = {}
 
 commands["tomtom.waypoint"] = function(a)   -- { map = uiMapID, x = 0-100, y = 0-100, title = text }
-  local map, x, y = tonumber(a.map), tonumber(a.x), tonumber(a.y)
-  if not (map and x and y and map > 0 and x >= 0 and x <= 100 and y >= 0 and y <= 100) then
+  local map, x, y = a.map, a.x, a.y   -- numbers as numbers: no "0x7fffffff", and only a map the game has
+  if not (type(map) == "number" and type(x) == "number" and type(y) == "number" and map > 0 and map == math.floor(map)
+          and x >= 0 and x <= 100 and y >= 0 and y <= 100 and C_Map.GetMapInfo(map)) then
     return false, L("bad waypoint")
   end
   local title = "Wisp"
   if type(a.title) == "string" and a.title ~= "" then
-    title = clip((a.title:gsub("|", "")), 80)   -- no colour, texture or link codes from outside
+    title = clip((a.title:gsub("[|%c]", "")), 80)   -- no colour, texture or link codes from outside, and no second line
   end
   if type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function" then
     TomTom:AddWaypoint(map, x / 100, y / 100, { title = title, from = "Wisp" })
@@ -1656,6 +1658,7 @@ end
 
 local function receive(text)
   if text:sub(1, 6) ~= "WISP1:" then return say(L("that is not a Wisp message.")) end
+  if #text > 90000 then return say(L("that message is too long.")) end   -- Wisp's own are at most 60,000: a larger one is not decoded at all
   local ok, message = pcall(function() return E.DeserializeJSON(E.DecodeBase64(text:sub(7))) end)
   if not ok or type(message) ~= "table" or type(message.cmds) ~= "table" then
     return say(L("could not read that message."))
@@ -1664,7 +1667,9 @@ local function receive(text)
     if i > 50 then say(L("stopped after 50 commands.")); break end
     local run = type(cmd) == "table" and commands[cmd["do"]]
     if not run then
-      say("|cffff6060" .. L("skipped") .. "|r " .. L("unknown command") .. " " .. tostring(type(cmd) == "table" and cmd["do"]))
+      -- its name is text from outside like any other: no colour, link or line codes, and not much of it
+      local named = clip((tostring(type(cmd) == "table" and cmd["do"]):gsub("[|%c]", "")), 40)
+      say("|cffff6060" .. L("skipped") .. "|r " .. L("unknown command") .. " " .. named)
     else
       local okRun, good, note = pcall(run, cmd)
       if okRun and good then
@@ -1865,7 +1870,13 @@ frame:SetScript("OnEvent", function(_, event, ...)
     pcall(lootClosed)
   elseif event == "UNIT_SPELLCAST_SENT" then
     local unit, target = ...
-    if unit == "player" and type(target) == "string" and target ~= "" then lastCast = { name = target, at = time() } end
+    if unit == "player" then
+      -- The name of what is being gathered, never of a person: after a heal on someone, a fishing bobber looted
+      -- would otherwise be filed under their name. Any cast that names no node forgets the last one.
+      local person = type(target) ~= "string" or target == "" or target == UnitName("player") or UnitIsPlayer(target)
+        or (UnitName("target") == target and UnitIsPlayer("target"))
+      lastCast = not person and { name = target, at = time() } or nil
+    end
   elseif event ~= "PLAYER_LOGIN" then
     pcall(captureRecipes)
   else

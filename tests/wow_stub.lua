@@ -187,6 +187,7 @@ function UnitRace() return "Человек", "Human" end
 function UnitLevel() return 12 end
 function GetQuestGreenRange() return 6 end   -- at level 12, a quest of level 6 is still green and one of level 5 is grey
 function UnitName() return "Тестер" end
+function UnitIsPlayer(unit) return unit == "player" or unit == "Тестер" or unit == "Васян" end
 function GetRealmName() return "Test Realm" end
 local xpNow, xpMax = 4200, 10000   -- where the bar stands at logout; a session below starts lower and climbs to it
 function UnitXP() return xpNow end
@@ -553,6 +554,10 @@ local function goLooting(boot)
   lootWindow(boot, 80, 0, { { 2770, { vein1, 2 } }, { 2835, { vein1, 1 } } })
   boot.scripts.OnEvent(boot, "UNIT_SPELLCAST_SENT", "player", "Copper Vein", "cast-2", 2575)
   lootWindow(boot, 800, 0, { { 2770, { vein2, 3 } } })   -- after a long break: that break is not looting time
+  if flags:find("healthenfish") then   -- a heal on a party member, then a bobber looted: his name is not the bobber's
+    boot.scripts.OnEvent(boot, "UNIT_SPELLCAST_SENT", "player", "Васян", "cast-3", 2050)
+    lootWindow(boot, 5, 0, { { 6291, { "GameObject-0-1-2-3-35591-B1", 1 } } })
+  end
 end
 -- The mailbox. Auction mails carry an invoice; three of them say exactly the same (three stacks bought in one go).
 local function bought(name, id, count, paid, days) return { "buyer", name, "Bob", paid, paid, 0, 0, count, id = id, days = days } end

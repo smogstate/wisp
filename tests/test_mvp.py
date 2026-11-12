@@ -2186,6 +2186,33 @@ def test_model_boundary(tmp: Path):
     assert "recorded" in json.loads(chat.got[0]["content"]) and "https://example.com" in chat.got[2]["content"], "outside research: as before"
 
 
+def test_game_boundary(tmp: Path):
+    """What the addon takes from outside and gives away: text from a message never colours or links the chat, a
+    waypoint is on a map the game has, a person's name is never a node's, and a damaged saved file is a problem said."""
+    fake = encode_wisp1([{"do": "|n|cffffff00[Blizzard] Whisper |Hplayer:Gm|h[Game Master]|h now" + "x" * 200}])
+    said = [l for l in stub("paste", fake) if "unknown command" in l][0]
+    named = said.split("unknown command ", 1)[1]
+    assert "|" not in named and len(named) <= 40 and named.startswith("ncffffff00[Blizzard] Whisper"), said   # plain text, and little of it
+    for bad in ({"map": "0x7fffffff", "x": 10, "y": 10}, {"map": 2.5, "x": 10, "y": 10}, {"map": 999999, "x": 10, "y": 10},
+                {"map": 1429, "x": "1e1", "y": 10}):
+        lines = stub("paste", encode_wisp1([{"do": "tomtom.waypoint", **bad}]))
+        assert not any(l.startswith("WAY ") for l in lines), (bad, lines)
+    assert any(l.startswith("WAY tomtom 1429 ") for l in stub("paste", encode_wisp1([{"do": "tomtom.waypoint", "map": 1429, "x": 10, "y": 10, "title": "a\nb"}])))
+    assert any("too long" in l for l in stub("paste", "WISP1:" + "A" * 90000)), "a message far larger than Wisp's own is not decoded"
+
+    fished = Game.load(make_wow_dir(tmp, flags="healthenfish"))
+    sources = [src for day in fished.snapshot["loot"] for src in day["sources"]]
+    bobber = [src for src in sources if str(src.get("key", "")).startswith("o35591")]
+    assert bobber and "Васян" not in json.dumps(fished.snapshot["loot"], ensure_ascii=False), "a heal's target is not the bobber's name"
+
+    for damaged in ('{"v":1,"takenAt":1e999}', '{"v":1,"quests":[{"id":[1],"title":"x"}]}', "[" * 100000):
+        folder = tmp / str(abs(hash(damaged)))
+        (folder / "WTF/Account/T/SavedVariables").mkdir(parents=True)
+        (folder / "WTF/Account/T/SavedVariables/Wisp.lua").write_text(
+            f'WispSnapshot = "{base64.b64encode(damaged.encode()).decode()}"\n', encoding="utf-8")
+        assert Game.load(folder).problem, damaged
+
+
 def test_names_as_typed():
     """A name is found the way a player writes it: Russian endings, ё, a plural; and the plain item before a longer one."""
     from wisp.questdb import best
@@ -2277,6 +2304,8 @@ if __name__ == "__main__":
         test_update(Path(u))
     with tempfile.TemporaryDirectory() as mb:
         test_model_boundary(Path(mb))
+    with tempfile.TemporaryDirectory() as gb:
+        test_game_boundary(Path(gb))
     test_names_as_typed()
     test_eval_cases()
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

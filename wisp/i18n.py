@@ -76,6 +76,7 @@ RU = {
     # -- what went wrong, said to the player
     "no game folder was given": "папка игры не указана",
     "no Wisp snapshot found: enable the Wisp addon, log in, then log out once": "снимок Wisp не найден: включите аддон Wisp, войдите в игру и один раз выйдите",
+    "the Wisp snapshot is damaged: log in and out once more to write a new one": "снимок Wisp повреждён: войдите в игру и выйдите ещё раз, чтобы записать новый",
     "The {company} key was rejected. Check it in Settings.": "Ключ {company} отклонён. Проверьте его в настройках.",
     "{company} is rate limiting this key. Wait a moment and ask again.": "{company} ограничивает частоту запросов по этому ключу. Подождите немного и спросите снова.",
     "Could not reach {company}. Check the connection and ask again.": "Не удалось связаться с {company}. Проверьте соединение и спросите снова.",

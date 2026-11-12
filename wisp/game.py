@@ -107,6 +107,9 @@ class Game:
             game = cls(read_snapshot(saved))
         except ValueError as e:
             return cls(None, str(e))
+        except (TypeError, OverflowError, RecursionError, AttributeError, KeyError, IndexError):
+            # the file is written by the game, where any other addon can reach Wisp's saved variables
+            return cls(None, t("the Wisp snapshot is damaged: log in and out once more to write a new one"))
         game.saved_file = saved
         from .questdb import read_index
         game.graph.attach(read_index(saved, "WispItems", "items"))   # Questie's whole item list, when the addon has read it

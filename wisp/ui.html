@@ -881,8 +881,9 @@ function sourcesList(sources) {
   for (const source of sources) {
     const li = el("li"), link = el("a", "", source.title);
     li.value = source.n;
-    link.href = source.url; link.title = source.url;
-    link.onclick = e => { e.preventDefault(); api("/api/open", { url: source.url }); };
+    if (/^https?:\/\//i.test(source.url)) link.href = source.url;   // nothing but a web address is ever a link
+    link.title = source.url;
+    link.onclick = link.onauxclick = e => { e.preventDefault(); api("/api/open", { url: source.url }); };   // a middle click too
     li.append(link, el("span", "", " · " + source.site));
     list.append(li);
   }
