@@ -168,6 +168,7 @@ def probe(api: Blizzard, snapshot: dict, remember=None) -> list[tuple[str, bool,
             out.append((t("Blizzard API: items"), False, str(e)))
         out.extend(recipes_probe(api))
         out.extend(names_probe(api))
+        out.extend(quest_probe(api, snapshot))
 
     if not own_auctions(snapshot):
         try:
@@ -242,6 +243,22 @@ def recipes_probe(api: Blizzard) -> list[tuple[str, bool, str]]:
     except BlizzardError as e:
         lines.append((t("Blizzard API: recipes"), False, str(e)))
     return lines
+
+
+def quest_probe(api: Blizzard, snapshot: dict) -> list[tuple[str, bool, str]]:
+    """Whether Blizzard publishes quests with what they give (experience, money, items): the game itself
+    says that only for quests in the log. One of the log's quests is asked for."""
+    some = next((q.get("id") for q in snapshot.get("quests") or [] if isinstance(q, dict) and isinstance(q.get("id"), int)), None)
+    if some is None:
+        return []
+    try:
+        quest = api.get(f"/data/wow/quest/{some}", "static")
+    except BlizzardError as e:
+        return [(t("Blizzard API: quests"), False, t("quest {id}: {why}", id=some, why=e))]
+    rewards = quest.get("rewards") if isinstance(quest.get("rewards"), dict) else {}
+    return [(t("Blizzard API: quests"), True, t("quest {id} is {name}; it has: {fields}; its rewards have: {rewards}", id=some,
+                                                name=quest.get("title") or quest.get("name") or "?", fields=", ".join(sorted(quest))[:300],
+                                                rewards=", ".join(sorted(rewards)) or "–"))]
 
 
 def names_probe(api: Blizzard) -> list[tuple[str, bool, str]]:

@@ -131,12 +131,27 @@ class Game:
 
     @staticmethod
     def _reward(q: dict) -> dict:
-        """What handing a quest in gives, where Questie could say."""
+        """What handing a quest in gives: the game's own figures for a quest of the log, else Questie's reckoning where it has one."""
         out = {}
         if isinstance(q.get("xp"), int) and not isinstance(q.get("xp"), bool) and q["xp"] > 0:
             out["xp"] = q["xp"]
         if isinstance(q.get("money"), int) and not isinstance(q.get("money"), bool) and q["money"] > 0:
             out["money"] = coins(q["money"])
+        return out
+
+    @staticmethod
+    def _reward_items(q: dict) -> dict:
+        """The items a quest of the log gives, and those to choose one of, as the game lists them."""
+        out = {}
+        for key, told in (("rewardItems", "reward_items"), ("rewardChoices", "choose_one_reward_of")):
+            listed = []
+            for item in (i for i in _as_list(q.get(key)) if isinstance(i, dict)):
+                name = _clean(item.get("name"), 80) or (f"item {item['id']}" if isinstance(item.get("id"), int) else "")
+                count = item.get("count")
+                if name:
+                    listed.append(f"{count} × {name}" if isinstance(count, int) and not isinstance(count, bool) and count > 1 else name)
+            if listed:
+                out[told] = listed
         return out
 
     def _share_of_level(self, xp: int) -> str | None:
@@ -190,7 +205,7 @@ class Game:
         title = _clean(q.get("title"), 80)
         out = {
             "id": qid, "title": title, "level": q.get("level"), "colour": self.colour(q.get("level")),
-            "complete": bool(q.get("complete")), **self._reward(q),
+            "complete": bool(q.get("complete")), **self._reward(q), **self._reward_items(q),
             "objectives": [{"text": _clean(o.get("text"), 160), "done": bool(o.get("done"))}
                            for o in _as_list(q.get("objectives")) if isinstance(o, dict)],
             "starts": self._who(f"q{qid}.start", q.get("starts"), t("quest giver")),

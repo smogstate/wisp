@@ -657,6 +657,17 @@ if flags:find("brokenindex") then   -- a game whose encoder gives up on the ques
   end
 end
 
+-- What a quest of the log gives, as the game says. Usually the stand-in game says nothing (0, none), so that
+-- Questie's own reckoning shows; with the "rewards" flag it speaks: a little more experience for the wolves'
+-- quest than Questie has, and for the mine quest money, a cloak, and a choice of two.
+local speaks = flags:find("rewards")
+GetQuestLogRewardXP = function(id) return speaks and id == 33 and 460 or 0 end
+GetQuestLogRewardMoney = function(id) return speaks and id == 76 and 350 or 0 end
+GetNumQuestLogRewards = function(id) return speaks and id == 76 and 1 or 0 end
+GetQuestLogRewardInfo = function(i, id) return "Miner's Cape", 134, 1, 1, true, 5444 end
+GetNumQuestLogChoices = function(id) return speaks and id == 76 and 2 or 0 end
+GetQuestLogChoiceInfo = function(i, id) if i == 1 then return "Silk Cloth", 134, 5, 1, true, 4306 end return "Kobold Mining Shovel", 134, 1, 2, true, 1195 end
+
 assert(loadfile(here .. "/../addon/Wisp/Wisp.lua"))()
 
 if mode == "snapshot" then

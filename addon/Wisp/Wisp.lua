@@ -129,6 +129,33 @@ local function fromQuestie(questId, DB, ZoneDB, follow)
   return out
 end
 
+-- What handing a quest of the log in gives, as the game itself says: experience, money, the items given
+-- and the items to choose one of. Questie's own experience table is only a fallback (Forever's Questie
+-- may have none).
+local function logRewards(id)
+  local out = {}
+  local function number(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, n = pcall(fn, ...)
+    return ok and type(n) == "number" and n > 0 and n or nil
+  end
+  out.xp, out.money = number(GetQuestLogRewardXP, id), number(GetQuestLogRewardMoney, id)
+  local function items(count, info, ...)
+    local list = {}
+    for i = 1, math.min(number(count, ...) or 0, 12) do
+      local ok, name, _, amount, _, _, itemID = pcall(info, i, id)
+      if ok and (type(name) == "string" or type(itemID) == "number") then
+        list[#list + 1] = { id = type(itemID) == "number" and itemID or nil, name = type(name) == "string" and name or nil,
+                            count = type(amount) == "number" and amount > 1 and amount or nil }
+      end
+    end
+    return #list > 0 and list or nil
+  end
+  if type(GetQuestLogRewardInfo) == "function" then out.items = items(GetNumQuestLogRewards, GetQuestLogRewardInfo, id) end
+  if type(GetQuestLogChoiceInfo) == "function" then out.choices = items(GetNumQuestLogChoices, GetQuestLogChoiceInfo, id, true) end
+  return out
+end
+
 local function questLog(DB, ZoneDB)
   local quests = {}
   for i = 1, C_QuestLog.GetNumQuestLogEntries() do
@@ -150,6 +177,11 @@ local function questLog(DB, ZoneDB)
           quest.requiredLevel, quest.needs = known.requiredLevel, known.needs
           quest.xp, quest.money = known.xp, known.money
         end
+      end
+      local okR, gives = pcall(logRewards, info.questID)   -- the game's own word comes first
+      if okR then
+        quest.xp, quest.money = gives.xp or quest.xp, gives.money or quest.money
+        quest.rewardItems, quest.rewardChoices = gives.items, gives.choices
       end
       quests[#quests + 1] = quest
     end
@@ -1483,6 +1515,9 @@ local function buildSnapshot()
   if not okQ then open = nil end
   for _, quest in ipairs(log) do
     for _, need in ipairs(quest.needs or {}) do wanted[need.id] = true end
+    for _, list in ipairs({ quest.rewardItems or {}, quest.rewardChoices or {} }) do   -- what a reward is worth helps to choose one
+      for _, reward in ipairs(list) do if reward.id then wanted[reward.id] = true end end
+    end
   end
   for _, dungeon in ipairs(journal or {}) do
     for _, quest in ipairs(dungeon.quests) do

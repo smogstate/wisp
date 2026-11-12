@@ -1739,6 +1739,9 @@ def test_blizzard(wow: Path):
             if url.path == "/data/wow/search/item" and ns == static["ns"]:   # whole lists, every language at once
                 return self.reply(200, {"page": 1, "pageSize": 5, "maxPageSize": 1000, "pageCount": 4012, "results": [
                     {"data": {"id": 25, "name": {"en_US": "Worn Shortsword", "ru_RU": "Иззубренный короткий меч"}}}]})
+            if url.path == "/data/wow/quest/33" and ns == static["ns"]:
+                return self.reply(200, {"id": 33, "title": "Wolves Across the Border", "requirements": {"min_character_level": 2},
+                                        "rewards": {"experience": 450, "money": {"value": 50}, "items": {"choice_of": []}}})
             if url.path == "/data/wow/playable-class/index" and ns == static["ns"]:
                 return self.reply(200, {"classes": [{"id": 8, "name": "Mage"}]})
             if url.path == "/data/wow/item/4306" and ns == static["ns"]:
@@ -1781,6 +1784,8 @@ def test_blizzard(wow: Path):
         assert lines["Blizzard API: the client"] == (True, "accepted (EU)")
         assert lines["Blizzard API: WoW Forever"] == (True, "2 rulesets: Normal, Hardcore")
         assert lines["Blizzard API: game data"] == (True, "answers as static-forever-eu") and set(asked_in) == {"en_US"}
+        assert lines["Blizzard API: quests"] == (True, "quest 33 is Wolves Across the Border; it has: id, requirements, rewards, title; "
+                                                       "its rewards have: experience, items, money")
         assert lines["Blizzard API: lists of names"] == (True, "item: 4012 pages of 5 (up to 1000), names in en_US, ru_RU, e.g. 25 = Worn Shortsword; "
                                                          "creature: HTTP 404"), "items come as whole lists in every language; creatures do not, here"
         from wisp import i18n
@@ -2136,6 +2141,19 @@ def test_graph_stays_out_of_context(tmp: Path):
     assert "Thing 12345" not in SYSTEM + json.dumps(TOOLS)
 
 
+def test_quest_rewards(tmp: Path):
+    """What handing a quest in gives: the game's own word for quests of the log (experience, money, items), Questie's reckoning otherwise."""
+    game = Game.load(make_wow_dir(tmp, flags="rewards"))
+    wolves, mine = run_tool(game, "quests", {})["quests"]
+    assert wolves["xp"] == 460, "the game says 460; Questie reckoned 450"
+    assert mine["xp"] == 700 and mine["money"] == "3s 50c", "where the game is silent on experience, Questie's figure stands"
+    assert mine["reward_items"] == ["Miner's Cape"] and mine["choose_one_reward_of"] == ["5 × Silk Cloth", "Kobold Mining Shovel"]
+    assert "reward_items" not in wolves and "choose_one_reward_of" not in wolves
+    assert 4306 in game.crafting.prices, "a reward's price is at hand, to choose by"
+    quiet = run_tool(Game.load(make_wow_dir(tmp / "q")), "quests", {})["quests"]
+    assert quiet[0]["xp"] == 450 and "reward_items" not in quiet[1] and "money" not in quiet[1], "a silent game: Questie's experience, no rewards listed"
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, tempfile.TemporaryDirectory() as c:
         wow = make_wow_dir(Path(a))
@@ -2149,6 +2167,8 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as q:
             test_available_quests(wow, Path(q))
         test_questing_route(wow)
+        with tempfile.TemporaryDirectory() as qr:
+            test_quest_rewards(Path(qr))
         with tempfile.TemporaryDirectory() as oc2:
             test_graph_stays_out_of_context(Path(oc2))
         with tempfile.TemporaryDirectory() as bo:
