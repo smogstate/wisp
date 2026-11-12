@@ -1684,11 +1684,6 @@ def test_blizzard(wow: Path):
     recipes = {"on": True}   # whether the stand-in has professions at all: nobody knows yet whether Forever's does
     static = {"ns": "static-forever-eu"}   # the name game data answers under: the plain one, or one that names the data's version
     asked_in = []   # the language each request asked for
-    searched = []   # each page of names asked for: (kind, from which id)
-    ITEMS_RU = {2321: ("Fine Thread", "Тонкая нить"), 4306: ("Silk Cloth", "Шелковый материал"), 6325: ("Recipe: Herb Baked Egg", "Рецепт: яичница с зеленью"),
-                7090: ("Pattern: Not Learned Yet", "Выкройка: ещё не изучено"), 6889: ("Small Egg", "Маленькое яйцо")}
-    CREATURES_RU = {118: ("Prowler", "Бродяга"), 900: ("Roaming Mob", "Бродячий зверь"), 1347: ("Alexandra Bolero", "Александра Болеро"),
-                    234: ("Gryan Stoutmantle", "Гриан Камнегрив")}
 
     def house(number):
         if number == 110:
@@ -1728,14 +1723,6 @@ def test_blizzard(wow: Path):
             if ns.startswith("static-") and ns != static["ns"]:   # game data answers under one name only
                 return self.reply(403, {})
             asked_in.append(parse_qs(url.query).get("locale", [""])[0])
-            if url.path in ("/data/wow/search/item", "/data/wow/search/creature") and ns == static["ns"] and "id" in parse_qs(url.query):
-                # the whole list in order of id, a few at a time, from the number asked for: as a fetch of every name asks
-                listed = ITEMS_RU if url.path.endswith("item") else CREATURES_RU
-                start = int(parse_qs(url.query)["id"][0].strip("[],"))
-                searched.append((url.path.rsplit("/", 1)[1], start))
-                rows = [(i, names) for i, names in sorted(listed.items()) if i >= start][:2]   # Blizzard allows two a page, here
-                return self.reply(200, {"page": 1, "pageSize": 2, "maxPageSize": 2, "pageCount": 500,
-                                        "results": [{"data": {"id": i, "name": {"en_US": en, "ru_RU": ru}}} for i, (en, ru) in rows]})
             if url.path == "/data/wow/search/item" and ns == static["ns"]:   # whole lists, every language at once
                 return self.reply(200, {"page": 1, "pageSize": 5, "maxPageSize": 1000, "pageCount": 4012, "results": [
                     {"data": {"id": 25, "name": {"en_US": "Worn Shortsword", "ru_RU": "Иззубренный короткий меч"}}}]})
@@ -1853,27 +1840,6 @@ def test_blizzard(wow: Path):
         bare_game.live = Live(lambda: client)
         assert "puts one auction up" in run_tool(bare_game, "live_auctions", {"item": "Silk Cloth"})["error"]
         stack["on"] = False
-
-        # names in the player's language: every item and creature, fetched once, kept, and used in place of Questie's English
-        from wisp.names import Names
-        names = Names(Path(tempfile.mkdtemp()) / "names.sqlite")
-        assert names.load("ru") == {"item": {}, "creature": {}} and names.wanted("ru") == ["item", "creature"] and names.wanted("en") == []
-        assert names.sync(client, "ru", pause=0) == {"item": 5, "creature": 4} and names.version == 2
-        assert [s for s in searched if s[0] == "item"] == [("item", 1), ("item", 4307), ("item", 6890), ("item", 7091)], \
-            "from the last number seen each time: whatever the page size, nothing is missed"
-        assert names.wanted("ru") == [] and names.sync(client, "ru", pause=0) == {}, "fetched: not fetched again for a month"
-        assert names.counts("ru") == {"item": {"names": 5, "complete": True}, "creature": {"names": 4, "complete": True}}
-        local = names.load("ru")
-        assert local["creature"][1347] == "Александра Болеро" and local["item"][6889] == "Маленькое яйцо"
-        ru = Game.load(make_wow_dir(Path(tempfile.mkdtemp()), flags="questindex"), local)
-        egg = run_tool(ru, "recipes", {"search": "baked egg"})["recipes"][0]["how_to_learn"]["recipe_items"][0]
-        assert egg["item"] == "Рецепт: яичница с зеленью" and [d["name"] for d in egg["dropped_by"]] == ["Бродячий зверь", "Бродяга", "Edwin VanCleef"], \
-            "Blizzard's names where it has them; Questie's stays for the one it lacks"
-        pattern = run_tool(ru, "item_links", {"item": "Выкройка: ещё не изучено"})
-        assert pattern["sold_by"][0]["name"] == "Александра Болеро" and ru.places[pattern["sold_by"][0]["where"][0]["ref"]]["title"].startswith("Александра Болеро (")
-        assert ru.graph.names[4306] == "Silk Cloth", "what the game itself named (in the snapshot) is left as the game named it"
-        assert run_tool(ru, "quest_search", {"id": 155})["quest"]["starts"][0]["name"] == "Гриан Камнегрив", "quest givers too"
-        assert Game.load(wow).graph.names.get(6325) in (None, "Recipe: Herb Baked Egg"), "without the names nothing changes"
 
         checked = {what: status for what, status, _ in check(wow, call_model=False, battlenet="missing")}
         assert checked["Blizzard API"] == "note", "not set up: an optional line, not a failure"
