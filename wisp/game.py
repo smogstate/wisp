@@ -319,7 +319,8 @@ class Game:
     def tool_quests(self, _args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
-        note = "Locations come from the Questie addon. Use the 'ref' of a location with the waypoint tool."
+        note = ("Locations come from the Questie addon. Use the 'ref' of a location with the waypoint tool. next_in_chain is "
+                "one step only: for a whole chain and the experience it gives in all, call quest_search with the quest's id.")
         if not (self.snapshot.get("addons") or {}).get("questie"):
             note = "Questie was not available when the snapshot was taken, so most locations are missing."
         return {"quests": self.quests, "snapshot_age_minutes": self.age_minutes(), "note": note}
@@ -1078,7 +1079,10 @@ class Game:
                 "those in reach. state: done, in the log, open now (Questie shows it on the map), open by its requirements "
                 "(level and earlier quests allow it, though Questie may hide it, e.g. too low for the character), not yet "
                 "(why_not_open says what is missing), closed (another quest was chosen instead). colour is how the quest log "
-                "would colour it. Every place has a ref for the waypoint tool. Never add a quest or a fact from memory.")
+                "would colour it. Every place has a ref for the waypoint tool. Never add a quest or a fact from memory. xp is what "
+                "handing a quest in gives: the game's own figure for a quest of the log, else Questie's reckoning (a quest far below "
+                "the character's level gives less). chain_experience is the chain added up, whole and still to earn: for 'how much "
+                "for the chain' give those figures, never a sum of your own.")
         if qid is not None:
             if qid not in db.quests:
                 return {"error": f"no quest {qid} in Questie's list for this character: it may be for another race or class, "

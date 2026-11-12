@@ -358,6 +358,16 @@ CASES = [
      "oracle": [([("quest_search", {"profession": "Tailoring"}), ("item_links", {"item": "Tailoring"})],
                  "Ни книги, ни задания на это в данных нет: значит, это тренер, а тренеров в моих данных нет. У вас Tailoring 150.")]},
 
+    {"id": "chain-xp", "tags": ["quests", "rewards", "as-asked"], "lang": "ru",
+     "ask": "Сколько опыта я получу за всю цепочку The Defias Brotherhood?",   # he was told the first quest's alone
+     "tools": ["quest_search"], "text": [r"4[\s\u00a0,.]?000|4[\s\u00a0,.]?250"], "say": [r"2[\s\u00a0,.]?800"],
+     "oracle": [([("quest_search", {"name": "The Defias Brotherhood"})],
+                 "За оставшиеся два задания цепочки 4 000 опыта: 1 200 и 2 800. Вся цепочка 4 250, первое задание уже сдано.")]},
+    {"id": "chain-xp-from-log", "tags": ["quests", "rewards", "as-asked"], "lang": "ru",
+     "ask": "Сколько опыта дадут за Wolves Across the Border и за всё, что идёт дальше по цепочке?",
+     "tools": ["quest_search"], "text": [r"1[\s\u00a0,.]?000"],   # 460 for the one in the log and 540 for the next: added up by the tool
+     "oracle": [([("quests", {}), ("quest_search", {"id": 33})], "Всего 1 000 опыта: 460 за это задание и 540 за следующее, An Unwelcome Guest.")]},
+
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
      "ask": "Привет! Ты кто?", "no_tools": True,

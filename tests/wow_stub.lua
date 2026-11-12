@@ -285,7 +285,8 @@ QuestieDB.IsGroupQuest = function(id) return tags[id] == "elite" end
 QuestieDB.IsDungeonQuest = function(id) return tags[id] == "dungeon" end
 QuestieDB.IsRaidQuest = function() return false end
 QuestieDB.IsPvPQuest = function() return false end
-local questXp = { [33] = 450, [34] = 540, [40] = 620, [76] = 700, [176] = 900, [314] = 800, [386] = 2100, [84] = 60 }
+local questXp = { [33] = 450, [34] = 540, [40] = 620, [76] = 700, [176] = 900, [314] = 800, [386] = 2100, [84] = 60,
+                  [7] = 250, [155] = 1200, [166] = 2800 }   -- and a chain's later parts, which only Questie can tell
 local QuestXP = { GetQuestLogRewardXP = function(_, id) return questXp[id] or 0 end,
                   GetQuestRewardMoney = function(id) return id == 176 and 1500 or 0 end }
 local ZoneDB = { GetUiMapIdByAreaId = function(_, area) return ({ [12] = 1429, [1519] = 1453, [1] = 1426, [40] = 1436 })[area] end }

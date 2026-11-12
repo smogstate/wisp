@@ -239,7 +239,7 @@ local function indexKey(DB, pointers, ...)
   local okV, version = pcall(meta, "Questie", "Version")
   local count = 0
   for _ in pairs(pointers) do count = count + 1 end
-  return table.concat({ "f5", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f5: the profession skill a quest needs
+  return table.concat({ "f6", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f6: the experience each quest gives
 end
 
 local function questIndexKey(DB)
@@ -338,6 +338,8 @@ end
 
 local function buildQuestIndex(DB, ZoneDB, key)
   local Player, Corrections = questieModule("QuestiePlayer"), questieModule("QuestieCorrections")
+  local XP = questieModule("QuestXP")
+  if type(XP) ~= "table" or type(XP.GetQuestLogRewardXP) ~= "function" then XP = nil end
   local hidden = type(Corrections) == "table" and type(Corrections.hiddenQuests) == "table" and Corrections.hiddenQuests or {}
   local function allowed(check, mask)   -- a quest for another race or class is not this character's
     if type(mask) ~= "number" or mask == 0 or type(Player) ~= "table" or type(Player[check]) ~= "function" then return true end
@@ -382,6 +384,10 @@ local function buildQuestIndex(DB, ZoneDB, key)
                   sn = ids(startedBy[1]), so = ids(startedBy[2]), si = ids(startedBy[3]), en = ids(finishedBy[1]), eo = ids(finishedBy[2]),
                   pre = ids(ask(Q, id, "preQuestSingle")), preAll = ids(ask(Q, id, "preQuestGroup")), excl = ids(ask(Q, id, "exclusiveTo")),
                   text = type(text) == "table" and type(text[1]) == "string" and clip(text[1], 240) or nil }
+      if XP then   -- what handing it in gives, as Questie reckons it: for the later parts of a chain, which the game does not show yet
+        local okX, xp = pcall(XP.GetQuestLogRewardXP, XP, id, true)
+        if okX and type(xp) == "number" and xp > 0 then q.xp = xp end
+      end
       local skill = ask(Q, id, "requiredSkill")   -- { skill line, value }: how a profession's next rank is earned, where that is a quest
       if type(skill) == "table" and type(skill[1]) == "number" and type(skill[2]) == "number" then q.sk = { skill[1], skill[2] } end
       local nextId, flags = ask(Q, id, "nextQuestInChain"), ask(Q, id, "specialFlags")

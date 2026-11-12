@@ -2139,6 +2139,10 @@ def test_quest_rewards(tmp: Path):
     # a quest asked about by name gets the same: quest_search reads Questie's list, which has no rewards of its own
     asked = run_tool(Game.load(make_wow_dir(tmp / "s", flags="rewards,questindex")), "quest_search", {"name": "Jasperlode"})["quests"][0]
     assert (asked["xp"], asked["money"], asked["reward_items"]) == (700, "3s 50c", ["Miner's Cape"]), asked
+    # a chain's later parts are not in the log: Questie's reckoning for each, and the chain added up in code
+    later = run_tool(Game.load(make_wow_dir(tmp / "c", flags="rewards,questindex")), "quest_search", {"name": "The Defias Brotherhood"})["quests"]
+    assert [q["xp"] for q in later] == [1200, 2800] and [c.get("xp") for c in later[0]["chain"]] == [250, 1200, 2800]
+    assert later[0]["chain_experience"] == {"whole_chain": 4250, "still_to_earn": 4000, "quests_still_to_do": 2}, "the first part is done"
     quiet = run_tool(Game.load(make_wow_dir(tmp / "q")), "quests", {})["quests"]
     assert quiet[0]["xp"] == 450 and "reward_items" not in quiet[1] and "money" not in quiet[1], "a silent game: Questie's experience, no rewards listed"
 

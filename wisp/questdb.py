@@ -232,8 +232,14 @@ class QuestDB:
             ahead.append(nxt)
             at = nxt
         ids = list(reversed(back)) + [qid] + ahead
-        return [{"id": i, "name": self.name(i), "level": self.quests[i].get("level"), "state": self.state(i)[0],
-                 **({"this_one": True} if i == qid else {})} for i in ids] if len(ids) > 1 else []
+        return [{k: v for k, v in {"id": i, "name": self.name(i), "level": self.quests[i].get("level"), "state": self.state(i)[0],
+                                   "xp": self.xp(i), "this_one": True if i == qid else None}.items() if v is not None}
+                for i in ids] if len(ids) > 1 else []
+
+    def xp(self, qid: int) -> int | None:
+        """What handing a quest in gives: the game's own figure where it has shown one, else Questie's reckoning."""
+        known = self.game.rewards.get(qid, {}).get("xp")
+        return known if known else _int(self.quests.get(qid, {}).get("xp"))
 
     def row(self, qid: int) -> dict:
         q = self.quests[qid]
@@ -242,7 +248,7 @@ class QuestDB:
                                   "zone": q.get("zone"), "kind": q.get("kind"), "state": state,
                                   "colour": self.game.colour(q.get("level")),
                                   "needs_profession": (lambda n: f"{n[0]} {n[1]}" if n else None)(self.skill_needed(qid)),
-                                  **self.game.rewards.get(qid, {})}.items() if v is not None}
+                                  "xp": self.xp(qid), **self.game.rewards.get(qid, {})}.items() if v is not None}
 
     def detail(self, qid: int) -> dict:
         q = self.quests[qid]
@@ -262,4 +268,9 @@ class QuestDB:
         chain = self.chain(qid)
         if chain:
             out["chain"] = chain
+            # added up here, so that 'how much for the whole chain' is never the model's own sum
+            left = [c for c in chain if c["state"] != "done"]
+            out["chain_experience"] = {"whole_chain": sum(c.get("xp", 0) for c in chain), "still_to_earn": sum(c.get("xp", 0) for c in left),
+                                       "quests_still_to_do": len(left),
+                                       **({"quests_without_a_figure": n} if (n := sum("xp" not in c for c in chain)) else {})}
         return out
