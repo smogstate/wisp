@@ -208,6 +208,7 @@ class App:
         self.handle = None                       # the Windows handle of that window
         self.active = True                       # the mouse is over it or it has the keyboard
         self.collapsed = False
+        self.round = False                       # whether the collapsed window really is a disc
         self.hotkey = None                       # the global show/hide key, when Windows granted it
         saved = local.load_config() if persist else {}
         models = saved.get("models") if isinstance(saved.get("models"), dict) else {}
@@ -642,22 +643,29 @@ class App:
     def set_collapsed(self, collapsed: bool) -> dict:
         """Shrink the window to the wisp, or bring it back, keeping its top-right corner where it is."""
         self.collapsed = bool(collapsed)
+        self.round = os.name != "nt"   # elsewhere the window is see-through and the page draws the disc itself
         if self.window is not None:
             if self.frameless:
                 from webview.window import FixPoint
                 width, height = (ORB, ORB) if self.collapsed else SIZE
+                self.handle = local.window_handle(self.window) or self.handle   # asked for anew: Windows may have made the window again
                 if not self.collapsed:
                     local.set_window_round(self.handle, False)
                 self.window.resize(width, height, fix_point=FixPoint.NORTH | FixPoint.EAST)
                 if self.collapsed:
                     time.sleep(0.15)   # let the resize land before the shape is cut from the new size
-                    local.set_window_round(self.handle, True)
+                    self.round = local.set_window_round(self.handle, True) or self.round
                 self.apply_alpha()
             elif self.collapsed:
                 self.window.minimize()   # an ordinary window just goes to the taskbar
             else:
                 self.window.restore()
-        return {"collapsed": self.collapsed}
+        return {"collapsed": self.collapsed, "round": self.round}   # not round: the page draws a square tile instead
+
+    def window_resized(self, *_):
+        """Whatever resizes the collapsed window afterwards (a change of screen or scaling) leaves the old cut: cut it again."""
+        if self.collapsed and self.frameless and os.name == "nt":
+            self.round = local.set_window_round(local.window_handle(self.window) or self.handle, True)
 
     def toggle_from_hotkey(self):
         if self.window is None:
@@ -1114,6 +1122,7 @@ def main():
         app.window, app.frameless = window, not plain
         window.events.closing += app.remember_position
         window.events.shown += app.window_shown
+        window.events.resized += app.window_resized
         if not fake and local.start_hotkey(app.toggle_from_hotkey):
             app.hotkey = local.HOTKEY_LABEL
         if smoke_file:

@@ -50,8 +50,10 @@
   body.glass:not(:hover):not(:focus-within) { --glass-now: var(--glass); --chrome-now: min(1, calc(var(--glass) + .15)); }
   /* On Windows the whole window fades instead, and the collapsed window is cut to a disc: fill it. */
   body.fade { border: 1px solid var(--line); }
+  body.fade.collapsed { background: #7a5422; }   /* the ring's own colour: a sliver at the cut's edge is never the window's */
   body.fade.collapsed #orb button { width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
-  body.fade.collapsed #orb[data-state="ready"] button::after, body.fade.collapsed #orb[data-state="card"] button::after { top: 9px; right: 9px; }
+  /* where Windows would not cut the window round, it is a square: drawn as a framed tile, not a disc on a background */
+  body.fade.collapsed.square #orb button::before { border-radius: 22%; }
   header {
     display: flex; align-items: center; gap: 6px; padding: 10px var(--gutter);
     background: rgb(var(--panel-rgb) / var(--chrome-now)); border-bottom: 1px solid var(--line);
@@ -64,16 +66,24 @@
   body.collapsed.glass { background: transparent; }
   body.collapsed > :not(#orb) { display: none !important; }
   body.collapsed #orb { display: grid; place-items: center; flex: 1; }
-  #orb button { position: relative; width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
-    background: radial-gradient(circle at 35% 32%, #ffffff 0, var(--accent) 42%, rgb(var(--bg-rgb) / .9) 100%);
-    box-shadow: 0 0 12px 2px var(--accent); }
-  #orb[data-state="thinking"] button { animation: breathe 1.3s ease-in-out infinite; }
+  /* The collapsed wisp: a bronze ring, as the game's own round buttons have, around a deep disc with the wisp on it.
+     Every pixel is the icon's own, to the very edge: nothing of the window's background shows around it.
+     Drawn here, not the game's art. */
+  #orb button { position: relative; width: 44px; height: 44px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+    background: conic-gradient(from 210deg, #6d4a1e, #e9c983 18%, #b98b40 34%, #7a5422 52%, #f0d597 70%, #a97c36 86%, #6d4a1e);
+    box-shadow: 0 1px 6px rgb(0 0 0 / .45); }
+  #orb button::before { content: ""; position: absolute; inset: 10.5%; border-radius: 50%;
+    background: center / 100% no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><radialGradient id="g" cx="50%" cy="68%" r="60%"><stop offset="0" stop-color="%23ffffff"/><stop offset="1" stop-color="%239ff3e6"/></radialGradient></defs><path fill="url(%23g)" d="M33 11c1 8 12 13 12 26a13 13 0 0 1-26 0c0-6 3-9 6-13 1 4 2 6 4 6 2-6 1-12 4-19z"/><path fill="%230e665d" opacity=".55" d="M32 34c1 4 5 5 5 10a5 5 0 0 1-10 0c0-3 3-5 5-10z"/></svg>'),
+                linear-gradient(155deg, #17877b 0%, #0e665d 48%, #093f3a 100%);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / .55), inset 0 2px 4px rgb(0 0 0 / .35); }
+  #orb[data-state="thinking"] button::before { animation: glow 1.3s ease-in-out infinite; }
+  /* an answer is ready, or a card is waiting: a mark on the ring, inside the icon's own outline */
   #orb[data-state="ready"] button::after, #orb[data-state="card"] button::after {
-    content: ""; position: absolute; top: -2px; right: -2px; width: 12px; height: 12px; border-radius: 50%;
-    background: var(--text); border: 2px solid rgb(var(--bg-rgb)); }
-  #orb[data-state="card"] button::after { background: #f5b83d; border-radius: 3px; }
-  @keyframes breathe { 0%, 100% { transform: scale(.82); opacity: .75; } 50% { transform: scale(1); opacity: 1; } }
-  @media (prefers-reduced-motion: reduce) { #orb[data-state="thinking"] button { animation: none; } }
+    content: ""; position: absolute; top: 12%; right: 12%; width: 22%; height: 22%; border-radius: 50%;   /* wholly inside the disc */
+    background: #ffffff; box-shadow: 0 0 0 1.5px rgb(0 0 0 / .6); }
+  #orb[data-state="card"] button::after { background: #f5b83d; border-radius: 32%; }
+  @keyframes glow { 0%, 100% { filter: brightness(.8); } 50% { filter: brightness(1.4); } }
+  @media (prefers-reduced-motion: reduce) { #orb[data-state="thinking"] button::before { animation: none; } }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); flex: none; }
   h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: .01em; }
   #status { color: var(--muted); font-size: 12px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -447,10 +457,11 @@ async function setCollapsed(on) {
     for (const d of document.querySelectorAll("dialog[open]")) d.close();
     orb.dataset.state = running ? "thinking" : "idle";
     document.body.classList.add("collapsed");
-    await post("/api/window", { collapsed: true });
+    const done = await post("/api/window", { collapsed: true });
+    document.body.classList.toggle("square", fade && done.round === false);   // Windows did not cut the window round
   } else {    // grow first, then show
     await post("/api/window", { collapsed: false });
-    document.body.classList.remove("collapsed");
+    document.body.classList.remove("collapsed", "square");
     orb.dataset.state = "idle";
     input.focus();
   }

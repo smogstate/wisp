@@ -158,10 +158,12 @@ def set_window_alpha(handle: int | None, alpha: float):
     user32.SetLayeredWindowAttributes(ctypes.c_void_p(handle), 0, max(40, min(255, round(alpha * 255))), lwa_alpha)
 
 
-def set_window_round(handle: int | None, round_shape: bool):
-    """Clip the window to a disc (the collapsed wisp), or give it back its rectangle."""
+def set_window_round(handle: int | None, round_shape: bool) -> bool:
+    """Clip the window to a disc (the collapsed wisp), or give it back its rectangle.
+    True when the window is now a disc: Windows is asked afterwards what shape it really has, because on some
+    machines the cut does not take, and the window must then be drawn as the square it still is."""
     if not handle:
-        return
+        return False
     import ctypes
     from ctypes import wintypes
     user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
@@ -172,7 +174,11 @@ def set_window_round(handle: int | None, round_shape: bool):
         rect = wintypes.RECT()
         user32.GetWindowRect(ctypes.c_void_p(handle), ctypes.byref(rect))
         region = gdi32.CreateEllipticRgn(0, 0, rect.right - rect.left + 1, rect.bottom - rect.top + 1)
-    user32.SetWindowRgn(handle, region, True)   # the window owns the region from here on
+    done = user32.SetWindowRgn(handle, region, True)   # the window owns the region from here on
+    if not round_shape:
+        return False
+    box = wintypes.RECT()
+    return bool(done) and user32.GetWindowRgnBox(ctypes.c_void_p(handle), ctypes.byref(box)) == 3   # 3: a shape, not a rectangle
 
 
 def round_window_corners(handle: int | None):
