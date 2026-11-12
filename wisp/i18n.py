@@ -165,6 +165,7 @@ RU = {
     "Wisp added what one-click cards need. Restart the game once so it sees the new files.": "Wisp добавил то, что нужно для карточек в один клик. Перезапустите игру один раз, чтобы она увидела новые файлы.",
     "Could not send it to the game: {why}": "Не удалось отправить в игру: {why}",
     "Every item from Questie": "Все предметы из Questie", "{n} items with who sells or drops them": "предметов с продавцами и источниками: {n}",
+    "the game could not read it: {why}": "игра не смогла прочитать: {why}",
     "Every quest from Questie": "Все задания из Questie", "{n} quests this character could take": "заданий, доступных этому персонажу: {n}",
     "not yet: Wisp's addon reads them in the background about a minute after login; log out after that": "пока нет: аддон Wisp читает их в фоне примерно через минуту после входа; после этого выйдите из игры",
     "Quest locations found": "Найдено мест заданий",

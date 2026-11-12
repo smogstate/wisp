@@ -35,7 +35,7 @@ def read_snapshot(saved_file: Path) -> dict:
     if not m:
         raise ValueError("the addon has not saved a snapshot yet; log out of the game once")
     try:
-        snapshot = json.loads(base64.b64decode(m.group(1)))
+        snapshot = json.loads(base64.b64decode(m.group(1)).decode("utf-8", errors="replace"))
     except ValueError as e:
         raise ValueError("the saved snapshot is damaged") from e
     if not isinstance(snapshot, dict) or snapshot.get("v") != SNAPSHOT_VERSION:

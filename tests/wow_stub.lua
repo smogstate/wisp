@@ -31,13 +31,9 @@ function PlaySoundFile(path)
 end
 local out = print
 print = function(s) LOG[#LOG + 1] = (s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
-local clock = os.time()   -- the game's clock, which the play below moves forward by up to an hour or so
--- That play must not straddle a midnight, UTC (Wisp's days) or local (Auctionator's): start it a few hours earlier if it would.
-local function sameDay(a, b) return math.floor(a / 86400) == math.floor(b / 86400) and os.date("%d", a) == os.date("%d", b) end
-for _ = 1, 23 do
-  if sameDay(clock, clock + 7200) then break end
-  clock = clock - 3600
-end
+-- The game's clock, which the play below moves forward by up to an hour or so. The tests hand it over
+-- (WISP_CLOCK), set so that neither that play nor what it looks back on straddles a midnight, UTC or local.
+local clock = tonumber(os.getenv("WISP_CLOCK") or "") or os.time()
 time = function() return clock end
 function strsplit(sep, text)
   local parts = {}
@@ -302,6 +298,8 @@ for id, q in pairs(quests) do
 end
 raw[33].objectives = { { { 118 } }, nil, { { 750 } } }
 raw[33].objectivesText = { "Bring 8 pieces of Tough Wolf Meat to Eagan Peltskinner." }
+-- a Russian client: letters of two bytes, and a text long enough to be cut. Byte 240 falls in the middle of one.
+raw[76].objectivesText = { ("Убейте 10 кобольдов-рудокопов и вернитесь к маршалу Макбрайду в Аббатство Североземья, когда закончите. "):rep(3) }
 raw[7] = { name = "Kobold Camp Cleanup", questLevel = 3, requiredLevel = 1, zoneOrSort = 12, startedBy = { { 240 } }, finishedBy = { { 240 } } }
 raw[155] = { name = "The Defias Brotherhood", questLevel = 14, requiredLevel = 9, zoneOrSort = 40, preQuestSingle = { 7 }, nextQuestInChain = 166,
              startedBy = { { 234 } }, finishedBy = { { 234 } } }
@@ -649,6 +647,14 @@ if flags:find("alts") then   -- what an alt left in the saved data at its own lo
   }
 end
 
+if flags:find("brokenindex") then   -- a game whose encoder gives up on the quest list
+  local encode = C_EncodingUtil.SerializeJSON
+  C_EncodingUtil.SerializeJSON = function(value)
+    if type(value) == "table" and value.quests and value.npcs then error("out of memory") end
+    return encode(value)
+  end
+end
+
 assert(loadfile(here .. "/../addon/Wisp/Wisp.lua"))()
 
 if mode == "snapshot" then
@@ -699,7 +705,6 @@ if mode == "snapshot" then
     out("SENT " .. market .. " " .. upTo.to - upTo.from)
   end
 elseif mode == "inbox" then   -- a session: login, a few seconds, then the files change on disk, a few seconds more
-  clock = os.time()   -- no play here to keep clear of midnight, and messages are dated by the real clock
   if os.getenv("WISP_DELIVERED") then WispData = { delivered = tonumber(os.getenv("WISP_DELIVERED") .. ".0") } end
   local boot
   for _, f in ipairs(FRAMES) do if f.scripts.OnEvent then boot = f end end

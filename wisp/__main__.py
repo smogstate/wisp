@@ -129,8 +129,13 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 t("none yet: it starts with the first thing you loot after this update"), optional=True)
             if (addons / "Questie").is_dir():
                 every = game.questdb()
+                failed = game.snapshot.get("indexFailed") if isinstance(game.snapshot.get("indexFailed"), dict) else {}
+
+                def not_yet(name):   # why the game could not read a list, when it said; else how it comes
+                    return (t("the game could not read it: {why}", why=str(failed[name])[:300]) if failed.get(name) else
+                            t("not yet: Wisp's addon reads them in the background about a minute after login; then /wisp sync"))
                 add(t("Every quest from Questie"), every is not None, t("{n} quests this character could take", n=len(every.quests) if every else 0),
-                    t("not yet: Wisp's addon reads them in the background about a minute after login; log out after that"), optional=True)
+                    not_yet("quests"), optional=True)
             add(t("Every recipe in the game"), bool(game.crafting.world_recipes) or game.recipes_read and bool(game.crafting.recipes),
                 t("{n} recipes beyond your own professions", n=len(game.crafting.world_recipes)),
                 t("the game gave none: tell Wisp's author") if game.recipes_read else
@@ -139,7 +144,7 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 t("not yet: restart the game once, keep its sound enabled (the volume may be zero), then /wisp sync"), optional=True)
             if (addons / "Questie").is_dir():
                 add(t("Every item from Questie"), bool(game.graph.world), t("{n} items with who sells or drops them", n=len(game.graph.world)),
-                    t("not yet: Wisp's addon reads them in the background about a minute after login; log out after that"), optional=True)
+                    not_yet("items"), optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add(t("Quest locations found"), places > 0, t("{n} for quest givers and turn-ins", n=places), t("none: is your quest log empty?"))
             if battlenet == "missing":

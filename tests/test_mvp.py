@@ -33,9 +33,30 @@ from wisp.llm import FakeChat, answer  # noqa: E402
 # at one, and under the fengari VM (Lua 5.3) through Node otherwise.
 LUA = [os.environ["WISP_LUA"], "tests/wow_stub.lua"] if os.environ.get("WISP_LUA") else ["node", "tests/wow_stub.js"]
 
+# One clock for the whole test world. The stand-in game plays a session of an hour or so and looks back a few
+# hours (mail, scans), and "today" must be the same day throughout, in UTC (Wisp's days) and in local time
+# (Auctionator's). Run close to a midnight, that cannot hold at the real time: so the tests' own clock, and
+# the stand-in game's with it, is set back by whole hours until it does.
+_real_time = time.time
+
+
+def _a_quiet_hour(now: float) -> float:
+    def same_day(a, b):
+        return a // 86400 == b // 86400 and time.localtime(a).tm_mday == time.localtime(b).tm_mday
+    for _ in range(23):
+        if same_day(now - 14400, now + 7200):
+            break
+        now -= 3600
+    return now
+
+
+_SET_BACK = _real_time() - _a_quiet_hour(_real_time())
+time.time = lambda: _real_time() - _SET_BACK
+
 
 def stub(*args, flags=""):
-    out = subprocess.run([*LUA, *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "WISP_STUB": flags})
+    out = subprocess.run([*LUA, *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                         env={**os.environ, "WISP_STUB": flags, "WISP_CLOCK": str(int(time.time()))})
     assert out.returncode == 0, out.stderr + out.stdout
     return out.stdout.splitlines()
 
@@ -1534,6 +1555,25 @@ def test_quest_search(tmp: Path):
     assert db is not None and 9001 not in db.quests and 9003 not in db.quests, "another race's and another class's quests are left out"
     assert 9002 not in db.quests and {7, 33, 155, 166, 386} <= set(db.quests), "and so are those Questie hides"
 
+    # a Russian client: a long text is cut between letters, never through one (half a letter made the whole list unreadable)
+    mine = db.quests[76]["text"]
+    assert mine.startswith("Убейте 10 кобольдов-рудокопов") and len(mine.encode("utf-8")) in (239, 240) and "\ufffd" not in mine, mine[-12:]
+    assert run_tool(game, "quest_search", {"id": 76})["quest"]["objective"].endswith(mine[-10:])
+    # and a list an older addon wrote with half a letter in it is still read
+    from wisp.questdb import read_index
+    saved = next(wow.rglob("Wisp.lua"))
+    half = base64.b64encode('{"v":1,"quests":[{"id":5,"name":"Задание","text":"'.encode() + "кобольд".encode()[:5] + b'"}]}').decode()
+    old_file = tmp / "old" / "Wisp.lua"
+    old_file.parent.mkdir()
+    old_file.write_text(f'WispQuests = "{half}"\n', encoding="utf-8")
+    assert read_index(old_file)["quests"][0]["name"] == "Задание", "the broken letter is replaced, the rest stands"
+    # when the game cannot read or write a list, Check setup says why instead of 'not yet'
+    broken = make_wow_dir(tmp / "broken", flags="questindex,brokenindex")
+    (broken / "Interface" / "AddOns" / "Questie").mkdir(parents=True)
+    said = {what: (status, detail) for what, status, detail in check(broken, call_model=False)}
+    assert said["Every quest from Questie"][0] == "note" and "could not be written" in said["Every quest from Questie"][1] and "out of memory" in said["Every quest from Questie"][1]
+    assert said["Every item from Questie"][0] == "ok", "the other lists are read all the same"
+
     both = run_tool(game, "quest_search", {"name": "defias"})
     assert both["found"] == 2 and [q["id"] for q in both["quests"]] == [155, 166]
     first, second = both["quests"]
@@ -1794,7 +1834,7 @@ def test_one_click_cards(wow: Path, tmp: Path):
     assert "LoadOnDemand: 1" in (addons / "Wisp_In001" / "Wisp_In001.toc").read_text() and "LoadOnDemand" not in (addons / "Wisp_Inbox" / "Wisp_Inbox.toc").read_text()
 
     def game(folder, later=None, flags="", delivered=None):
-        env = {**os.environ, "WISP_STUB": flags, "WISP_ADDONS": str(folder)}
+        env = {**os.environ, "WISP_STUB": flags, "WISP_ADDONS": str(folder), "WISP_CLOCK": str(int(time.time()))}
         if later:
             env["WISP_ADDONS_LATER"] = str(later)
         if delivered:
@@ -1848,7 +1888,7 @@ def test_one_click_cards(wow: Path, tmp: Path):
     assert "SLOTS 0" in game(later, flags="nosound")
     def told(env_addons, flags=""):
         lines = subprocess.run([*LUA, "snapshot"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
-                               env={**os.environ, "WISP_STUB": flags, "WISP_ADDONS": str(env_addons)}).stdout.splitlines()
+                               env={**os.environ, "WISP_STUB": flags, "WISP_ADDONS": str(env_addons), "WISP_CLOCK": str(int(time.time()))}).stdout.splitlines()
         return json.loads(base64.b64decode(next(l for l in lines if l.startswith("SNAPSHOT ")).split()[1]))["addons"]["inbox"]
     assert told(addons) is True and told(addons, "nosound") is False
 

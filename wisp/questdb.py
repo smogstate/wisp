@@ -36,7 +36,8 @@ def read_index(saved: Path | None, name: str = "WispQuests", holds: str = "quest
     try:
         m = re.search(rf'^{name} = "([A-Za-z0-9+/=]+)"', saved.read_text(encoding="utf-8", errors="replace"), re.M)
         if m:
-            data = json.loads(base64.b64decode(m.group(1)))
+            # a letter cut in half by an older addon must not cost the whole list
+            data = json.loads(base64.b64decode(m.group(1)).decode("utf-8", errors="replace"))
             if isinstance(data, dict) and data.get("v") == 1 and isinstance(data.get(holds), list):
                 index = data
     except (OSError, ValueError):

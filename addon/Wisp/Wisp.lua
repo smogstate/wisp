@@ -43,6 +43,19 @@ local function say(text) print("|cff7fd4ffWisp|r " .. text) end
 
 local function round1(n) return math.floor(n * 10 + 0.5) / 10 end
 
+-- A text no longer than so many bytes, cut between letters: a Russian letter is two bytes, and half of one
+-- is not text any more (it made the whole quest list unreadable on a Russian client).
+local function clip(text, most)
+  if #text <= most then return text end
+  local last = most
+  while last > 0 do
+    local following = text:byte(last + 1)
+    if not following or following < 128 or following >= 192 then break end   -- the next byte starts a letter
+    last = last - 1
+  end
+  return text:sub(1, last)
+end
+
 local function mapName(map)
   local info = map and C_Map.GetMapInfo(map)
   return info and info.name
@@ -193,7 +206,7 @@ local function indexKey(DB, pointers, ...)
   local okV, version = pcall(meta, "Questie", "Version")
   local count = 0
   for _ in pairs(pointers) do count = count + 1 end
-  return table.concat({ "f2", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f2: how places are chosen
+  return table.concat({ "f3", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f3: texts cut between letters
 end
 
 local function questIndexKey(DB)
@@ -320,7 +333,7 @@ local function buildQuestIndex(DB, ZoneDB, key)
                   zone = zoneName(ask(Q, id, "zoneOrSort")),
                   sn = ids(startedBy[1]), so = ids(startedBy[2]), si = ids(startedBy[3]), en = ids(finishedBy[1]), eo = ids(finishedBy[2]),
                   pre = ids(ask(Q, id, "preQuestSingle")), preAll = ids(ask(Q, id, "preQuestGroup")), excl = ids(ask(Q, id, "exclusiveTo")),
-                  text = type(text) == "table" and type(text[1]) == "string" and text[1]:sub(1, 240) or nil }
+                  text = type(text) == "table" and type(text[1]) == "string" and clip(text[1], 240) or nil }
       local nextId, flags = ask(Q, id, "nextQuestInChain"), ask(Q, id, "specialFlags")
       if type(nextId) == "number" and nextId > 0 then q.next = nextId end
       if type(flags) == "number" and flags % 2 == 1 then q.repeatable = true end
@@ -467,19 +480,23 @@ local function indexStep()
   end
   local ok, index = coroutine.resume(indexRun.run)
   if ok and coroutine.status(indexRun.run) ~= "dead" then return C_Timer.After(0, indexStep) end
-  local keep = indexRun.keep
+  local keep, name = indexRun.keep, indexRun.name
   indexRun = nil
+  local why = not ok and tostring(index) or nil   -- what went wrong, for Wisp's Check setup: nothing is said in chat
   if ok and type(index) == "table" then
     local okJ, text = pcall(function() return E.EncodeBase64(E.SerializeJSON(index)) end)
-    if okJ and type(text) == "string" then keep(text, index.key) end
+    if okJ and type(text) == "string" then keep(text, index.key) else why = "could not be written: " .. tostring(text) end
   end
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.indexFailed = WispData.indexFailed or {}
+  WispData.indexFailed[name] = why and clip(why, 300) or nil
   C_Timer.After(0, indexStep)   -- the next one, if any
 end
 
 local function queueIndex(name, build, keep)   -- each index once per session
   if indexQueued[name] or not (E and E.SerializeJSON and E.EncodeBase64) then return end
   indexQueued[name] = true
-  indexQueue[#indexQueue + 1] = { run = coroutine.create(build), keep = keep }
+  indexQueue[#indexQueue + 1] = { name = name, run = coroutine.create(build), keep = keep }
   if not indexGoing then indexGoing = true; indexStep() end
 end
 
@@ -1504,6 +1521,7 @@ local function buildSnapshot()
     bags = carried,
     bank = banked,
     alts = others,
+    indexFailed = type(WispData) == "table" and type(WispData.indexFailed) == "table" and next(WispData.indexFailed) and WispData.indexFailed or nil,
     recipes = books,
     prices = market,
     market = record,
@@ -1544,7 +1562,7 @@ commands["tomtom.waypoint"] = function(a)   -- { map = uiMapID, x = 0-100, y = 0
   end
   local title = "Wisp"
   if type(a.title) == "string" and a.title ~= "" then
-    title = (a.title:gsub("|", "")):sub(1, 80)   -- no colour, texture or link codes from outside
+    title = clip((a.title:gsub("|", "")), 80)   -- no colour, texture or link codes from outside
   end
   if type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function" then
     TomTom:AddWaypoint(map, x / 100, y / 100, { title = title, from = "Wisp" })
