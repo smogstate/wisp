@@ -31,6 +31,11 @@ def stamp():
     info = {"commit": os.environ["GITHUB_SHA"], "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "runtime": sha(b"\0".join(parts))[:12]}
     (ROOT / "wisp" / "version.json").write_text(json.dumps(info), encoding="utf-8")
+    # the addon says in every snapshot which Wisp it came with, so that Wisp can tell when the game still runs the one before
+    addon = ROOT / "addon" / "Wisp" / "Wisp.lua"
+    source, mark = addon.read_bytes(), b'local ADDON_BUILD = "dev"'
+    assert source.count(mark) == 1, "the addon's version line is gone"
+    addon.write_bytes(source.replace(mark, b'local ADDON_BUILD = "%s"' % info["commit"][:7].encode()))
     print(info)
 
 

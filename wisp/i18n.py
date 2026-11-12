@@ -70,6 +70,7 @@ RU_COUNTED = {
 }
 
 RU = {
+    "This game data was saved by an earlier version of Wisp's addon, so what is new is not in it yet. In the game type /wisp sync, and once the interface has reloaded, /wisp sync again.": "Эти данные игры записаны прежней версией аддона Wisp, поэтому нового в них ещё нет. В игре наберите /wisp sync, а когда интерфейс перезагрузится, ещё раз /wisp sync.",
     # whose names Wisp shows (Check setup)
     "Names of quests": "Названия заданий",
     "Names of people": "Имена персонажей",

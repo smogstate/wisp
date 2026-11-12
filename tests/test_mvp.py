@@ -2316,6 +2316,19 @@ def test_dungeons_in_the_journals_language(tmp: Path):
         "a journal without those functions, or in English: its own words"
 
 
+def test_addon_behind(tmp: Path):
+    """After an update the game keeps running the old addon until its interface loads again: Wisp says so, not nothing."""
+    app = App(make_wow_dir(tmp), fake=True)
+    game = app.load_game()
+    assert game.snapshot["addonBuild"] == "dev" and app.addon_behind(game) is None, "run from source: no version to compare"
+    app.update["version"] = "abc1234"   # a built Wisp, and data written by the addon of another build
+    assert "/wisp sync" in app.addon_behind(game) and "/wisp sync" in app.state()["addon_behind"]
+    game.snapshot["addonBuild"] = "abc1234"
+    assert app.addon_behind(game) is None, "the addon of this very build wrote it"
+    del game.snapshot["addonBuild"]
+    assert app.addon_behind(game), "data from before the addon said which build it was"
+
+
 def test_item_rarity(tmp: Path):
     """An item's rarity, learned from the game in the background, so the window can colour its name as the game does."""
     game = Game.load(make_wow_dir(tmp, flags="questindex,ranks"))
@@ -2404,6 +2417,8 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as gb:
         test_game_boundary(Path(gb))
     test_names_as_typed()
+    with tempfile.TemporaryDirectory() as ab:
+        test_addon_behind(Path(ab))
     with tempfile.TemporaryDirectory() as dj:
         test_dungeons_in_the_journals_language(Path(dj))
     with tempfile.TemporaryDirectory() as ir:

@@ -1,3 +1,8 @@
+-- Which Wisp this addon came with. The build writes the version in place of "dev"; it goes into every snapshot, so
+-- that Wisp can tell a snapshot written by the addon it has just installed from one written by the addon before
+-- it: after an update the game keeps running the old addon until its interface is loaded again.
+local ADDON_BUILD = "dev"
+
 -- Wisp, game side (MVP). An addon has no network and no live file access, so:
 --   out: a SNAPSHOT of the character and quest log, saved when you log out.
 --        For every quest it copies out what Questie knows: who starts and
@@ -1994,6 +1999,7 @@ local function buildSnapshot()
     xp = progress,
     deaths = deaths,
     combatLog = COMBAT_LOG_OPEN,   -- whether this game lets an addon read the combat log at all
+    addonBuild = ADDON_BUILD,
     itemSkill = okS and needs or nil,
     nameProbe = okN and named or nil,
     quality = okQ and rare or nil,

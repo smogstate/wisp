@@ -515,6 +515,15 @@ class App:
         lines = recap(changes)
         return {"since": ago_words(changes["hours_between"]), "lines": lines} if lines else None
 
+    def addon_behind(self, game) -> str | None:
+        """What to tell the player when the game's data was written by an earlier addon than the one Wisp has
+        installed: after an update the game keeps running the old addon until its interface loads again, and the
+        data it saves is the old addon's. None when the two match, or when this Wisp has no version (run from source)."""
+        mine = self.update.get("version")
+        if not mine or not game.snapshot or game.snapshot.get("addonBuild") == mine:
+            return None
+        return t("This game data was saved by an earlier version of Wisp's addon, so what is new is not in it yet. In the game type /wisp sync, and once the interface has reloaded, /wisp sync again.")
+
     def state(self) -> dict:
         game = self.load_game()
         character = game.snapshot.get("character") or {}
@@ -525,6 +534,7 @@ class App:
                      f"{PROVIDERS[self.chat.provider]['label']} · {self.chat.model}",
             "model_problem": self.problem,
             "snapshot_problem": game.problem,
+            "addon_behind": self.addon_behind(game),
             "snapshot_age_minutes": game.age_minutes(),
             "quests": len(game.quests),
             "level": character.get("level"),

@@ -504,6 +504,7 @@ new MutationObserver(changes => {
   }
 }).observe(log, { childList: true, subtree: true, characterData: true });
 const send = document.getElementById("send"), statusEl = document.getElementById("status");
+let addonBehind = null;
 let running = false, usage = null, lastCard = null, turnCount = 0, collapsed = false, glass = false, fade = false;
 let lastRecap = null, snapshotsKept = 0, canDeliver = false;
 
@@ -639,7 +640,9 @@ async function refresh() {
     log.querySelector(".hello")?.remove();   // drawn again below, in the new language
   }
   statusEl.textContent = s.snapshot_problem ? T("no character data")
-    : T("level {level}", { level: s.level ?? "?" }) + " · " + TN(s.quests, "{n} quest", "{n} quests") + " · " + age(s.snapshot_age_minutes ?? 0);
+    : T("level {level}", { level: s.level ?? "?" }) + " · " + TN(s.quests, "{n} quest", "{n} quests") + " · " + age(s.snapshot_age_minutes ?? 0)
+      + (s.addon_behind ? " · " + T("old addon") : "");
+  addonBehind = s.addon_behind || null;   // said again before each answer: the data is from before the update
   // the line is short and may be cut: its tooltip has all of it
   statusEl.title = (s.snapshot_problem || statusEl.textContent + " · " + T("Your character as of your last logout")) + T(" · answers from {model}", { model: s.model });
   lastRecap = s.recap; snapshotsKept = s.snapshots; canDeliver = s.inbox === true;
@@ -669,7 +672,7 @@ async function refresh() {
     who.className = "hint"; who.style.marginTop = "8px"; who.textContent = T("Answers from {model}", { model: s.model });
     hello.append(who);
     if (s.recap) hello.append(recapBlock(s.recap));
-    for (const problem of [s.snapshot_problem, s.model_problem, s.questie === false ? T("Questie was not found, so locations will be missing.") : null]) {
+    for (const problem of [s.snapshot_problem, s.addon_behind, s.model_problem, s.questie === false ? T("Questie was not found, so locations will be missing.") : null]) {
       if (!problem) continue;
       const warn = document.createElement("div");
       warn.className = "warn";
@@ -844,6 +847,7 @@ const RU = {
   " (no key yet)": " (ключа пока нет)", "{company} API key": "Ключ API {company}", "saved on this PC": "сохранён на этом ПК", "environment": "из переменной окружения",
   "Changing the provider starts a new conversation; the earlier one is kept.": "Смена провайдера начинает новый разговор; прежний сохраняется.",
   "Paste a key for this provider below to see all its models.": "Вставьте ниже ключ этого провайдера, чтобы увидеть все его модели.",
+  "old addon": "аддон не обновлён",
   "ok": "ок", "FAIL": "СБОЙ", "note": "нет",
   // earlier conversations
   " · fork": " · ответвление", "Nothing matches that.": "Ничего не найдено.",
@@ -1266,6 +1270,7 @@ async function ask(text, research = false) {
   add("div", "msg user", text);
   if (research) add("div", "trace", T("Research run: your game data first, then the web where the provider has it. Up to 24 rounds of lookups, 8 web searches (1 cent each) and 6 pages. Stop any time.")
     + (spend && spend.cap ? T(" Today so far: {spent} of your ${cap} limit.", { spent: dollars(spend.today), cap: spend.cap.toFixed(2) }) : ""));
+  if (addonBehind) add("div", "note", addonBehind);
   let bubble = add("div", "msg wisp"), planEl = null;
   setRunning(true);
   if (collapsed) orb.dataset.state = "thinking";
