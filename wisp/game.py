@@ -68,8 +68,10 @@ def _as_list(value) -> list:
 class Game:
     """One snapshot, plus the tools over it. Rebuilt whenever the file changes."""
 
-    def __init__(self, snapshot: dict | None, problem: str | None = None):
+    def __init__(self, snapshot: dict | None, problem: str | None = None, names: dict | None = None):
         self.snapshot = snapshot or {}
+        # names in the player's language from Blizzard's data, where Wisp has fetched them: {"item": {id: name}, "creature": {id: name}}
+        self.local = names or {}
         self.problem = problem            # why there is no snapshot, in words
         self.places: dict[str, dict] = {}  # ref -> {map, zone, x, y, title}
         self.quests = [self._quest(q) for q in _as_list(self.snapshot.get("quests")) if isinstance(q, dict)]
@@ -93,14 +95,14 @@ class Game:
         self._questdb = None
 
     @classmethod
-    def load(cls, wow_dir: Path | None) -> "Game":
+    def load(cls, wow_dir: Path | None, names: dict | None = None) -> "Game":
         if wow_dir is None:
             return cls(None, t("no game folder was given"))
         saved = find_saved_file(wow_dir)
         if saved is None:
             return cls(None, t("no Wisp snapshot found: enable the Wisp addon, log in, then log out once"))
         try:
-            game = cls(read_snapshot(saved))
+            game = cls(read_snapshot(saved), names=names)
         except ValueError as e:
             return cls(None, str(e))
         game.saved_file = saved
@@ -167,10 +169,14 @@ class Game:
         self.places[ref] = entry
         return {"ref": ref, "zone": entry["zone"], "x": x, "y": y}
 
+    def creature_name(self, some, otherwise):
+        """A creature's name in the player's language where Blizzard's is known, else as it came (Questie's, maybe English)."""
+        return (self.local.get("creature") or {}).get(some) or otherwise
+
     def _who(self, prefix: str, people, role: str) -> list[dict]:
         out = []
         for i, person in enumerate(p for p in _as_list(people) if isinstance(p, dict)):
-            name = _clean(person.get("name"), 60) or "?"
+            name = _clean(self.creature_name(person.get("id"), person.get("name")) if person.get("kind") == "npc" else person.get("name"), 60) or "?"
             where = []
             for j, place in enumerate(p for p in _as_list(person.get("places")) if isinstance(p, dict)):
                 seen = self._place(f"{prefix}.{i + 1}.{j + 1}", place, f"{name} ({role})")

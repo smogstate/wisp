@@ -182,6 +182,8 @@ RU = {
     "Blizzard API: skill a recipe needs": "API Blizzard: навык, нужный для рецепта",
     "fields that may hold it: {fields}": "поля, где он может быть: {fields}", "no such field; a tier has: {fields}": "такого поля нет; поля ступени: {fields}",
     "Blizzard API: lists of names": "API Blizzard: списки названий",
+    "Names in your language, from Blizzard": "Названия на вашем языке, от Blizzard", "items: {items}, creatures: {creatures}": "предметов: {items}, существ: {creatures}",
+    "being fetched in the background: items {items}, creatures {creatures} so far; check again in a few minutes": "скачиваются в фоне: предметов {items}, существ {creatures}; проверьте ещё раз через несколько минут",
     "Blizzard API: professions": "API Blizzard: профессии", "no professions listed": "профессии не перечислены", "{n}: {names}": "{n}: {names}",
     "Blizzard API: recipes": "API Blizzard: рецепты",
     "{profession} has no skill tiers; it has: {fields}": "у профессии «{profession}» нет ступеней навыка; есть поля: {fields}",

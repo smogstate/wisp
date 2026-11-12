@@ -70,8 +70,12 @@ class QuestDB:
                 self.quests[q["id"]] = q
 
         def table(rows):
-            return {r["id"]: r for r in rows or [] if isinstance(r, dict) and _int(r.get("id")) and isinstance(r.get("name"), str)}
+            return {r["id"]: dict(r) for r in rows or [] if isinstance(r, dict) and _int(r.get("id")) and isinstance(r.get("name"), str)}
         self.npcs, self.objects, self.items = table(index.get("npcs")), table(index.get("objects")), table(index.get("items"))
+        for some, npc in self.npcs.items():   # in the player's language, where Blizzard's names are known
+            npc["name"] = game.creature_name(some, npc["name"])
+        for some, item in self.items.items():
+            item["name"] = (game.local.get("item") or {}).get(some) or item["name"]
         self.maps = {m["id"]: m.get("name") for m in index.get("maps") or [] if isinstance(m, dict) and _int(m.get("id"))}
         snap = game.snapshot
         self.done = set(_ids(snap.get("completed")))

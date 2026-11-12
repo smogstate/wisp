@@ -32,6 +32,7 @@ from .assets import Assets
 from .market import Market
 from . import i18n, inbox, update
 from .i18n import t
+from .names import Names
 from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
 from .sessions import Sessions, record
 
@@ -45,7 +46,7 @@ NO_FOLDER = "That folder has no Interface\\AddOns inside. Choose the World of Wa
 
 
 def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthropic",
-          model: str | None = None, battlenet=None, found_house=None) -> list[tuple[str, str, str]]:
+          model: str | None = None, battlenet=None, found_house=None, names=None) -> list[tuple[str, str, str]]:
     """Everything a first run depends on, as (what, "ok" | "FAIL" | "note", detail).
     A "note" is something optional that is missing. Makes one small real model call."""
     out = []
@@ -147,6 +148,12 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                     not_yet("items"), optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add(t("Quest locations found"), places > 0, t("{n} for quest givers and turn-ins", n=places), t("none: is your quest log empty?"))
+            if names is not None and i18n.LANG != "en" and battlenet not in (None, "missing"):
+                kept = names.counts(i18n.LANG)
+                add(t("Names in your language, from Blizzard"), all(k.get("complete") for k in kept.values()) and bool(kept),
+                    t("items: {items}, creatures: {creatures}", items=kept.get("item", {}).get("names", 0), creatures=kept.get("creature", {}).get("names", 0)),
+                    t("being fetched in the background: items {items}, creatures {creatures} so far; check again in a few minutes",
+                      items=kept.get("item", {}).get("names", 0), creatures=kept.get("creature", {}).get("names", 0)), optional=True)
             if battlenet == "missing":
                 add(t("Blizzard API"), False, bad=t("not set up: optional, in Settings"), optional=True)
             elif battlenet is not None:   # the player's own developer client: try Blizzard's data for real
@@ -198,6 +205,7 @@ class App:
         self.busy = threading.Lock()             # one question at a time
         self.updating = threading.Lock()         # one look for a newer version at a time
         self._game = None                        # (what the game's file looked like, the Game built from it)
+        self._naming = False                     # names are being fetched from Blizzard right now
         self.stop = threading.Event()
         self.chat = None
         self.problem = None                      # why the model cannot be used, in words
@@ -239,6 +247,7 @@ class App:
         self.history = History(local.APP_DIR / "snapshots" if persist else Path(tempfile.mkdtemp(prefix="wisp-snapshots-")))
         self.market = Market((local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-market-"))) / "market.sqlite")
         self.assets = Assets(self.market.file)   # investments live in the same file as the prices
+        self.names = Names(self.market.file)     # and so do the names Blizzard gives items and creatures in the player's language
         from .blizzard import Live   # the auction house as Blizzard publishes it, when the player has set a client up
 
         def remember_house(where):
@@ -431,6 +440,23 @@ class App:
         except Exception as e:
             self.problem = t("Cannot start the model: {why}", why=e)
 
+    def _fetch_names(self):
+        """In the background, once: the names of every item and creature in the player's language, from Blizzard,
+        when the player has set a client up and the language is not English. Nothing is fetched twice."""
+        lang = i18n.LANG
+        if self._naming or self.battlenet() in (None, "missing") or not self.names.wanted(lang):
+            return
+        self._naming = True
+
+        def run():
+            try:
+                self.names.sync(self.battlenet(), lang)
+            except Exception:   # names are a nicety: never at the cost of anything else
+                pass
+            finally:
+                self._naming = False
+        threading.Thread(target=run, daemon=True).start()
+
     def _stamp(self):
         """What the game last wrote, by which a change is told: the saved file, when it was written, its size."""
         try:
@@ -445,15 +471,17 @@ class App:
         hang together. Built once and kept; built again only when the game has written its file anew (a logout,
         a /wisp sync) or Wisp's language has changed. A new snapshot is filed into the history as it is first seen."""
         stamp = self._stamp()
+        stamp = stamp and (*stamp, self.names.version)   # names fetched since: build again with them
         kept = self._game
         if kept is not None and stamp is not None and kept[0] == stamp and self.language(kept[1].snapshot) == i18n.LANG:
             return kept[1]
-        game = Game.load(self.wow_dir)
+        game = Game.load(self.wow_dir, self.names.load(i18n.LANG))
         wanted = self.language(game.snapshot)
         if wanted != i18n.LANG:
             i18n.set_language(wanted)
-            game = Game.load(self.wow_dir)   # the names it gives to places are written in that language too
+            game = Game.load(self.wow_dir, self.names.load(wanted))   # the names it gives to places are written in that language too
         self._game = (stamp, game) if game.snapshot and stamp is not None else None
+        self._fetch_names()
         if game.snapshot:
             self.history.ingest(game.snapshot)
             game.history = self.history
@@ -888,7 +916,7 @@ def make_handler(app: App, port: int):
                 if self.path == "/api/browse":
                     return self.send_json(200, app.browse())
                 results = check(app.wow_dir, call_model=not app.fake, provider=app.provider, model=app.models[app.provider],
-                                battlenet=app.battlenet(), found_house=app.live.found)
+                                battlenet=app.battlenet(), found_house=app.live.found, names=app.names)
                 return self.send_json(200, {"results": [{"what": w, "status": s, "detail": d} for w, s, d in results]})
             if self.path != "/api/ask":
                 return self.send_json(404, {"error": "not found"})

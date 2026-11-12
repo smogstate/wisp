@@ -99,16 +99,25 @@ class ItemGraph:
         if not index:
             return
         for kind, rows in (("npc", index.get("npcs")), ("object", index.get("objects"))):
-            self.people[kind] = {r["id"]: r for r in _list(rows) if isinstance(r, dict) and isinstance(r.get("id"), int)}
+            self.people[kind] = {r["id"]: dict(r) for r in _list(rows) if isinstance(r, dict) and isinstance(r.get("id"), int)}
+        local_items = self.game.local.get("item") or {}   # Blizzard's names in the player's language, where fetched
+        for some, npc in self.people["npc"].items():
+            npc["name"] = self.game.creature_name(some, npc.get("name"))
         self.maps = {m["id"]: m.get("name") for m in _list(index.get("maps")) if isinstance(m, dict) and isinstance(m.get("id"), int)}
         for entry in _list(index.get("items")):
             name = _text(entry.get("name"), 80) if isinstance(entry, dict) else None
             if not name or not isinstance(entry.get("id"), int) or isinstance(entry["id"], bool):
                 continue
             self.world[entry["id"]] = entry
-            self.names.setdefault(entry["id"], name)
-            if ":" in name:   # "Recipe: Herb Baked Egg", "Pattern: ...", "Plans: ...": in any language, what follows the colon
-                self.teachers.setdefault(name.split(":", 1)[1].strip().lower(), []).append(entry["id"])
+            # the game's own name (from the snapshot) stands; then Blizzard's in the player's language; then Questie's
+            shown = self.names.setdefault(entry["id"], _text(local_items.get(entry["id"]), 80) or name)
+            # "Recipe: Herb Baked Egg", "Pattern: ...", "Plans: ...": in any language, what follows the colon is what it
+            # teaches. Under every name the item goes by, since the recipe's own name is in the game's language.
+            for known in {shown, name, _text(local_items.get(entry["id"]), 80)}:
+                if known and ":" in known:
+                    taught = self.teachers.setdefault(known.split(":", 1)[1].strip().lower(), [])
+                    if entry["id"] not in taught:
+                        taught.append(entry["id"])
 
     def _from_world(self, item: int) -> dict:
         """Who sells an item, what drops it and what holds it, from the whole list; places get refs."""
