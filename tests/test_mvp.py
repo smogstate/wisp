@@ -2198,7 +2198,7 @@ def test_game_boundary(tmp: Path):
         lines = stub("paste", encode_wisp1([{"do": "tomtom.waypoint", **bad}]))
         assert not any(l.startswith("WAY ") for l in lines), (bad, lines)
     assert any(l.startswith("WAY tomtom 1429 ") for l in stub("paste", encode_wisp1([{"do": "tomtom.waypoint", "map": 1429, "x": 10, "y": 10, "title": "a\nb"}])))
-    assert any("too long" in l for l in stub("paste", "WISP1:" + "A" * 90000)), "a message far larger than Wisp's own is not decoded"
+    assert any("too long" in l for l in stub("paste", "@long")), "a message far larger than Wisp's own is not decoded"
 
     fished = Game.load(make_wow_dir(tmp, flags="healthenfish"))
     sources = [src for day in fished.snapshot["loot"] for src in day["sources"]]

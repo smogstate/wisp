@@ -7,6 +7,7 @@
 --   noprofession leaves the profession window closed
 
 local mode, ARG = arg[1], arg[2] or ""
+if ARG == "@long" then ARG = "WISP1:" .. ("A"):rep(90000) end   -- too long for a command line on Windows: made here
 local flags = os.getenv("WISP_STUB") or ""
 local here = (arg[0] or "tests/wow_stub.lua"):match("^(.*)[/\\][^/\\]*$") or "."
 
