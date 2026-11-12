@@ -173,7 +173,8 @@ def research(game, tmp):
     assert report["sections"][0]["points"] == [{"text": "Cloth sells early.", "refs": [1]}, {"text": "You have 15 gold to start with.", "refs": []}]
     assert report["basis"] == "Your own game data and 1 web page" and report["saved"] == "Kept in your notes"
     told = json.loads(REQUESTS[3]["body"]["messages"][-1]["content"][0]["content"])
-    assert told["sources_left_out"] == ["https://invented.example/never-seen"]
+    # told which one, but not as an address a web tool could open: in a research run none is left whole in a tool's answer
+    assert told["sources_left_out"] == ["https: //invented.example/never-seen"]
     note = next((tmp / "notes").glob("*-gold-at-the-start.md")).read_text(encoding="utf-8")
     assert note.startswith("# Gold at the start") and "- Cloth sells early. [1]" in note and f"1. Forever gold guide — {GUIDE}" in note
     assert len([e for e in events if e["type"] == "card"]) == 1, "the report lists its sources: no second card"
