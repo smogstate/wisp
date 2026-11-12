@@ -1,0 +1,6 @@
+# What the build installs: Wisp's own libraries, and the tools that make and test the exe.
+# requirements.lock is this, resolved for Windows and Python 3.12, every file by its hash:
+#   uv pip compile requirements-build.in --python-platform windows --python-version 3.12 --generate-hashes --no-header -o requirements.lock
+-r requirements.txt
+pyinstaller
+pillow

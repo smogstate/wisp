@@ -8,28 +8,37 @@ on:
     paths-ignore: ["wiki/**", "checks/**", "**.md"]
   workflow_dispatch:
 
+# What is built here runs on every player's PC within hours, so: the job that installs and runs other people's code
+# (the libraries, PyInstaller, the tests) can only read the repository; publishing is a second job that runs none of
+# it and only uploads what the first one built. Every library is installed by the hash in requirements.lock, and every
+# action by its commit. One run at a time, in the order of the pushes, so an older commit is never published last.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0   # v7.1.0
         with:
           python-version: "3.12"
 
-      - uses: actions/setup-node@v7.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
         with:
           node-version: "22"
 
       - name: Install
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pyinstaller pillow
+          python -m pip install --require-hashes -r requirements.lock
           npm ci
 
       - name: Tests (addon in a Lua VM, the whole loop, the settings)
@@ -129,7 +138,12 @@ jobs:
           if (-not $away -or (Test-Path upd\Wisp.new.exe)) { "the swap did not happen"; exit 1 }
           if (Test-Path upd\Wisp.old.exe) { "the old exe was left in plain sight"; exit 1 }
 
-      - uses: actions/upload-artifact@v7.0.2
+      # the addon alone, for installing by hand: unzip into Interface\AddOns
+      - name: The addon as a zip
+        shell: pwsh
+        run: Compress-Archive -Path addon\Wisp -DestinationPath Wisp-addon.zip -Force
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         if: always()
         with:
           name: Wisp
@@ -139,15 +153,28 @@ jobs:
             smoke-*.png
             wisp-code.zip
             version.json
+            Wisp-addon.zip
+
+  # Publishes what the job above built and tested, and runs nothing from the repository or its libraries:
+  # this is the only place the token that can write releases exists.
+  publish:
+    needs: windows
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with:
+          name: Wisp
 
       - name: Publish as the "mvp" release
-        if: github.ref == 'refs/heads/master'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          # the addon alone, for installing by hand: unzip into Interface\AddOns
-          Compress-Archive -Path addon\Wisp -DestinationPath Wisp-addon.zip -Force
           Get-Content version.json
           gh release delete mvp --yes --cleanup-tag 2>$null
           Start-Sleep -Seconds 5

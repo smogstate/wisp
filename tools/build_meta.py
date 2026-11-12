@@ -2,8 +2,9 @@
 
     python tools/build_meta.py stamp
         writes wisp/version.json: the commit, the time, and the "runtime": which exe this
-        code needs. The runtime changes when the libraries (requirements.txt) or the
-        launcher (wisp_app.py) change, and only then does an update replace the exe.
+        code needs. The runtime changes when the libraries (requirements.lock: the exact
+        versions inside the exe) or the launcher (wisp_app.py) change, and only then does an
+        update replace the exe.
 
     python tools/build_meta.py pack dist/Wisp.exe
         writes wisp-code.zip (Wisp's own code and its addon) and version.json, the file a
@@ -26,7 +27,7 @@ def sha(data: bytes) -> str:
 
 def stamp():
     # line endings differ between checkouts; the runtime must not
-    parts = [(ROOT / name).read_bytes().replace(b"\r\n", b"\n") for name in ("requirements.txt", "wisp_app.py")]
+    parts = [(ROOT / name).read_bytes().replace(b"\r\n", b"\n") for name in ("requirements.lock", "wisp_app.py")]
     info = {"commit": os.environ["GITHUB_SHA"], "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "runtime": sha(b"\0".join(parts))[:12]}
     (ROOT / "wisp" / "version.json").write_text(json.dumps(info), encoding="utf-8")
