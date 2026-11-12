@@ -1932,6 +1932,9 @@ def test_one_click_cards(wow: Path, tmp: Path):
 def test_alts_recipes(tmp: Path):
     """An alt's professions count too: every character's recipe books are handed over, the last-played one's first."""
     game = Game.load(make_wow_dir(tmp, flags="alts"))
+    who = run_tool(game, "character", {})
+    assert who["other_characters"] == [{"class": "Warrior", "level": 30}] and "Кук" not in json.dumps(who, ensure_ascii=False), \
+        "the model is told of the other character by class and level, never by name"
     books = [(b["profession"], b["owner"]) for b in game.crafting.books]
     assert books == [("Tailoring", None), ("Cooking", "another character of yours: Warrior, level 30"), ("Tailoring", "another character of yours: ?")], books
     listed = run_tool(game, "recipes", {"show": "all"})["professions"]
@@ -2116,6 +2119,9 @@ def test_quest_rewards(tmp: Path):
     assert mine["reward_items"] == ["Miner's Cape"] and mine["choose_one_reward_of"] == ["5 × Silk Cloth", "Kobold Mining Shovel"]
     assert "reward_items" not in wolves and "choose_one_reward_of" not in wolves
     assert 4306 in game.crafting.prices, "a reward's price is at hand, to choose by"
+    # a quest asked about by name gets the same: quest_search reads Questie's list, which has no rewards of its own
+    asked = run_tool(Game.load(make_wow_dir(tmp / "s", flags="rewards,questindex")), "quest_search", {"name": "Jasperlode"})["quests"][0]
+    assert (asked["xp"], asked["money"], asked["reward_items"]) == (700, "3s 50c", ["Miner's Cape"]), asked
     quiet = run_tool(Game.load(make_wow_dir(tmp / "q")), "quests", {})["quests"]
     assert quiet[0]["xp"] == 450 and "reward_items" not in quiet[1] and "money" not in quiet[1], "a silent game: Questie's experience, no rewards listed"
 

@@ -179,7 +179,8 @@ class QuestDB:
         state, _ = self.state(qid)
         return {k: v for k, v in {"id": qid, "name": q["name"], "level": q.get("level"), "required_level": q.get("req"),
                                   "zone": q.get("zone"), "kind": q.get("kind"), "state": state,
-                                  "colour": self.game.colour(q.get("level"))}.items() if v is not None}
+                                  "colour": self.game.colour(q.get("level")),
+                                  **self.game.rewards.get(qid, {})}.items() if v is not None}
 
     def detail(self, qid: int) -> dict:
         q = self.quests[qid]

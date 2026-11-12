@@ -76,6 +76,9 @@ class Game:
         self.dungeons = [self._dungeon(i, d) for i, d in enumerate(_as_list(self.snapshot.get("dungeons")))
                          if isinstance(d, dict)]
         self.available = [self._available(q) for q in _as_list(self.snapshot.get("available")) if isinstance(q, dict)]
+        # what a quest gives, wherever it is asked about: quest_search answers from Questie's list, which has none of it
+        self.rewards = {q["id"]: {k: q[k] for k in ("xp", "money", "reward_items", "choose_one_reward_of") if k in q}
+                        for q in self.available + self.quests}
         self.crafting = Crafting(self.snapshot)
         self.gathering = Gathering(self.snapshot)
         self.farming = Farming(self.snapshot, self.crafting, self.gathering)
@@ -301,8 +304,12 @@ class Game:
             "addons": self.snapshot.get("addons"),
             "quests_in_log": len(self.quests),
             "quests_completed": len(completed),
+            "other_characters": [{"class": _clean(a.get("class"), 20).capitalize(), "level": a.get("level")}
+                                 for a in _as_list(self.snapshot.get("alts")) if isinstance(a, dict)][:20],
             "snapshot_age_minutes": self.age_minutes(),
-            "note": "This is the state at the player's last logout. Anything done since is not in it.",
+            "note": "This is the state at the player's last logout. Anything done since is not in it. other_characters are "
+                    "the player's other characters Wisp has seen: their names are not given to you, their recipes are in "
+                    "recipes and what they hold is counted by craft_tree.",
         }
 
     def tool_quests(self, _args: dict) -> dict:
@@ -1272,8 +1279,9 @@ class Game:
             if len(listed) > 80:
                 entry["left_out"] = len(listed) - 80
             out.append(entry)
-        return {"professions": out,
-                "note": "Read from the game while the profession window was open, on whichever of the player's characters has the "
+        return {"professions": out, "every_profession_of_this_character": self.snapshot.get("professions"),
+                "note": "professions holds only those whose recipes were read; every_profession_of_this_character is the whole "
+                        "list with skill. Read from the game while the profession window was open, on whichever of the player's characters has the "
                         "profession: a book with 'character' belongs to another character of theirs (crafter on a recipe), who "
                         "must do the crafting; bags and bank counted are the last-played character's. A recipe gives skill on every craft "
                         "while orange, less often while yellow or green, never once grey. Where colour_read_at_skill is "
@@ -2324,7 +2332,8 @@ links name the node an item is gathered from; from there, ask gathering for its 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
 into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.
 
-Answer in the player's language. Be brief: this is read in a narrow window between fights. Never a wall of text: when \
+Answer in the player's language, but write every name (quest, item, creature, person, place) exactly as the tools \
+give it: never translate or respell a name, the player searches the game by it. Be brief: this is read in a narrow window between fights. Never a wall of text: when \
 there are steps or several items, put each on its own short line, numbered when the order matters. Plain text only: no \
 markdown symbols and no tables."""
 

@@ -5,6 +5,8 @@
     python3 evals/run.py             paid: the real model, with ANTHROPIC_API_KEY from the
                                      environment; says what it will send and waits for a yes
     python3 evals/run.py --only quest-xp,hello --reps 3 --model claude-opus-5-5 --variant v1
+    python3 evals/run.py --via cli   no key: the model is reached through Claude Code's headless
+                                     mode on the subscription it is signed in with (see run_case_cli)
 
 It calls the same answer() the window calls, on the test game from tests/wow_stub.lua,
 with Wisp set to Russian. Results go to .claude/hillclimb/answers/<variant>/: results.jsonl
@@ -15,9 +17,11 @@ import argparse
 import base64
 import json
 import re
+import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -133,6 +137,88 @@ def run_case(case, wow, make_chat, ceiling=180):
             "usage": dict(chat.usage), "model": chat.model, "latency_s": round(time.monotonic() - started, 1)}
 
 
+def serve(wow: Path, log: Path):
+    """Wisp's tools as a tool server on stdin/stdout (MCP: one JSON-RPC message a line), for --via cli.
+    Every call is appended to `log` with the cards it made, which is what the grader reads."""
+    i18n.set_language("ru")
+    game = new_game(wow)
+    for line in sys.stdin:
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        method, params = msg.get("method"), msg.get("params") or {}
+        if "id" not in msg:
+            continue   # a notification: nothing to answer
+        if method == "initialize":
+            result = {"protocolVersion": params.get("protocolVersion", "2024-11-05"), "capabilities": {"tools": {}},
+                      "serverInfo": {"name": "wisp", "version": "1"}}
+        elif method == "tools/list":
+            result = {"tools": [{"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
+                                for t in llm.tools_for(False)]}
+        elif method == "tools/call":
+            shown = len(game.cards)
+            out = _recording(game, params.get("name"), params.get("arguments") or {})
+            if len(game.eval_log) >= llm.MAX_HOPS - 1:   # answer() says this on its last round; here it is counted in calls
+                out["wisp"] = "This was the last lookup. Answer now with what you have."
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(json.dumps({**game.eval_log[-1], "cards": game.cards[shown:]}, ensure_ascii=False) + "\n")
+            result = {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}], "isError": "error" in out}
+        elif method == "ping":
+            result = {}
+        else:
+            print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": "unknown method"}}), flush=True)
+            continue
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}, ensure_ascii=False), flush=True)
+
+
+def run_case_cli(case, wow, model, ceiling=300):
+    """The same case through `claude -p`: Wisp's system prompt and tools, but Claude Code's loop
+    in place of answer(). So what differs from the window: the tools are named mcp__wisp__<name>,
+    the round limit is --max-turns instead of MAX_HOPS with its "last lookup" nudge, and Claude Code
+    adds a little of its own to the prompt. Good for 'right tool, true answer'; not a test of answer()."""
+    work = Path(tempfile.mkdtemp(prefix="wisp-eval-cli-"))   # empty: no project instructions leak in
+    log, config, session = work / "calls.jsonl", work / "mcp.json", str(uuid.uuid4())
+    config.write_text(json.dumps({"mcpServers": {"wisp": {
+        "command": sys.executable, "args": [str(Path(__file__).resolve()), "--serve", str(wow), str(log)]}}}))
+    questions = [case["ask"]] if isinstance(case["ask"], str) else case["ask"]
+    started = time.monotonic()
+    trace = [{"role": "system", "content": llm.system_for(False, False)}]
+    text, calls, usage, reason, problem, served = [], [], llm.new_usage(), "end", None, model
+    for n, question in enumerate(questions):
+        trace.append({"role": "user", "content": question})
+        out = subprocess.run(
+            ["claude", "-p", question, "--model", model, "--system-prompt", llm.system_for(False, False),
+             "--mcp-config", str(config), "--strict-mcp-config", "--tools", "", "--allowedTools", "mcp__wisp",
+             "--setting-sources", "", "--output-format", "json", "--max-turns", str(llm.MAX_HOPS + 1),
+             *(["--resume", session] if n else ["--session-id", session])],
+            cwd=work, capture_output=True, text=True, encoding="utf-8", timeout=ceiling)
+        try:
+            reply = json.loads(out.stdout)
+        except ValueError:
+            raise RuntimeError(f"claude -p gave no JSON (exit {out.returncode}): {(out.stderr or out.stdout)[:300]}")
+        new = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()][len(calls):] if log.exists() else []
+        for call in new:
+            trace.append({"role": "tool_call", "name": call["name"], "content": json.dumps(call["args"], ensure_ascii=False, indent=2)})
+            trace.append({"role": "tool_result", "content": call["result"]})
+        calls += new
+        said = reply.get("result") or ""
+        text.append(said)
+        trace.append({"role": "assistant", "content": said})
+        used = reply.get("usage") or {}
+        usage["requests"] += reply.get("num_turns") or 0
+        for mine, theirs in (("input", "input_tokens"), ("output", "output_tokens"),
+                             ("cache_read", "cache_read_input_tokens"), ("cache_write", "cache_creation_input_tokens")):
+            usage[mine] += used.get(theirs) or 0
+        served = next(iter(reply.get("modelUsage") or {}), served)
+        if reply.get("is_error") or reply.get("subtype") not in (None, "success"):
+            reason, problem = "error", f"{reply.get('subtype')}: {said[:200]}"
+            break
+    return {"text": "\n".join(part for part in text if part.strip()), "cards": [c for call in calls for c in call["cards"]],
+            "calls": calls, "reason": reason, "problem": problem, "trace": trace, "usage": usage, "model": served,
+            "latency_s": round(time.monotonic() - started, 1)}
+
+
 def card_text(cards) -> str:
     """Cards as text, with each card's command to the game decoded so its contents can be checked."""
     out = json.dumps(cards, ensure_ascii=False)
@@ -216,7 +302,12 @@ def main():
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--max-tokens", type=int, default=4_000_000, help="stop starting cases past this many tokens in all")
     p.add_argument("--yes", action="store_true", help="skip the question before spending")
+    p.add_argument("--via", choices=["api", "cli"], default="api",
+                   help="api: the Anthropic API with a key. cli: Claude Code's headless mode, on its subscription")
+    p.add_argument("--serve", nargs=2, metavar=("GAME", "LOG"), help="internal: the tool server --via cli starts")
     args = p.parse_args()
+    if args.serve:
+        return serve(Path(args.serve[0]), Path(args.serve[1]))
 
     i18n.set_language("ru")
     wow = test_mvp.make_wow_dir(Path(tempfile.mkdtemp(prefix="wisp-eval-game-")), flags="questindex,alts,rewards")
@@ -226,9 +317,10 @@ def main():
     if args.check:
         sys.exit(0 if check(wow, cases) else 1)
 
-    out = OUT / args.variant
+    flow = OUT if args.via == "api" else OUT.with_name("answers-cli")   # another harness: never mixed into one score
+    out = flow / args.variant
     (out / "traces").mkdir(parents=True, exist_ok=True)
-    state = OUT / "_state.json"
+    state = flow / "_state.json"
     if not state.exists():
         state.write_text(json.dumps({"metrics": METRICS}, indent=2))
     rows = out / "results.jsonl"
@@ -240,7 +332,8 @@ def main():
         turns = sum(1 if isinstance(c["ask"], str) else len(c["ask"]) for c, _ in todo)
         print(f"{len(todo)} runs ({turns} questions) on {args.model}: at most {turns * llm.MAX_HOPS} requests, "
               f"each carrying the system prompt and {len(llm.tools_for(False))} tool descriptions.\n"
-              f"It stops starting new cases after {args.max_tokens:,} tokens. This spends money on your key.")
+              f"It stops starting new cases after {args.max_tokens:,} tokens. "
+              + ("This spends money on your key." if args.via == "api" else "This uses your Claude subscription's allowance."))
         if input("Type yes to run: ").strip().lower() != "yes":
             sys.exit("not run")
 
@@ -251,6 +344,8 @@ def main():
         if spent > args.max_tokens:
             return case, rep, None, "token limit reached before this case"
         try:
+            if args.via == "cli":
+                return case, rep, run_case_cli(case, wow, args.model), None
             return case, rep, run_case(case, wow, lambda c: llm.AnthropicChat(model=args.model)), None
         except Exception as error:   # a broken attempt is recorded, never scored as a wrong answer
             return case, rep, None, f"{type(error).__name__}: {error}"
