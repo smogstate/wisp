@@ -432,6 +432,73 @@ local function recipeProfession(id)
   if ok and class == RECIPE_CLASS then return RECIPE_OF[subclass] end
 end
 
+-- An item's rarity, as the game colours its name: 0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary.
+-- The game tells it only for an item it has described, so it is learned in the background, a little at a
+-- time, for every item Wisp knows by name or from Questie's list, and kept for good.
+--   WispData.quality[item id] = 0..7
+local function rarityOf(id)
+  local I = C_Item
+  if I and I.GetItemQualityByID then
+    local ok, quality = pcall(I.GetItemQualityByID, id)
+    if ok and type(quality) == "number" then return quality end
+  end
+end
+
+local function noteRarity(id)
+  if type(id) ~= "number" then return end
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.quality = WispData.quality or {}
+  if WispData.quality[id] == nil then WispData.quality[id] = rarityOf(id) end
+end
+
+local rarityIds, rarityAt, rarityAsked
+local function learnRarity()
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.quality = WispData.quality or {}
+  if not rarityIds then   -- once a session: what is not known yet
+    rarityIds, rarityAt, rarityAsked = {}, 1, {}
+    local seen = {}
+    local function want(id)
+      if type(id) == "number" and not seen[id] and WispData.quality[id] == nil then seen[id] = true; rarityIds[#rarityIds + 1] = id end
+    end
+    for id in pairs(type(WispData.items) == "table" and WispData.items or {}) do want(id) end
+    local DB = questieModule("QuestieDB")
+    for id in pairs(type(DB) == "table" and type(DB.ItemPointers) == "table" and DB.ItemPointers or {}) do want(id) end
+    table.sort(rarityIds)
+  end
+  for _, id in ipairs(rarityAsked) do noteRarity(id) end   -- those asked for last time: the game has had its moment
+  rarityAsked = {}
+  local looked = 0
+  while rarityAt <= #rarityIds and #rarityAsked < 150 and looked < 3000 do
+    local id = rarityIds[rarityAt]
+    rarityAt, looked = rarityAt + 1, looked + 1
+    local quality = rarityOf(id)
+    if quality then
+      WispData.quality[id] = quality
+    else
+      rarityAsked[#rarityAsked + 1] = id
+      if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+    end
+  end
+  if rarityAt <= #rarityIds or #rarityAsked > 0 then C_Timer.After(2, function() pcall(learnRarity) end) end
+end
+
+local function rarities()   -- every item that is not common (white), by rarity: the common ones need no colour
+  local known = type(WispData) == "table" and WispData.quality
+  if type(known) ~= "table" then return nil end
+  local out, count = {}, 0
+  for id, quality in pairs(known) do
+    if type(id) == "number" and type(quality) == "number" and quality ~= 1 and quality >= 0 and quality <= 7 and count < 20000 then
+      local key = tostring(quality)
+      out[key] = out[key] or {}
+      out[key][#out[key] + 1] = id
+      count = count + 1
+    end
+  end
+  for _, ids in pairs(out) do table.sort(ids) end   -- the same file whatever order the game walked them in
+  return count > 0 and out or nil
+end
+
 -- The skill at which a profession's next step can be taken, from the game's own words for it.
 -- A book or a recipe says it on itself ("Requires First Aid (125)"): the game's own format for that line
 -- (ITEM_MIN_SKILL, in the player's language) is turned into a pattern, so nothing is guessed from wording.
@@ -1784,7 +1851,7 @@ local function buildSnapshot()
   local wanted = {}   -- items worth a price: what is carried and what the recipes use and make
   local okB, carried = pcall(bags)
   if not okB then carried = {} end
-  for _, line in ipairs(carried) do wanted[line.id] = true end
+  for _, line in ipairs(carried) do wanted[line.id] = true; pcall(noteRarity, line.id) end   -- what is carried is always described
   local okC, books = pcall(crafting, wanted)
   if not okC then books = {} end
   local log = questLog(DB, ZoneDB)
@@ -1828,6 +1895,7 @@ local function buildSnapshot()
   local okD, deaths = pcall(deathRecord)
   if not okD then deaths = nil end
   local okS, needs = pcall(itemSkills)
+  local okQ, rare = pcall(rarities)
   local okT, taught = pcall(trainerWindows)
   return {
     v = 1,
@@ -1866,6 +1934,7 @@ local function buildSnapshot()
     deaths = deaths,
     combatLog = COMBAT_LOG_OPEN,   -- whether this game lets an addon read the combat log at all
     itemSkill = okS and needs or nil,
+    quality = okQ and rare or nil,
     trainerWindows = okT and taught or nil,
     vendor = vendor,
     quests = log,
@@ -2178,6 +2247,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
   else
     C_Timer.After(20, function() pcall(learnNames) end)   -- once the login rush is over
     C_Timer.After(60, function() pcall(learnItemSkills) end)
+    C_Timer.After(75, function() pcall(learnRarity) end)
     C_Timer.After(30, function() pcall(startQuestIndex); pcall(startRecipeIndex) end)
     pcall(startInbox)
     pcall(pruneLoot)

@@ -2301,6 +2301,17 @@ def test_profession_path(tmp: Path):
     assert old["trainers"] == [] and old["steps"] == [] and "names no trainer" in old["trainers_note"], "Questie without that list: none, and said so"
 
 
+def test_item_rarity(tmp: Path):
+    """An item's rarity, learned from the game in the background, so the window can colour its name as the game does."""
+    game = Game.load(make_wow_dir(tmp, flags="questindex,ranks"))
+    assert game.snapshot["quality"] == {"2": [6325, 7048, 16084], "3": [7090]}, "by rarity; the common ones are left out"
+    colours = game.item_colours()
+    assert colours["Azure Silk Hood"] == 2 and colours["Pattern: Not Learned Yet"] == 3 and colours["Rockslicer"] == 3, "the journal's loot too"
+    assert "Silk Cloth" not in colours and "Fine Thread" not in colours, "a common item keeps the text's own colour"
+    app = App(make_wow_dir(tmp / "app", flags="questindex,ranks"), fake=True)
+    assert app.state()["item_colours"].startswith(f"{len(app.load_game().item_colours())}:"), "the page asks again only when this changes"
+
+
 def test_eval_cases():
     """The assistant's eval (evals/) stays answerable: each case's written right answer still
     passes on this test game, and an empty answer does not. Free: no model is asked."""
@@ -2378,6 +2389,8 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as gb:
         test_game_boundary(Path(gb))
     test_names_as_typed()
+    with tempfile.TemporaryDirectory() as ir:
+        test_item_rarity(Path(ir))
     with tempfile.TemporaryDirectory() as pp:
         test_profession_path(Path(pp))
     test_eval_cases()

@@ -107,6 +107,16 @@
           box-shadow: inset 0 0 0 1px rgb(0 0 0 / .28), inset 0 .1em .08em rgb(255 255 255 / .5); }
   .chart circle.coin { stroke: rgb(0 0 0 / .3); stroke-width: .6; }
   .chart circle.coin.g { fill: #e8b923; } .chart circle.coin.s { fill: #c3c8d0; } .chart circle.coin.c { fill: #c8763c; }
+  /* An item's name in its rarity's colour, as the game writes it. On the dark theme the game's own colours; on the light
+     one the same hues, darkened until they read on white. A common item keeps the text's colour. */
+  .q0 { color: #6f6f6f; } .q2 { color: #128a00; } .q3 { color: #0061c2; } .q4 { color: #8a2bd6; } .q5 { color: #c45f00; } .q6, .q7 { color: #8a7430; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .q0 { color: #9d9d9d; } :root:not([data-theme="light"]) .q2 { color: #1eff00; }
+    :root:not([data-theme="light"]) .q3 { color: #0070dd; } :root:not([data-theme="light"]) .q4 { color: #a335ee; }
+    :root:not([data-theme="light"]) .q5 { color: #ff8000; } :root:not([data-theme="light"]) .q6, :root:not([data-theme="light"]) .q7 { color: #e6cc80; }
+  }
+  :root[data-theme="dark"] .q0 { color: #9d9d9d; } :root[data-theme="dark"] .q2 { color: #1eff00; } :root[data-theme="dark"] .q3 { color: #0070dd; }
+  :root[data-theme="dark"] .q4 { color: #a335ee; } :root[data-theme="dark"] .q5 { color: #ff8000; } :root[data-theme="dark"] .q6, :root[data-theme="dark"] .q7 { color: #e6cc80; }
   .coin.g { background: radial-gradient(circle at 35% 30%, #fff0b0, #e8b923 55%, #a87400); }
   .coin.s { background: radial-gradient(circle at 35% 30%, #ffffff, #c3c8d0 55%, #7b828d); }
   .coin.c { background: radial-gradient(circle at 35% 30%, #f8c9a4, #c8763c 55%, #7c4019); }
@@ -441,10 +451,56 @@ function drawCoins(node) {
   parts.append(text.slice(from));
   node.replaceWith(parts);
 }
+// Item names in their rarity's colour, everywhere in the conversation, the same way: Wisp hands over the names it
+// knows a rarity for (not the common ones), and whatever text lands in the log is looked through for them: a name
+// as a whole, never part of a word, the longest name first.
+let itemRarity = new Map(), itemRarityKey = null, longestItemName = 0;
+const wordChar = ch => ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+function drawItems(node) {
+  if (!itemRarity.size) return;
+  if (node.nodeType !== Node.TEXT_NODE) {
+    for (const child of [...node.childNodes]) drawItems(child);
+    return;
+  }
+  const parent = node.parentElement;
+  if (!parent || parent.closest(".q, .coin, svg, textarea, input")) return;
+  const text = node.nodeValue, found = [];
+  for (let i = 0; i < text.length; i++) {
+    if (!wordChar(text[i]) || wordChar(text[i - 1])) continue;   // only where a word begins
+    for (let j = Math.min(text.length, i + longestItemName); j > i + 2; j--) {
+      if (wordChar(text[j])) continue;   // only where a word ends
+      const rarity = itemRarity.get(text.slice(i, j));
+      if (rarity !== undefined) { found.push([i, j, rarity]); i = j - 1; break; }
+    }
+  }
+  if (!found.length) return;
+  const parts = document.createDocumentFragment();
+  let from = 0;
+  for (const [start, end, rarity] of found) {
+    const name = document.createElement("span");
+    name.className = "q q" + rarity;
+    name.textContent = text.slice(start, end);
+    parts.append(text.slice(from, start), name);
+    from = end;
+  }
+  parts.append(text.slice(from));
+  node.replaceWith(parts);
+}
+async function loadItemRarity(key) {
+  if (!key || key === itemRarityKey) return;
+  itemRarityKey = key;
+  try {
+    const got = await (await api("/api/item-colours")).json();
+    itemRarity = new Map(Object.entries(got.colours || {}));
+    longestItemName = 0;
+    for (const name of itemRarity.keys()) longestItemName = Math.max(longestItemName, name.length);
+    drawItems(log);   // what is on screen already
+  } catch { itemRarityKey = null; }
+}
 new MutationObserver(changes => {
   for (const change of changes) {
-    if (change.type === "characterData") drawCoins(change.target);
-    else for (const added of change.addedNodes) drawCoins(added);
+    if (change.type === "characterData") { drawItems(change.target); drawCoins(change.target); }
+    else for (const added of change.addedNodes) { drawItems(added); drawCoins(added); }
   }
 }).observe(log, { childList: true, subtree: true, characterData: true });
 const send = document.getElementById("send"), statusEl = document.getElementById("status");
@@ -576,6 +632,7 @@ function age(minutes) {
 async function refresh() {
   let s;
   try { s = await (await api("/api/state")).json(); } catch { statusEl.textContent = T("not connected"); return; }
+  loadItemRarity(s.item_colours);   // the names to colour: asked for again only when the game's data changed
   if ((s.lang || "en") !== lang) {   // the language is the game's, known once the snapshot is read; or Settings changed it
     lang = s.lang || "en";
     localize();

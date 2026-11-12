@@ -1823,6 +1823,28 @@ class Game:
         return ("Names are as the player's game writes them, in the language of their game: ask with the word the player "
                 "wrote, as they wrote it, not a translation and not a name you remember.")
 
+    def item_colours(self) -> dict:
+        """Item names with their rarity (0 poor, 2 uncommon, 3 rare, 4 epic, 5 legendary), for the window to colour
+        them as the game does. Common items are left out: they keep the text's own colour. From what the addon has
+        learned of each item, and from the dungeon journal's loot."""
+        if getattr(self, "_colours", None) is None:
+            out = {}
+            known = self.snapshot.get("quality") if isinstance(self.snapshot.get("quality"), dict) else {}
+            for key, ids in known.items():
+                if key.isdigit() and int(key) != 1 and int(key) <= 7:
+                    for item in _as_list(ids):
+                        name = self.graph.names.get(item) if isinstance(item, int) else None
+                        if name and len(name) >= 3:
+                            out[name] = int(key)
+            words = {word: number for number, word in QUALITY.items()}
+            for dungeon in self.dungeons:
+                for boss in dungeon.get("bosses", []):
+                    for drop in boss.get("loot", []):
+                        if words.get(drop.get("quality"), 1) != 1 and drop.get("item"):
+                            out.setdefault(drop["item"], words[drop["quality"]])
+            self._colours = out
+        return self._colours
+
     def _one_item(self, args: dict):
         """The item a tool was asked about, or the answer to give instead."""
         name = _clean(args.get("item"), 80) if isinstance(args.get("item"), str) else ""

@@ -523,6 +523,8 @@ class App:
             "inbox": self.can_deliver(game.snapshot),
             "theme": self.prefs["theme"],
             "opacity": self.prefs["opacity"],
+            # the page asks for the names and their rarity (/api/item-colours) only when this changes
+            "item_colours": f"{len(game.item_colours())}:{game.snapshot.get('takenAt', 0)}" if game.snapshot else "0",
             # two ways to be see-through: the page's own background (where the system blends single pixels),
             # or the whole window's opacity (Windows), which the page drives by reporting when it is in use
             "window": {"own": self.window is not None, "glass": self.frameless and os.name != "nt",
@@ -858,6 +860,9 @@ def make_handler(app: App, port: int):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(page)
+            elif path == "/api/item-colours" and self.allowed():
+                game = app.load_game()
+                self.send_json(200, {"colours": game.item_colours() if game.snapshot else {}})
             elif path == "/api/state" and self.allowed():
                 self.send_json(200, app.state())
             elif path == "/api/settings" and self.allowed():

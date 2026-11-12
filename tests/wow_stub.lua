@@ -465,6 +465,11 @@ C_Item = {
   IsItemDataCachedByID = function(id) return itemNames[id] ~= nil end,
   GetItemNameByID = function(id) return itemNames[id] or (asked[id] and late[id]) or nil end,
   RequestLoadItemDataByID = function(id) asked[id] = true end,
+  -- rarity, for an item the game has described: a hood is uncommon, a recipe too, a shovel is poor; one is told only once asked for
+  GetItemQualityByID = function(id)
+    if id == 2321 and not asked[id] then return nil end
+    return ({ [7048] = 2, [6325] = 2, [16084] = 2, [7090] = 3, [750] = 0 })[id] or 1
+  end,
 }
 Enum = { CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2 } }
 local function slot(id, n, kind) return { reagents = { { itemID = id } }, quantityRequired = n, reagentType = kind or 1, required = true } end
