@@ -2,6 +2,61 @@
 
 Backlog from the 2026-11-09 design session. Nothing here is committed.
 
+## To come back to — written down 2026-11-12
+
+Denis: "write down, we come to this later". Known gaps as of commit `4a49a2c`, none of them started.
+
+### How you died (PvP): what the record does not see
+
+The feature works on the test fight; a real fight shows more than it keeps.
+
+- **Not confirmed at all:** whether the WoW Forever client lets an addon read the combat log. Check setup's line "Deaths on record" answers it after the first real death.
+- **What the enemy did that was not aimed at the character.** Only events that hit the character or come from it are kept, so an attacker's own cooldowns, self-heals, bandages, Vanish, Sprint are invisible. Fix: keep the casts and self-buffs of whoever is already in the fight.
+- **What kind of control the character was under.** Debuffs are names only; stun, silence or root is the model's guess, weaker still for Russian spell names (untested: the test fight's spells are English). Fix: the game's loss-of-control data, if this client has it, for the exact kind and length.
+- **The character's own state.** No mana, energy or rage; nothing on which abilities or potions were ready. The advice can say "Frost Nova came late", not "Ice Block was ready and unused". The most useful for advice and the heaviest to record.
+- **How close it was.** Damage dealt is summed; the enemy's health is not recorded. Fix: sample the target's health.
+- **The enemy's level** only when targeted or under the mouse; gear never.
+- **Resists, absorbs, overkill** are not kept: a mostly absorbed spell reads as a small hit.
+- **By design:** only deaths are filed (a fight won or escaped leaves nothing); nothing is live (logout or `/wisp sync`); a pause over 20 s splits a fight; three minutes and 400 lines at most.
+- Denis may want the killer's name on the card (never to the model). Not offered so far: his rule is no other players' names.
+
+Suggested first three: the attackers' own casts, loss-of-control data, the target's health.
+
+### Never yet seen working in Denis's real game
+
+- One-click cards (the Send button): needs a full game restart with sound on, then `/wisp sync`.
+- The collapsed icon: on his PC Windows does not cut the window round (it does on the build machine), cause unknown. Now it falls back to a square tile; which of the two he gets is the open question.
+- The resize grip: tested in a browser only, not how the drag feels in the real window.
+- Russian names: item search with word endings, books found by a profession's name, price history for Russian item names.
+- Quest data added on 2026-11-12: rewards, the profession a quest needs, experience for a whole chain. All need one login and logout first (quest index key `f6`).
+- Blizzard's live auctions: whether `buyout` is per item or per stack.
+- `/research`: whether the limits of 8 searches and 6 pages hold per run or per request.
+
+### What Wisp does not know
+
+- **Trainers**, and so the **skill a recipe needs**. Decision pending: record at trainers, or ForeverDB with Denis's own key.
+- **Item properties** (bag slots, stats, armour type): "a 14 slot bag", "food with stamina" cannot be answered. Needs a probe of what the client and Blizzard's API give.
+- **The character's gear, talents and known spells**: not exported, so no "is this an upgrade" and no build advice.
+- **Travel**: flight paths and how far things are across zones; a questing route stays inside one zone.
+- **Drop rates** beyond the player's own measured loot.
+- **Reputation, honour, PvP standing.**
+- **Chains that branch**: followed down one branch only. Experience for later parts is Questie's estimate, not the game's.
+
+### The assistant and its eval
+
+- The eval is tuned on its own 67 questions; there is no held-out set. Wanted from Denis: 5 to 10 questions he really asks while playing.
+- Advice is barely tested ("what should I do next to level fastest", "sell, hold or craft"); the eval mostly checks look-ups.
+- The eval runs through Claude Code's loop on the subscription, not through Wisp's own `answer()`; that path needs an API key.
+- Seen now and then: an English answer to a Russian question made mostly of English names; a waypoint nobody asked for; markdown in an answer.
+- The spending limit counts Kimi at Anthropic's dearest price (far above its real cost); Haiku's cache-read price is derived, not listed.
+
+### Smaller
+
+- Settings still takes about two screens; tabs would make it one each.
+- Two low security findings left: a pasted foreign message can overwrite an Auctionator list by name; the test switches `--apply-update` and `--try-code` ship in the exe. Not checked: a DLL placed beside `Wisp.exe`.
+- The market-ranking tools filter names by plain matching in places the shared matcher does not reach.
+- **This wiki is behind the code.** The work of 2026-11-12 (evals, security review, name matching, coins, the new icon, Settings, resizing, quest experience, deaths) is described in `CLAUDE.md` and the commit messages, not yet in Tools, Architecture, Integrations or Red Lines.
+
 ## Feature ideas — 2026-11-10
 
 Denis asked what else would be useful. Unprioritized by him; the first five are the ones the existing building blocks already nearly cover. All are out-of-combat help.
