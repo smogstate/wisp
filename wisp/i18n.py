@@ -71,6 +71,8 @@ RU_COUNTED = {
 
 RU = {
     # how a profession goes on (profession_path)
+    "At a trainer: {what}": "У учителя: {what}", "Step or trainer": "Шаг или учитель", "At skill": "С навыка",
+    "The skill is the one the book, the quest or the trainer's window states. ? — the game has not said yet: visit that trainer once, or log in again for a book.": "Навык — тот, что указан в книге, в задании или в окне учителя. ? — игра ещё не сообщила: зайдите к этому учителю один раз или войдите в игру ещё раз (для книги).",
     "{profession} trainer": "учитель: {profession}", "Book: {item}": "Книга: {item}", "Quest: {name}": "Задание: {name}", "Profession": "Профессия",
     "{profession}: how it goes on": "{profession}: как учить дальше", "your skill: {skill} of {cap}": "ваш навык: {skill} из {cap}",
     "your character does not have it": "у вашего персонажа её нет", "Where to learn": "Где учить", "Zone": "Зона", "Needs": "Нужно",

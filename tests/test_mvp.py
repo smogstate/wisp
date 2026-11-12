@@ -2262,25 +2262,35 @@ def test_profession_path(tmp: Path):
     """How any profession goes on, kept between sessions: who trains it, its books, the quests that need its skill."""
     game = Game.load(make_wow_dir(tmp, flags="questindex,ranks"))
     path = lambda name: {k: v for k, v in run_tool(game, "profession_path", {"profession": name}).items() if k != "note"}
+    step = lambda st: (st["at_skill"], st["how"], st["what"])   # an edge of the path: the skill it is taken at, how, what
     fishing = path("Fishing")
     assert fishing["character"] == {"skill": 31, "can_rise_to": 75, "at_its_cap": False}
     assert [(t["name"], t["title"], t["where"][0]["zone"]) for t in fishing["trainers"]] == [("Old Tom Reel", "Fishing Trainer", "Elwynn Forest")]
-    assert fishing["books"] == [] and [(q["name"], q["needs_profession"]) for q in fishing["quests"]] == [("Nat Pagle, Angler Extreme", "Fishing 225")], \
+    assert [step(st) for st in fishing["steps"]] == [(225, "quest", "Nat Pagle, Angler Extreme")], \
         "a fishing pole is sold and named after the profession, and is no book"
+    coming = fishing["next_for_the_character"]
+    assert coming["the_next_one_after"] == [{"how": "quest", "what": "Nat Pagle, Angler Extreme", "at_skill": 225}]
+    assert "ends at 75 and the next known step is at 225" in coming["a_rank_in_between_is_not_known"], "the trainer here was never visited"
     aid = path("first aid")
-    assert aid["character"] == "the character does not have this profession" and aid["trainers"] == []
-    assert [(b["item"], b["sold_by"][0]["name"]) for b in aid["books"]] == [("Expert First Aid - Under Wraps", "Alexandra Bolero")]
+    assert aid["character"] == "the character does not have this profession" and aid["trainers"] == [] and "next_for_the_character" not in aid
+    assert [step(st) for st in aid["steps"]] == [(125, "book", "Expert First Aid - Under Wraps")], "the skill the book states on itself"
+    assert aid["steps"][0]["from"][0]["name"] == "Alexandra Bolero"
     tailoring = path("портняжное дело")
     assert [t["name"] for t in tailoring["trainers"]] == ["Mara Stitchwell"], "the other faction's trainer is not this character's"
-    assert tailoring["books"] == [], "a pattern teaches one recipe: it is not how the profession goes on"
+    assert [step(st) for st in tailoring["steps"]] == [(125, "trainer", "Tailoring (Expert)"), (200, "trainer", "Tailoring (Artisan)")], \
+        "what the trainer's window listed: the ranks, not the hood it also teaches, and no pattern (that teaches one recipe)"
+    assert tailoring["steps"][0]["already_learned"] is True and tailoring["steps"][1] == {
+        "at_skill": 200, "how": "trainer", "what": "Tailoring (Artisan)", "character_level": 35, "cost": "5g", "taught_by": "Mara Stitchwell"}
+    assert tailoring["next_for_the_character"] == {"can_be_taken_at_its_skill": [],
+                                                   "the_next_one_after": [{"how": "trainer", "what": "Tailoring (Artisan)", "at_skill": 200}]}
     assert "professions" in path("Juggling") and "trainers_note" not in fishing
     shown = run_tool(game, "profession_path", {"profession": "Fishing", "show": True})
-    assert game.cards[-1]["table"]["rows"] == [["Old Tom Reel (Fishing Trainer)", "Elwynn Forest", "–"],
-                                               ["Quest: Nat Pagle, Angler Extreme — Gryan Stoutmantle", "Westfall", "Fishing 225"]] and "shown" in shown
+    assert game.cards[-1]["table"]["rows"] == [["Quest: Nat Pagle, Angler Extreme — Gryan Stoutmantle", "Westfall", "225"],
+                                               ["Old Tom Reel (Fishing Trainer)", "Elwynn Forest", "–"]] and "shown" in shown
     waypoint = run_tool(game, "waypoint", {"refs": [fishing["trainers"][0]["where"][0]["ref"]]})
     assert waypoint["shown"] == 1 and "Old Tom Reel" in game.cards[-1]["lines"][0]["text"], "a trainer's place can be sent to the game"
     old = run_tool(Game.load(make_wow_dir(tmp / "old", flags="questindex")), "profession_path", {"profession": "Fishing"})
-    assert old["trainers"] == [] and "trainers_note" not in old, "Questie without that list: none, and nothing promised"
+    assert old["trainers"] == [] and old["steps"] == [] and "trainers_note" not in old, "Questie without that list: none, and nothing promised"
 
 
 def test_eval_cases():

@@ -1597,7 +1597,7 @@ class Game:
                                "together are one stop, and each stop follows the nearest one before it."}
 
     def tool_profession_path(self, args: dict) -> dict:
-        """How a profession goes on: where the character stands, who trains it, its books, the quests that need its skill."""
+        """How a profession goes on, as a path: each step (a trainer's rank, a book, a quest) with the skill it is taken at."""
         if not self.snapshot:
             return {"error": self.problem}
         from .questdb import PROFESSIONS, fold
@@ -1611,10 +1611,70 @@ class Game:
         names = PROFESSIONS[number]
         mine = next((p for p in _as_list(self.snapshot.get("professions")) if isinstance(p, dict) and fold(p.get("name")) in map(fold, names)), None)
         name = _clean(mine.get("name"), 40) if mine else names[1 if russian else 0]
+        skill = mine.get("skill") if mine and isinstance(mine.get("skill"), int) else None
         out = {"profession": name,
-               "character": {"skill": mine.get("skill"), "can_rise_to": mine.get("max"),
-                             "at_its_cap": isinstance(mine.get("skill"), int) and isinstance(mine.get("max"), int) and mine["skill"] >= mine["max"]}
+               "character": {"skill": skill, "can_rise_to": mine.get("max"),
+                             "at_its_cap": skill is not None and isinstance(mine.get("max"), int) and skill >= mine["max"]}
                if mine else "the character does not have this profession"}
+        whole = lambda v: isinstance(v, int) and not isinstance(v, bool)
+        needs = {row[0]: row[1] for row in _as_list(self.snapshot.get("itemSkill"))
+                 if isinstance(row, list) and len(row) == 2 and whole(row[0]) and whole(row[1]) and 0 < row[1] <= 1000}
+        recipes = {fold(r["name"]) for b in self.crafting.books for r in b["recipes"]} | {fold(r["name"]) for r in self.crafting.world_recipes}
+        steps = []
+        # books: the game's own recipe items of this profession that someone sells and that teach no single recipe;
+        # the skill is the one the book states on itself
+        def book(item, entry):
+            title = self.graph.names.get(item, "")
+            if entry.get("b") != number or not entry.get("v"):
+                return False
+            teaches = fold(title.split(":", 1)[1]) if ":" in title else None
+            return teaches is None or (bool(recipes) and teaches not in recipes)   # "Pattern: X" teaches X; a skill book teaches a rank
+        for title, item in sorted((self.graph.names[i], i) for i, e in self.graph.world.items() if i in self.graph.names and book(i, e))[:8]:
+            steps.append({"at_skill": needs.get(item), "how": "book", "what": title, "from": self.graph._from_world(item).get("sold_by", [])})
+        # quests that need its skill
+        db = self.questdb()
+        for qid in (db.with_profession(names[0]) or [])[:10] if db else []:
+            row = db.row(qid)
+            steps.append({"at_skill": (db.quests[qid].get("sk") or [0, 0])[1], "how": "quest", "what": row["name"], "quest_id": qid,
+                          "state": row["state"], **({"character_level": row["required_level"]} if row.get("required_level") else {}),
+                          "from": db.detail(qid).get("starts", [])})
+        # what trainers' windows listed, when the player stood before one: the ranks, not the recipes
+        learned = set()
+        for window in _as_list(self.snapshot.get("trainerWindows")):
+            if not isinstance(window, dict) or fold(window.get("skill")) not in map(fold, (*names, name)):
+                continue
+            teacher = self.graph.people["npc"].get(window.get("id")) or {}
+            for row in _as_list(window.get("services"))[:300]:
+                if not (isinstance(row, list) and len(row) >= 6 and isinstance(row[0], str)) or fold(row[0]) in recipes:
+                    continue
+                what = _clean(row[0], 60) + (f" ({_clean(row[1], 30)})" if isinstance(row[1], str) and row[1] else "")
+                if what in learned:
+                    continue
+                learned.add(what)
+                steps.append({k: v for k, v in {
+                    "at_skill": row[2] if whole(row[2]) and row[2] > 0 else None, "how": "trainer", "what": what,
+                    "character_level": row[3] if whole(row[3]) and row[3] > 0 else None,
+                    "cost": coins(row[4]) if whole(row[4]) and row[4] > 0 else None,
+                    "already_learned": True if row[5] == 1 else None, "taught_by": _clean(teacher.get("name"), 60) or None}.items()
+                    if v is not None or k == "at_skill"})
+        steps.sort(key=lambda step: (step["at_skill"] is None, step["at_skill"] or 0, step["what"]))
+        out["steps"] = steps[:25]
+        if skill is not None:   # worked out here, so that 'what is next' is never the model's own reading of the list
+            open_ = [st for st in steps if st["at_skill"] is not None and not st.get("already_learned") and st.get("state") != "done"]
+            brief = lambda st: {"how": st["how"], "what": st["what"], "at_skill": st["at_skill"]}
+            later = [brief(st) for st in open_ if st["at_skill"] > skill][:1]
+            out["next_for_the_character"] = {"can_be_taken_at_its_skill": [brief(st) for st in open_ if st["at_skill"] <= skill][:6],
+                                             "the_next_one_after": later}
+            cap = mine.get("max")
+            if isinstance(cap, int) and (not later or later[0]["at_skill"] > cap):
+                # the rank the character has ends before the next step Wisp knows of: what raises it is not on record
+                out["next_for_the_character"]["a_rank_in_between_is_not_known"] = (
+                    f"The character's rank ends at {cap}" + (f" and the next known step is at {later[0]['at_skill']}" if later else "")
+                    + ": the rank that raises the cap is not on record. It is learned from one of the trainers (their windows "
+                      "have not been seen for it: the player visits one and Wisp has it from then on), or from a book the game has not described yet.")
+        unknown = sum(st["at_skill"] is None for st in steps)
+        if unknown:
+            out["steps_whose_skill_is_not_known_yet"] = unknown
         # who trains it: those in the character's own zone first, then zone by zone
         here = (self.snapshot.get("character") or {}).get("map")
         known = [k for k in (self.graph.people["npc"].get(n) for n in self.graph.trainers.get(number, [])) if k and _clean(k.get("name"), 60)]
@@ -1631,39 +1691,29 @@ class Game:
         if not self.graph.trainers_read:
             out["trainers_note"] = ("Wisp's addon has not read Questie's list of trainers yet: it does after the next login, and the "
                                     "list is here after the logout or /wisp sync that follows.")
-        # its books: the game's own recipe items of this profession that someone sells and that teach no single recipe
-        recipes = {fold(r["name"]) for b in self.crafting.books for r in b["recipes"]} | {fold(r["name"]) for r in self.crafting.world_recipes}
-        def book(item, entry):
-            title = self.graph.names.get(item, "")
-            if entry.get("b") != number or not entry.get("v"):
-                return False
-            teaches = fold(title.split(":", 1)[1]) if ":" in title else None
-            return teaches is None or (bool(recipes) and teaches not in recipes)   # "Pattern: X" teaches X; a skill book teaches a rank
-        books = sorted((self.graph.names[i], i) for i, e in self.graph.world.items() if i in self.graph.names and book(i, e))
-        out["books"] = [{"item": title, "sold_by": self.graph._from_world(i).get("sold_by", [])} for title, i in books[:6]]
-        # the quests that need its skill
-        db = self.questdb()
-        theirs = sorted(db.with_profession(names[0]) or [], key=lambda i: (db.quests[i].get("sk") or [0, 0])[1]) if db else []
-        out["quests"] = [{**db.row(i), "starts": db.detail(i).get("starts", [])} for i in theirs[:8]]
         if args.get("show") is True:
-            rows = [[p["name"] + (f" ({p['title']})" if p.get("title") else ""), p["where"][0]["zone"] if p["where"] else "–", "–"] for p in people]
-            rows += [[t("Book: {item}", item=b["item"]) + (" — " + b["sold_by"][0]["name"] if b["sold_by"] else ""),
-                      b["sold_by"][0]["where"][0]["zone"] if b["sold_by"] and b["sold_by"][0]["where"] else "–", "–"] for b in out["books"]]
-            rows += [[t("Quest: {name}", name=q["name"]) + (" — " + q["starts"][0]["name"] if q["starts"] else ""),
-                      q.get("zone") or "–", q.get("needs_profession") or "–"] for q in out["quests"]]
+            def zone(people_):   # a seller's places are a list, a quest giver's one place
+                where = people_[0].get("where") if people_ else None
+                where = where[0] if isinstance(where, list) and where else where
+                return where.get("zone") or "–" if isinstance(where, dict) else "–"
+            label = {"book": t("Book: {item}", item="{}"), "quest": t("Quest: {name}", name="{}"), "trainer": t("At a trainer: {what}", what="{}")}
+            rows = [[label[st["how"]].format(st["what"]) + (" — " + st["from"][0]["name"] if st.get("from") else ""),
+                     zone(st.get("from")), str(st["at_skill"]) if st["at_skill"] is not None else "?"] for st in out["steps"]]
+            rows += [[p["name"] + (f" ({p['title']})" if p.get("title") else ""), zone([p]), "–"] for p in people]
             self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Profession"), "table": {
                 "title": t("{profession}: how it goes on", profession=name),
-                "sub": t("your skill: {skill} of {cap}", skill=mine.get("skill"), cap=mine.get("max")) if mine else t("your character does not have it"),
-                "columns": [t("Where to learn"), t("Zone"), t("Needs")], "rows": rows[:30],
-                "notes": [t("Trainers, books and quests as Questie lists them. A trainer's title often says the rank it teaches.")]}})
-            out["shown"] = "a card with these trainers, books and quests is now shown to the player: do not repeat its rows"
-        out["note"] = ("How this profession goes on, from data kept between sessions. can_rise_to is the cap of the rank the character has: "
-                       "skill cannot pass it until the next rank is learned, from a trainer, a book or a quest. trainers are Questie's "
-                       "list for this profession, the character's own zone first; a title often says the rank a trainer teaches "
-                       "(a higher rank's trainer also teaches the lower ones), and where there is no title the data does not say which "
-                       "rank: say so. books are the game's own skill books of this profession with who sells them. quests need its "
-                       "skill at the value given in needs_profession. Every place has a ref for the waypoint tool. Answer for the "
-                       "skill asked about first, then where this character stands.")
+                "sub": t("your skill: {skill} of {cap}", skill=skill, cap=mine.get("max")) if mine else t("your character does not have it"),
+                "columns": [t("Step or trainer"), t("Zone"), t("At skill")], "rows": rows[:30],
+                "notes": [t("The skill is the one the book, the quest or the trainer's window states. ? — the game has not said yet: visit that trainer once, or log in again for a book.")]}})
+            out["shown"] = "a card with these steps and trainers is now shown to the player: do not repeat its rows"
+        out["note"] = ("A profession as a path, from data kept between sessions. can_rise_to is the cap of the rank the character has: "
+                       "skill cannot pass it until the next rank is learned. steps are the ways it goes on, in order of at_skill: the "
+                       "skill at which a step can be taken, as the game itself states it (a book says it on itself, a quest needs it, a "
+                       "trainer's window listed it when the player stood there). at_skill null: the game has not said yet (a trainer "
+                       "never visited, a book not read by the game yet): say it is not known, never fill it in. next_for_the_character "
+                       "is worked out from that list: give it as it is. trainers are who trains the profession and where, the "
+                       "character's own zone first; a title often says the rank. Every place has a ref for the waypoint tool. Answer "
+                       "for the skill asked about first, then where this character stands.")
         return out
 
     def tool_deaths(self, args: dict) -> dict:
@@ -2257,9 +2307,10 @@ TOOLS = [
     },
     {
         "name": "profession_path",
-        "description": "How a profession goes on, for any profession, whether the character has it or not: the character's "
-                       "skill and the cap of its rank, who trains the profession and where (with each trainer's title, which "
-                       "often says the rank), its skill books and who sells them, and the quests that need its skill. Use it "
+        "description": "How a profession goes on, as a path, for any profession, whether the character has it or not: the "
+                       "character's skill and the cap of its rank; the steps on (a trainer's rank, a skill book and who sells "
+                       "it, a quest), each with the skill at which it can be taken; what is next for this character; and who "
+                       "trains the profession and where, with each trainer's title. Use it "
                        "for 'where do I learn X', 'where do I train X past 150', 'what is next for my X'. With show true the "
                        "player sees it as a card.",
         "input_schema": {

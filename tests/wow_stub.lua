@@ -347,6 +347,32 @@ if flags:find("ranks") then   -- and as a book; a fishing pole is sold too and i
   rawItems[16084] = { name = "Expert First Aid - Under Wraps", vendors = { 1347 } }
   rawItems[6256] = { name = "Fishing Pole", vendors = { 1347 } }
 end
+-- what an item says of itself: its name, and for a book or a recipe the skill it needs, in the game's own wording
+ITEM_MIN_SKILL = flags:find("russian") and "Требуется: %s (%d)" or "Requires %s (%d)"
+C_TooltipInfo = { GetItemByID = function(id)
+  local needs = ({ [16084] = { "First Aid", 125 }, [7090] = { "Tailoring", 160 } })[id]
+  local lines = { { leftText = "an item" }, { leftText = "Binds when picked up" } }
+  if needs then lines[#lines + 1] = { leftText = ITEM_MIN_SKILL:format(needs[1], needs[2]) } end
+  return { lines = lines }
+end }
+-- a profession trainer's window, as the game lists what it teaches: name, rank, state; the skill, the level, the cost
+local trainerOffers = {}
+function IsTradeskillTrainer() return true end
+function GetNumTrainerServices() return #trainerOffers end
+function GetTrainerServiceInfo(i) local o = trainerOffers[i]; return o[1], o[2], o[3] end
+function GetTrainerServiceSkillReq(i) local o = trainerOffers[i]; return o[4], o[5], true end
+function GetTrainerServiceLevelReq(i) return trainerOffers[i][6] end
+function GetTrainerServiceCost(i) return trainerOffers[i][7] end
+local function visitTrainers(boot)
+  local real = UnitGUID
+  UnitGUID = function(unit) if unit == "npc" then return "Creature-0-1-2-3-9001-00001" end return real(unit) end
+  trainerOffers = { { "Tailoring", "Expert", "used", "Tailoring", 125, 20, 5000 },
+                    { "Tailoring", "Artisan", "unavailable", "Tailoring", 200, 35, 50000 },
+                    { "Azure Silk Hood", "", "used", "Tailoring", 145, 0, 800 },
+                    { "Trade Skills", "", "header" } }
+  boot.scripts.OnEvent(boot, "TRAINER_SHOW")
+  UnitGUID = real
+end
 -- the game's own class of an item: 9 is a recipe item, its subclass the profession (7 First Aid, 2 Tailoring, 5 Cooking)
 function GetItemInfoInstant(id)
   local recipe = ({ [16084] = 7, [7090] = 2, [6325] = 5 })[id]
@@ -764,6 +790,7 @@ if mode == "snapshot" then
   end
   if not flags:find("noloot") then goLooting(boot) end
   if flags:find("pvpdeath") then killedByAPlayer(boot) end
+  if flags:find("ranks") then visitTrainers(boot) end
   if flags:find("wolfdeath") then killedByAWolf(boot) end
   if not flags:find("nomail") then openMailbox(boot) end
   if not flags:find("noauctions") then boot.scripts.OnEvent(boot, "OWNED_AUCTIONS_UPDATED") end

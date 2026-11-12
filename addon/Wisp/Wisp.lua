@@ -432,6 +432,113 @@ local function recipeProfession(id)
   if ok and class == RECIPE_CLASS then return RECIPE_OF[subclass] end
 end
 
+-- The skill at which a profession's next step can be taken, from the game's own words for it.
+-- A book or a recipe says it on itself ("Requires First Aid (125)"): the game's own format for that line
+-- (ITEM_MIN_SKILL, in the player's language) is turned into a pattern, so nothing is guessed from wording.
+--   WispData.itemSkill[item id] = the skill needed, 0 when the item states none
+local skillLine
+do
+  local format = type(ITEM_MIN_SKILL) == "string" and ITEM_MIN_SKILL or nil
+  if format then
+    local text = format:gsub("%%%d?%$?s", "\1"):gsub("%%%d?%$?d", "\2")      -- set the two blanks aside
+    text = text:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")                    -- the rest is literal
+    skillLine = "^" .. text:gsub("\1", ".+"):gsub("\2", "(%%d+)") .. "$"
+  end
+end
+
+local function skillNeededBy(id)   -- nil while the game has not described the item yet
+  local T = C_TooltipInfo
+  if not (skillLine and T and T.GetItemByID) then return nil end
+  local ok, data = pcall(T.GetItemByID, id)
+  if not ok or type(data) ~= "table" or type(data.lines) ~= "table" or #data.lines < 2 then return nil end
+  for _, line in ipairs(data.lines) do
+    local text = type(line) == "table" and line.leftText
+    local need = type(text) == "string" and text:match(skillLine)
+    if need then return tonumber(need) end
+  end
+  return 0
+end
+
+local function learnItemSkills(pass)   -- a couple of hundred at a time; an item the game must fetch first is read on a later pass
+  local ids = type(WispData) == "table" and WispData.recipeItems
+  if type(ids) ~= "table" then return end
+  WispData.itemSkill = WispData.itemSkill or {}
+  local waiting = 0
+  for _, id in ipairs(ids) do
+    if WispData.itemSkill[id] == nil then
+      local need = skillNeededBy(id)
+      if need then
+        WispData.itemSkill[id] = need
+      else
+        waiting = waiting + 1
+        if waiting > 200 then break end
+        if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+      end
+    end
+  end
+  pass = pass or 1
+  if waiting > 0 and pass < 20 and skillLine and C_TooltipInfo then C_Timer.After(3, function() pcall(learnItemSkills, pass + 1) end) end
+end
+
+local function itemSkills()
+  local known = type(WispData) == "table" and WispData.itemSkill
+  if type(known) ~= "table" then return nil end
+  local out = {}
+  for id, need in pairs(known) do
+    if type(id) == "number" and type(need) == "number" and need > 0 and #out < 3000 then out[#out + 1] = { id, need } end
+  end
+  return #out > 0 and out or nil
+end
+
+-- A trainer says it in its window: each thing it teaches, with the skill and the level it needs and what it
+-- costs. Read while the window of a profession's trainer is open, as the player sees it (its filters are
+-- left alone), and kept for every trainer visited, by any character.
+--   WispData.trainers[npc id] = { at, skill = the profession's name, services = { { name, rank, skill needed, level, cost, known } } }
+local function trainerSeen()
+  if type(GetNumTrainerServices) ~= "function" or type(GetTrainerServiceInfo) ~= "function" then return end
+  if type(IsTradeskillTrainer) == "function" and not IsTradeskillTrainer() then return end   -- a class's trainer, not a profession's
+  local guid = UnitGUID("npc")
+  local id = type(guid) == "string" and tonumber((select(6, strsplit("-", guid)))) or nil
+  if not id then return end
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.trainers = WispData.trainers or {}
+  local kept = WispData.trainers[id] or { services = {} }
+  local at, skills = {}, {}
+  for index, service in ipairs(kept.services) do at[tostring(service[1]) .. "|" .. tostring(service[2])] = index end
+  for i = 1, math.min(tonumber(GetNumTrainerServices()) or 0, 300) do
+    local name, rank, state = GetTrainerServiceInfo(i)
+    if type(name) == "string" and name ~= "" and state ~= "header" then
+      local skill, need = nil, nil
+      if type(GetTrainerServiceSkillReq) == "function" then skill, need = GetTrainerServiceSkillReq(i) end
+      if type(skill) == "string" and skill ~= "" then skills[skill] = (skills[skill] or 0) + 1 end
+      local row = { clip((name:gsub("|", "")), 60), type(rank) == "string" and rank ~= "" and clip((rank:gsub("|", "")), 30) or false,
+                    tonumber(need) or 0, type(GetTrainerServiceLevelReq) == "function" and tonumber(GetTrainerServiceLevelReq(i)) or 0,
+                    type(GetTrainerServiceCost) == "function" and tonumber(GetTrainerServiceCost(i)) or 0, state == "used" and 1 or 0 }
+      local key = tostring(row[1]) .. "|" .. tostring(row[2])
+      if at[key] then kept.services[at[key]] = row elseif #kept.services < 300 then kept.services[#kept.services + 1] = row; at[key] = #kept.services end
+    end
+  end
+  if #kept.services == 0 then return end
+  local most = 0
+  for skill, count in pairs(skills) do if count > most then kept.skill, most = skill, count end end
+  kept.at = time()
+  WispData.trainers[id] = kept
+end
+
+local function trainerWindows()
+  local seen = type(WispData) == "table" and WispData.trainers
+  if type(seen) ~= "table" then return nil end
+  local out = {}
+  for id, one in pairs(seen) do
+    if type(id) == "number" and type(one) == "table" and type(one.services) == "table" then
+      out[#out + 1] = { id = id, at = one.at, skill = one.skill, services = one.services }
+    end
+  end
+  table.sort(out, function(a, b) return (a.at or 0) > (b.at or 0) end)
+  while #out > 12 do table.remove(out) end   -- the trainers seen last: a dozen is every profession a player keeps
+  return #out > 0 and out or nil
+end
+
 local function buildItemIndex(DB, ZoneDB, key)
   local Q = DB.QueryItemSingle
   local friendly = {}
@@ -465,7 +572,7 @@ local function buildItemIndex(DB, ZoneDB, key)
   local order = {}
   for id in pairs(DB.ItemPointers) do if type(id) == "number" then order[#order + 1] = id end end
   table.sort(order)
-  local items, wantNpc, wantObject = {}, {}, {}
+  local items, wantNpc, wantObject, sold = {}, {}, {}, {}
   for i, id in ipairs(order) do
     if i % QUESTS_PER_SLICE == 0 then coroutine.yield() end
     if #items >= 30000 then break end
@@ -478,6 +585,7 @@ local function buildItemIndex(DB, ZoneDB, key)
       if #vendors + #drops + #objects > 0 then
         local entry = { id = id, name = name, b = recipeProfession(id) }
         if #vendors > 0 then entry.v = vendors end
+        if entry.b and #vendors > 0 and #sold < 2000 then sold[#sold + 1] = id end
         if #drops > 0 then entry.d, entry.dn = first(drops, 3, DB.QueryNPCSingle), #drops end
         if #objects > 0 then entry.o, entry.on = first(objects, 2, DB.QueryObjectSingle), #objects end
         for _, npc in ipairs(vendors) do wantNpc[npc] = true end
@@ -510,6 +618,8 @@ local function buildItemIndex(DB, ZoneDB, key)
     if type(title) == "string" and title ~= "" then npc.title = clip((title:gsub("|", "")), 60) end
   end
   local objects = named(DB.QueryObjectSingle, wantObject, true)
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.recipeItems = sold   -- skill books and recipes someone sells: what each needs is read from the item itself, below
   return { v = 1, key = key, items = items, npcs = npcs, objects = objects, maps = maps, trainers = trainers }
 end
 
@@ -575,6 +685,7 @@ local function indexStep()
   if ok and type(index) == "table" then
     local okJ, text = pcall(function() return E.EncodeBase64(E.SerializeJSON(index)) end)
     if okJ and type(text) == "string" then keep(text, index.key) else why = "could not be written: " .. tostring(text) end
+    if name == "items" then pcall(learnItemSkills) end   -- the list of sold recipe items is fresh: what each needs, next
   end
   if type(WispData) ~= "table" then WispData = {} end
   WispData.indexFailed = WispData.indexFailed or {}
@@ -1712,6 +1823,8 @@ local function buildSnapshot()
   if not okX then progress = nil end
   local okD, deaths = pcall(deathRecord)
   if not okD then deaths = nil end
+  local okS, needs = pcall(itemSkills)
+  local okT, taught = pcall(trainerWindows)
   return {
     v = 1,
     takenAt = time(),
@@ -1747,6 +1860,8 @@ local function buildSnapshot()
     listings = ladders,
     xp = progress,
     deaths = deaths,
+    itemSkill = okS and needs or nil,
+    trainerWindows = okT and taught or nil,
     vendor = vendor,
     quests = log,
     available = open,
@@ -1971,6 +2086,8 @@ end
 ---------------------------------------------------------------- boot ----
 
 local frame = CreateFrame("Frame")
+frame:RegisterEvent("TRAINER_SHOW")
+frame:RegisterEvent("TRAINER_UPDATE")
 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 frame:RegisterEvent("PLAYER_DEAD")
 frame:RegisterEvent("PLAYER_LOGIN")
@@ -2008,6 +2125,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
     end
   elseif event == "AUCTION_HOUSE_CLOSED" then
     pcall(learnNames)   -- a scan has just shown the game these items
+  elseif event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then
+    pcall(trainerSeen)
   elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
     pcall(combatLogged)
   elseif event == "PLAYER_DEAD" then
@@ -2051,6 +2170,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
     pcall(captureRecipes)
   else
     C_Timer.After(20, function() pcall(learnNames) end)   -- once the login rush is over
+    C_Timer.After(60, function() pcall(learnItemSkills) end)
     C_Timer.After(30, function() pcall(startQuestIndex); pcall(startRecipeIndex) end)
     pcall(startInbox)
     pcall(pruneLoot)

@@ -364,6 +364,18 @@ CASES = [
      "tools": ["profession_path"], "args": {"profession_path": {"show": True}}, "card": ["Old Tom Reel", "Nat Pagle"], "text": [r"\b31\b|\b75\b"],
      "oracle": [([("profession_path", {"profession": "Fishing", "show": True})],
                  "У вас Fishing 31, потолок ранга 75: следующий ранг у учителя Old Tom Reel рядом, в Elwynn Forest.")]},
+    # the skill on the edge: at what skill the next step can be taken, as the game states it
+    {"id": "rank-skill-trainer", "tags": ["as-asked", "professions"], "lang": "ru",
+     "ask": "С какого навыка я смогу выучить следующий ранг Tailoring и сколько это стоит?",
+     "tools": ["profession_path"], "text": [r"\b200\b"], "say": ["Artisan", money("5g")],
+     "never": [r"\b225\b[^.\n]{0,40}(можно|смож)\w* (вы)?учи"],   # 225 is the cap of the rank it has, not where the next one opens
+     "oracle": [([("profession_path", {"profession": "Tailoring"})],
+                 "Следующий ранг, Tailoring (Artisan), учится с навыка 200 у Mara Stitchwell, с 35 уровня, за 5g. У вас сейчас 150.")]},
+    {"id": "rank-skill-book", "tags": ["as-asked", "professions"], "lang": "ru",
+     "ask": "С какого навыка можно прочитать книгу по First Aid?",
+     "tools": ["profession_path|item_links"], "text": [r"\b125\b"], "say": ["Expert First Aid"],
+     "oracle": [([("profession_path", {"profession": "First Aid"})],
+                 "Expert First Aid - Under Wraps требует навык 125. У вашего персонажа этой профессии нет.")]},
     {"id": "ru-rank-trainer", "tags": ["as-asked", "professions", "russian-names"], "lang": "ru", "game": "ru",
      "ask": "Где учить портняжное дело дальше?",
      "tools": ["profession_path"], "say": [r"Мар\w+ Стеж", "Штормград"],
