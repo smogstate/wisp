@@ -148,9 +148,8 @@ class ItemGraph:
 
     def find(self, query: str) -> list[int]:
         """Items by name: the exact one, else those containing the words, shortest name first."""
-        from .questdb import best, fold   # as people type names: case, ё, punctuation and endings do not matter
-        found = best(query, self.names.items())
-        return found[:1] if found and fold(self.names[found[0]]) == fold(query) else found[:8]
+        from .questdb import pick   # as people type names: case, ё, punctuation and endings do not matter
+        return pick(query, self.names.items())
 
     def around(self, item: int, craft) -> dict:
         """Everything one step from an item."""

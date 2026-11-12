@@ -340,7 +340,7 @@ def test_crafting(wow: Path, tmp: Path):
     assert linen["found"] == [{"item": "Linen Cloth", "lowest_price": "1s 20c", "seen": "2 days ago"}]
     assert [f["item"] for f in silk["found"]] == ["Silk Cloth", "Azure Silk Hood", "Bolt of Silk Cloth"], "closest names, shortest first"
     assert silk["found"][0]["in_bags"] == 32 and silk["found"][0]["bags_worth"] == "1g 44s"
-    assert old["found"][0]["seen"] == "over three weeks ago" and none == {"asked": "nothing like this", "found": [], "note": "no price under that name"}
+    assert old["found"][0]["seen"] == "over three weeks ago" and (none["asked"], none["found"]) == ("nothing like this", []) and none["note"].startswith("no price under that name. Names are as")
     assert asked["items_with_a_price"] == 8 and "error" in run_tool(game, "auction_prices", {"items": []})
     assert not Game.load(wow).crafting.find("Bolt of Linen Cloth"), "an item the game had not loaded has no name yet"
     learned = Game.load(make_wow_dir(tmp / "c", flags="visitauction"))
@@ -2135,10 +2135,14 @@ def test_names_as_typed():
              (6, "Silk Cloth"), (7, "Bolt of Silk Cloth"), (8, "Herb Baked Egg")]
     for typed, found in (("шелка", 1), ("шёлк", 1), ("рулоны шелка", 2), ("тонкую нить", 3), ("тонкой нити", 3),
                          ("лазурных шелковых капюшона", 4), ("яиц с травами", 5), ("яйца с травами", 5),
-                         ("silk cloth", 6), ("bolts of silk cloth", 7), ("eggs", 8)):
+                         ("silk cloth", 6), ("bolts of silk cloth", 7), ("eggs", 8), ("лазурного шелкового капюшона", 4)):
         assert best(typed, names)[:1] == [found], (typed, best(typed, names))
     assert best("silk", names) == [6, 7], "several: the shorter name first, and the caller asks which"
     assert best("мифрил", names) == [] and best("  ", names) == []
+    # a Russian game asked for an English name says so plainly: the model's next try must be the player's own word
+    russian = Game.load(make_wow_dir(Path(tempfile.mkdtemp()), flags="russian"))
+    assert "game is in Russian" in run_tool(russian, "item_links", {"item": "Mithril Bar"})["error"]
+    assert "game is in Russian" not in run_tool(russian, "item_links", {"item": "мифрил"})["error"]
 
 
 def test_eval_cases():

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .crafting import coins
 from .i18n import t, tn
+from .questdb import best
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS price(market TEXT, item INTEGER, day INTEGER, low INTEGER, high INTEGER, listed INTEGER,
@@ -184,19 +185,13 @@ class Market:
 
     def find(self, query: str) -> list[tuple[int, str]]:
         """Items by name: the exact one, else those containing the words, shortest name first."""
-        query = query.strip().lower()
-        if not query:
-            return []
+        from .questdb import pick
         db = self._open()
-        try:
-            exact = db.execute("SELECT id, name FROM item WHERE lower(name) = ?", (query,)).fetchall()
-            if exact:
-                return exact[:1]
-            like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            return db.execute("SELECT id, name FROM item WHERE lower(name) LIKE ? ESCAPE '\\' "
-                              "ORDER BY length(name), name LIMIT 8", (like,)).fetchall()
+        try:   # matched here, not in SQL: SQLite's lower() and LIKE know Latin letters only, so «шелк» never met «Шелк»
+            names = dict(db.execute("SELECT id, name FROM item").fetchall())
         finally:
             db.close()
+        return [(item, names[item]) for item in pick(query, names.items())]
 
     def series(self, snapshot: dict, item: int, days: int) -> list[tuple[int, int, int, int | None]]:
         today = self.today(snapshot)
@@ -325,7 +320,7 @@ class Market:
         for item, points in series.items():
             if only is not None and item not in only:
                 continue
-            if name and name.lower() not in names[item].lower():
+            if name and not best(name, [(item, names[item])]):
                 continue
             if len(points) < 4 or today - points[-1][0] > 3:   # too little to judge, or not seen lately
                 continue

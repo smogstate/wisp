@@ -14,6 +14,7 @@ from .gathering import Gathering
 from .graph import ItemGraph
 from .history import diff
 from .i18n import num, t, tn
+from .questdb import best, pick   # names as the player typed them
 
 SNAPSHOT_VERSION = 1
 
@@ -347,7 +348,7 @@ class Game:
             if wanted in ("here", "this zone", "my zone"):
                 wanted = str(me.get("zone") or "").lower()
             zones = sorted({z for q in self.available for z in q["zones"]})
-            match = [z for z in zones if z.lower() == wanted] or [z for z in zones if wanted and wanted in z.lower()]
+            match = pick(wanted, [(z, z) for z in zones], 99)
             if len(match) != 1:
                 return {"error": f"no single zone with open quests is named like '{_clean(zone, 60)}'" if match or wanted else
                                  "the character's zone is not known", "zones_with_open_quests": zones[:60]}
@@ -460,7 +461,7 @@ class Game:
         if not zone or zone.lower() in ("here", "this zone", "my zone"):
             zone = str(me.get("zone") or "")
         known = sorted({p["zone"] for p in self.places.values() if p["zone"]})
-        match = [z for z in known if z.lower() == zone.lower()] or [z for z in known if zone and zone.lower() in z.lower()]
+        match = pick(zone, [(z, z) for z in known], 99)
         if len(match) != 1:
             return {"error": (f"no single zone with quests is named like '{zone}'" if zone else "the character's zone is not known"),
                     "zones_with_quests": known[:60]}
@@ -610,7 +611,7 @@ class Game:
             return {"error": "Live auction data is not available in this run of Wisp. " + setup}
         found = self.graph.find(name)
         if not found:
-            return {"error": f"Wisp knows no item named like '{name}'. Names are as the player's game writes them."}
+            return {"error": f"Wisp knows no item named like '{name}'. " + self._as_written(name)}
         if len(found) > 1:
             return {"several_items_match": [self.graph.names[i] for i in found], "note": "Ask again with one of these names exactly."}
         seen = self.live.item(found[0], self.snapshot)
@@ -790,7 +791,7 @@ class Game:
         deals = [self._deal(d) for d in self.assets.deals(market_key(self.snapshot), int(time.time()) - days * 86400)]
         if isinstance(args.get("item"), str) and args["item"].strip():
             wanted = _clean(args["item"], 80).lower()
-            deals = [d for d in deals if wanted in d["item"].lower()]
+            deals = [d for d in deals if best(wanted, [(0, d["item"])])]
         note = ("What the auction house's mail said, noted by Wisp's addon whenever the mailbox was open: real purchases and real "
                 "sales, not listings. A sale's 'received' is its price less the house's cut. An auction whose mail was emptied "
                 "before the mailbox was opened with Wisp running is not here, and neither are auctions that ran out unsold.")
@@ -1087,7 +1088,7 @@ class Game:
             if wanted in ("here", "this zone", "my zone"):
                 wanted = str((self.snapshot.get("character") or {}).get("zone") or "").lower()
             zones = db.zones()
-            match = [z for z in zones if z.lower() == wanted] or [z for z in zones if wanted and wanted in z.lower()]
+            match = pick(wanted, [(z, z) for z in zones], 99)
             if len(match) != 1:
                 return {"error": f"no single zone is named like '{_clean(zone, 60)}'", "zones": zones[:80]}
             found = [i for i in found if db.quests[i].get("zone") == match[0]]
@@ -1097,7 +1098,8 @@ class Game:
             found = [i for i in found if i not in db.done]
         if not found:
             return {"found": 0, "note": "Nothing in Questie's list for this character matches. Quests for another race or class "
-                                        "are not in it.", "character_level": db.level}
+                                        "are not in it. " + (self._as_written(query) if isinstance(query, str) else ""),
+                    "character_level": db.level}
         if len(found) <= 3:
             return {"found": len(found), "quests": [db.detail(i) for i in found], "character_level": db.level, "note": note}
         if not (isinstance(query, str) and query.strip()):
@@ -1142,8 +1144,9 @@ class Game:
         if not isinstance(wanted, str) or not wanted.strip():
             return {"error": "name must be a dungeon's name"}
         key = wanted.strip().casefold()
-        found = [d for d in self.dungeons if d["name"].casefold() == key] or \
-                [d for d in self.dungeons if key in d["name"].casefold() or d["name"].casefold().removeprefix("the ") in key]
+        named = pick(wanted, [(i, d["name"]) for i, d in enumerate(self.dungeons)], 99)
+        found = [d for i, d in enumerate(self.dungeons) if i in named] or \
+                [d for d in self.dungeons if d["name"].casefold().removeprefix("the ") in key]
         if len(found) > 1:
             return {"error": "More than one dungeon matches. Ask for one of: " + ", ".join(d["name"] for d in found)}
         if not found:
@@ -1247,13 +1250,12 @@ class Game:
         if show not in ("skill_up", "all"):
             return {"error": "show must be skill_up or all"}
         if isinstance(search, str) and search.strip():   # one recipe by name, learned or not, and how to come by it
-            from .questdb import best   # by the recipe's name or by what it makes, endings and case as the player wrote them
             pool = [r for b in books for r in b["recipes"]] + self.crafting.world_recipes   # and every other recipe in the game
             wanted = _clean(search, 80)
             hits = [pool[i] for i in dict.fromkeys(best(wanted, [(i, r["name"]) for i, r in enumerate(pool)])
                                                    + best(wanted, [(i, self.crafting.name(r["makes"])) for i, r in enumerate(pool) if r["makes"]]))]
             if not hits:
-                return {"found": 0, "note": "No recipe of the professions read so far is named like that ("
+                return {"found": 0, "note": self._as_written(search) + " No recipe of the professions read so far is named like that ("
                                             + ", ".join(b["profession"] for b in books) + "). The game lists a profession's recipes, "
                                             "learned or not, while its window is open. For the recipe item itself, try item_links."}
             hits.sort(key=lambda r: (bool(r.get("world")), bool(r["owner"]), not r["learned"]))   # this character's own first, then an alt's, then the rest
@@ -1265,7 +1267,7 @@ class Game:
                         "items that teach it, from the Questie addon, with who sells or drops each and places that have refs "
                         "for the waypoint tool. Vendors of the other faction are left out."}
         if isinstance(wanted, str) and wanted.strip():
-            books = [b for b in books if b["profession"].lower() == wanted.strip().lower()]
+            books = [b for b in books if best(wanted, [(0, b["profession"])])]
             if not books:
                 return {"error": f"no recipes read for {wanted.strip()}. Read so far: "
                                  + ", ".join(b["profession"] for b in self.crafting.books)}
@@ -1321,7 +1323,7 @@ class Game:
                     line["days_with_a_scan"] = len(past)
                 entry["found"].append(line)
             if not found:
-                entry["note"] = "no price under that name"
+                entry["note"] = "no price under that name. " + self._as_written(name)
             out.append(entry)
         return {"prices": out, "items_with_a_price": len(craft.prices),
                 "note": "From the player's own Auctionator scans: the lowest price it saw listed, not a sale, and before "
@@ -1349,7 +1351,7 @@ class Game:
             return {"error": "days must be a whole number from 2 to 3650"}
         found = self.market.find(_clean(name, 80))
         if not found:
-            return {"error": f"no item named like '{_clean(name, 80)}' has been scanned. Names are as the player's game writes them."}
+            return {"error": f"no item named like '{_clean(name, 80)}' has been scanned. " + self._as_written(name)}
         if len(found) > 1:
             return {"several_items_match": [n for _, n in found], "note": "Ask again with one of these names exactly."}
         item, item_name = found[0]
@@ -1428,7 +1430,7 @@ class Game:
             return {"error": "item must be an item name"}
         found = self.graph.find(_clean(name, 80))
         if not found:
-            return {"error": f"Wisp knows no item named like '{_clean(name, 80)}'. Names are as the player's game writes them."
+            return {"error": f"Wisp knows no item named like '{_clean(name, 80)}'. " + self._as_written(name)
                              + ("" if self.graph.world else " So far it knows only the items the character carries, crafts with, crafts, "
                                 "is asked for by quests or has a price for: Questie's whole item list is read by Wisp's addon in the "
                                 "background about a minute after login, and is here after the next logout.")}
@@ -1641,6 +1643,15 @@ class Game:
             out["shown"] = "a table card with these rows is now shown to the player: do not repeat them in your text"
         return out
 
+    def _as_written(self, asked) -> str:
+        """What to tell the model when a name was not found, so that its next try is the player's own word."""
+        russian = str((self.snapshot.get("client") or {}).get("locale") or "").lower().startswith("ru")
+        if russian and isinstance(asked, str) and not re.search("[а-яё]", asked, re.I):
+            return (f"The player's game is in Russian, so every name in it is Russian: '{_clean(asked, 60)}' is not, and cannot "
+                    "be found. Ask again with the Russian word the player wrote, as they wrote it; do not translate it.")
+        return ("Names are as the player's game writes them, in the language of their game: ask with the word the player "
+                "wrote, as they wrote it, not a translation and not a name you remember.")
+
     def _one_item(self, args: dict):
         """The item a tool was asked about, or the answer to give instead."""
         name = _clean(args.get("item"), 80) if isinstance(args.get("item"), str) else ""
@@ -1648,8 +1659,7 @@ class Game:
             return None, {"error": "item must be an item name"}
         found = self.graph.find(name)
         if not found:
-            return None, {"error": f"Wisp knows no item named like '{name}'. Names are as the player's game writes them, in the "
-                                   "language of their game: ask with the player's own words, not a translation."}
+            return None, {"error": f"Wisp knows no item named like '{name}'. " + self._as_written(name)}
         if len(found) > 1:
             return None, {"several_items_match": [self.graph.names[i] for i in found], "note": "Ask again with one of these names exactly."}
         return found[0], None
@@ -2194,7 +2204,10 @@ TOOLS = [
     },
     {
         "name": "shopping_list",
-        "description": "Show the player a card. With crafts (the same as for craft_plan) it is the whole crafting "
+        "description": "Show the player a card. Not for 'a shopping list for item X': that is craft_tree with show true, "
+                       "which goes down to raw materials and counts what the player's other characters hold; this tool does "
+                       "neither, so it would tell them to buy what they can make or already have. "
+                       "With crafts (the same as for craft_plan) it is the whole crafting "
                        "plan laid out: the steps in the order given, a table of materials with what the bags cover "
                        "and what to buy, the cost, and a Copy button that creates the shopping list for exactly the "
                        "remainder in the Auctionator addon. Put the crafts in the order the player should do them. "

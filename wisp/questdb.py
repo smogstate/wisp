@@ -62,14 +62,14 @@ def fold(text: str) -> str:
 def stems(text: str) -> list[str]:
     """A name's words without their endings: 'тонкую нить' is 'Тонкая нить', 'рулоны шелка' is 'Рулон шелка', 'eggs' is 'Egg'.
     ponytail: the last letter or two cut off, no dictionary; a real stemmer if this ever mismatches."""
-    return [w if len(w) <= 3 else w[:-1] if len(w) == 4 else w[:-2] for w in fold(text).split()]
+    return [w[:len(w) - (0 if len(w) <= 3 else 1 if len(w) == 4 else 2 if len(w) <= 6 else 3)] for w in fold(text).split()]   # -ого, -ыми
 
 
 def best(query: str, names) -> list:
     """The keys of the names a typed query means, best first; names is (key, name) pairs.
-    The exact name alone; else every name holding the query's words, as written or by their stems
-    (a player writes a name in whatever case their sentence needs), those of the query's own length
-    first ('шелка' is 'Шелк' before it is 'Рулон шелка'), shorter names first."""
+    The exact name alone. Else the names that are the query word for word with other endings (a player writes a
+    name in whatever case their sentence needs: 'шелка' is 'Шелк', not 'Рулон шелка'). Else every name holding
+    the query's words, as written or by their stems, shorter names first."""
     wanted = fold(query)
     if not wanted:
         return []
@@ -78,10 +78,17 @@ def best(query: str, names) -> list:
     if exact:
         return exact
     words, cut = wanted.split(), stems(query)
-    near = [(key, text) for key, text in folded
-            if all(w in text for w in words) or all(any(part.startswith(s) for part in text.split()) for s in cut)]
-    same = [n for n in near if len(n[1].split()) == len(words)]
+    by_stems = lambda text: all(any(part.startswith(s) for part in text.split()) for s in cut)
+    near = [(key, text) for key, text in folded if all(w in text for w in words) or by_stems(text)]
+    same = [n for n in near if len(n[1].split()) == len(words) and by_stems(n[1])]
     return [key for key, text in sorted(same or near, key=lambda n: (len(n[1]), n[1], str(n[0])))]
+
+
+def pick(query: str, names, most: int = 8) -> list:
+    """best() as the tools use it: the exact name alone, else up to `most` candidates for the caller to choose from or name."""
+    names = list(names)
+    found = best(query, names)
+    return found[:1] if found and fold(dict(names)[found[0]]) == fold(query) else found[:most]
 
 
 class QuestDB:

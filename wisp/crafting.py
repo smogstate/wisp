@@ -205,9 +205,8 @@ class Crafting:
 
     def find(self, query: str) -> list[int]:
         """Priced items by name: the exact one, else those containing the words, shortest name first."""
-        from .questdb import best, fold
-        found = best(_text(query, 80), [(item, self.names[item]) for item in self.prices if item in self.names])
-        return found[:1] if found and fold(self.names[found[0]]) == fold(query) else found[:8]
+        from .questdb import pick
+        return pick(_text(query, 80), [(item, self.names[item]) for item in self.prices if item in self.names])
 
     def describe(self, recipe: dict) -> dict:
         materials, cost, unpriced, can_make = [], 0, [], None

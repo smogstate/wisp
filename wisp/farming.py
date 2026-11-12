@@ -59,10 +59,9 @@ class Farming:
         return [r for r in self.records if r["day"] > self.today - days]
 
     def zone(self, query: str) -> list[tuple[int, str]]:
-        query = query.strip().lower()
+        from .questdb import pick
         zones = {r["map"]: r["zone"] for r in self.records}
-        exact = [(m, z) for m, z in zones.items() if z.lower() == query]
-        return exact[:1] or sorted((m, z) for m, z in zones.items() if query and query in z.lower())[:6]
+        return [(m, zones[m]) for m in pick(query, zones.items(), 6)]
 
     def spots(self, days: int) -> list[dict]:
         """Each zone farmed in the period: time looting, what came out, and per hour where there is enough time to say."""

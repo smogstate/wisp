@@ -39,18 +39,14 @@ class Gathering:
 
     def find(self, query: str) -> list[str]:
         """Node names: the exact one, else those containing the words, shortest first."""
-        query = query.strip().lower()
-        if not query:
-            return []
-        exact = [name for name in self.nodes if name.lower() == query]
-        return exact[:1] or sorted((n for n in self.nodes if query in n.lower()), key=lambda n: (len(n), n))[:8]
+        from .questdb import pick
+        return pick(query, [(name, name) for name in self.nodes])
 
     def zone(self, query: str) -> list[int]:
         """Map ids of the zones whose name fits, the exact one first."""
-        query = query.strip().lower()
+        from .questdb import pick
         names = {m: z["zone"] for n in self.nodes.values() for m, z in n["zones"].items()}
-        exact = [m for m, name in names.items() if name.lower() == query]
-        return exact[:1] or sorted(m for m, name in names.items() if query and query in name.lower())[:6]
+        return pick(query, names.items(), 6)
 
     def zone_name(self, map_id: int) -> str:
         return next(z["zone"] for n in self.nodes.values() for m, z in n["zones"].items() if m == map_id)
