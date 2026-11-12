@@ -791,6 +791,8 @@ def make_handler(app: App, port: int):
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = 60   # a connection that sends nothing does not hold a thread for ever
+
         def log_message(self, *args):
             pass
 
@@ -815,7 +817,7 @@ def make_handler(app: App, port: int):
 
         def do_GET(self):
             path, _, query = self.path.partition("?")
-            if path == "/" and self.headers.get("Host") in hosts and query == f"t={app.token}":
+            if path == "/" and self.headers.get("Host") in hosts and secrets.compare_digest(query, f"t={app.token}"):
                 page = UI.read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -840,8 +842,11 @@ def make_handler(app: App, port: int):
         def do_POST(self):
             if not self.allowed():
                 return self.send_json(403, {"error": "forbidden"})
-            length = int(self.headers.get("Content-Length") or 0)
-            if length > 100_000:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if not 0 <= length <= 100_000:   # a negative length would read until the other side hangs up
                 return self.send_json(413, {"error": "too long"})
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
