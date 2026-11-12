@@ -2216,15 +2216,21 @@ def test_game_boundary(tmp: Path):
     slain = Game.load(make_wow_dir(tmp / "pvp", flags="pvpdeath"))
     assert "Gankmaster" not in json.dumps(slain.snapshot, ensure_ascii=False), "the killer's name is not written down at all"
     one = run_tool(slain, "deaths", {})["deaths"][0]
-    assert (one["by"], one["killed_by_a_player"], one["damage_taken"], one["fight_lasted_seconds"]) == ("Rogue (Undead)", True, 1800, 5.0)
+    assert (one["by"], one["killed_by_a_player"], one["damage_taken"], one["fight_lasted_seconds"]) == ("Rogue (Undead)", True, 2000, 45.0), \
+        "a death to a player: the whole fight from its first blow, not its last half minute"
     full = run_tool(slain, "deaths", {"which": 1, "show": True})
     assert full["killing_blow"] == {"spell": "Eviscerate", "from": "Rogue (Undead)", "damage": 900}
-    assert [(d["spell"], d["damage"], d["share"]) for d in full["damage_by_spell"]] == [("Eviscerate", 900, "50%"), ("Sinister Strike", 600, "33%"), ("melee swing", 300, "17%")]
+    assert [(d["spell"], d["damage"], d["share"]) for d in full["damage_by_spell"]] == [
+        ("Eviscerate", 900, "45%"), ("Sinister Strike", 600, "30%"), ("melee swing", 400, "20%"), ("Ambush", 100, "5%")]
     assert full["held_by"] == [{"debuff": "Cheap Shot", "from": "Rogue (Undead)", "seconds": 3.0}] and full["healing_received"] == 150
-    assert full["what_you_cast"] == [{"seconds_before_death": 2.5, "spell": "Frost Nova"}] and len(full["timeline"]) == 7, "the wolf's hit a minute before is not this fight"
+    assert full["what_you_cast"] == [{"seconds_before_death": 35.0, "spell": "Blink"}, {"seconds_before_death": 2.5, "spell": "Frost Nova"}]
+    assert len(full["timeline"]) == 10, "the wolf's hit a minute before the rogue's first is not this fight"
     card = slain.cards[-1]["table"]
     assert card["title"] == "Killed by: Rogue (Undead)" and card["rows"][-1] == ["Eviscerate", "0 s", "900", "0"]
-    assert card["rows"][5] == ["healing: Healing Potion", "-1 s", "+150", "650"] and len(card["columns"]) == 4, "four columns: the window is narrow"
+    assert card["rows"][8] == ["healing: Healing Potion", "-1 s", "+150", "650"] and len(card["columns"]) == 4, "four columns: the window is narrow"
+    mauled = run_tool(Game.load(make_wow_dir(tmp / "pve", flags="wolfdeath")), "deaths", {})["deaths"][0]
+    assert (mauled["by"], mauled["killed_by_a_player"], mauled["damage_taken"], mauled["fight_lasted_seconds"]) == ("Prowler", False, 800, 30.0), \
+        "a death to a creature: the last half minute of an hour-long fight is enough"
     assert "error" in run_tool(slain, "deaths", {"which": 2}) and run_tool(Game.load(make_wow_dir(tmp / "alive")), "deaths", {})["deaths"] == []
 
     for damaged in ('{"v":1,"takenAt":1e999}', '{"v":1,"quests":[{"id":[1],"title":"x"}]}', "[" * 100000):

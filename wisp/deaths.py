@@ -1,7 +1,7 @@
 """How the character died.
 
-The addon keeps the last half minute of the game's combat log as far as it touches the character, and
-files it when the character dies (addon/Wisp/Wisp.lua, "how the character died"). Here that record is
+The addon keeps the game's combat log as far as it touches the character, and files the fight when the
+character dies: the whole fight when another player did it (up to three minutes), the last half minute otherwise (addon/Wisp/Wisp.lua, "how the character died"). Here that record is
 checked and summed up: who did the damage and with what, what held the character, what the character
 did in answer. All sums are done here; the model words them and adds advice.
 
@@ -18,7 +18,7 @@ CLASSES = {"WARRIOR": "Warrior", "PALADIN": "Paladin", "HUNTER": "Hunter", "ROGU
 RACES = {"Human": "Human", "Dwarf": "Dwarf", "NightElf": "Night Elf", "Gnome": "Gnome", "Orc": "Orc", "Scourge": "Undead",
          "Tauren": "Tauren", "Troll": "Troll", "BloodElf": "Blood Elf", "Draenei": "Draenei", "Goblin": "Goblin", "Worgen": "Worgen"}
 KINDS = ("hit", "tick", "miss", "heal", "debuff", "debuff_off", "interrupted", "cast", "dealt")
-EVENTS, TIMELINE, DEATHS = 160, 30, 8
+EVENTS, TIMELINE, DEATHS = 400, 60, 16   # a long fight is summed up whole; the timeline shows its last lines
 
 
 def _number(value, low=0, high=10**7):
@@ -58,7 +58,7 @@ class Deaths:
                         "name": None if one.get("player") is True or one.get("pet") is True else _text(one.get("name"), 40)})
         log = []
         for e in raw["log"][-EVENTS:]:
-            if not (isinstance(e, list) and len(e) >= 7 and e[1] in KINDS and _number(e[0], 0, 120) is not None):
+            if not (isinstance(e, list) and len(e) >= 7 and e[1] in KINDS and _number(e[0], 0, 600) is not None):
                 continue
             by = e[2] if isinstance(e[2], int) and not isinstance(e[2], bool) and 1 <= e[2] <= len(who) else 0
             log.append({"before": float(e[0]), "kind": e[1], "who": by, "spell": _text(e[3]), "amount": _number(e[4]) or 0,
@@ -194,7 +194,9 @@ class Deaths:
                          + ", ".join(f"{spell or t('melee')} {row['damage']:g}" for (_, spell), row in spells))
         if s["held"]:
             notes.append(t("Held by: {list}", list=", ".join(f"{spell} ({seconds:g} " + t("s") + ")" for _, spell, seconds, _ in s["held"][:6])))
-        notes.append(t("From the game's combat log, the last 30 seconds before the death. Other players are shown by class and race only."))
+        if len(record["log"]) > TIMELINE:
+            notes.append(t("{n} earlier lines of the fight are not shown; the sums count them.", n=len(record["log"]) - TIMELINE))
+        notes.append(t("From the game's combat log: the whole fight when a player killed you (up to 3 minutes), the last 30 seconds otherwise. Other players are shown by class and race only."))
         return {"title": t("Killed by: {who}", who=self.killers(record, s)),
                 "sub": " · ".join(x for x in (record["zone"], self.ago(record),
                                               tn(round(s["lasted"]), "the fight took {n} second", "the fight took {n} seconds")) if x),

@@ -555,6 +555,14 @@ function CombatLogGetCurrentEventInfo() return (table.unpack or unpack)(logged, 
 function GetPlayerInfoByGUID(guid)
   if guid == "Player-1-ROGUE" then return "Rogue", "ROGUE", "Undead", "Scourge", 2, "Gankmaster", "Other Realm" end
 end
+local function killedByAWolf(boot)   -- a long fight with a creature: only its last half minute is filed
+  local ME, WOLF, beast, mine = "Player-1-ME", "Creature-0-1-2-3-118-Y", 0xa48, 0x511
+  for i = 1, 6 do
+    uptime, health, logged = uptime + 10, 1400 - i * 200, { 0, "SWING_DAMAGE", false, WOLF, "Prowler", beast, 0, ME, "x", mine, 0, 200, -1, 1 }
+    boot.scripts.OnEvent(boot, "COMBAT_LOG_EVENT_UNFILTERED")
+  end
+  boot.scripts.OnEvent(boot, "PLAYER_DEAD")
+end
 local function killedByAPlayer(boot)
   local ME, ROGUE, WOLF = "Player-1-ME", "Player-1-ROGUE", "Creature-0-1-2-3-118-X"
   local foe, beast, mine = 0x548, 0xa48, 0x511   -- an enemy player, an enemy creature, the character
@@ -563,7 +571,11 @@ local function killedByAPlayer(boot)
     boot.scripts.OnEvent(boot, "COMBAT_LOG_EVENT_UNFILTERED")
   end
   line(0, 1400, "SWING_DAMAGE", false, WOLF, "Prowler", beast, 0, ME, "x", mine, 0, 40, -1, 1)   -- a minute earlier: another fight
-  line(60, 1400, "SPELL_AURA_APPLIED", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 1833, "Cheap Shot", 1, "DEBUFF")
+  -- the rogue's first try, well over half a minute before the death: the same fight, since it never went quiet for long
+  line(60, 1300, "SPELL_DAMAGE", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 8676, "Ambush", 1, 100, -1, 1, nil, nil, nil, false)
+  line(10, 1300, "SPELL_CAST_SUCCESS", false, ME, "x", mine, 0, ME, "x", mine, 0, 1953, "Blink", 64)
+  line(15, 1200, "SWING_DAMAGE", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 100, -1, 1, nil, nil, nil, false)
+  line(15, 1400, "SPELL_AURA_APPLIED", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 1833, "Cheap Shot", 1, "DEBUFF")
   line(0.5, 1100, "SWING_DAMAGE", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 300, -1, 1, nil, nil, nil, false)
   line(1, 500, "SPELL_DAMAGE", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 1752, "Sinister Strike", 1, 600, -1, 1, nil, nil, nil, true)
   line(1, 500, "SPELL_CAST_SUCCESS", false, ME, "x", mine, 0, ROGUE, "Gankmaster", foe, 0, 122, "Frost Nova", 16)
@@ -738,6 +750,7 @@ if mode == "snapshot" then
   end
   if not flags:find("noloot") then goLooting(boot) end
   if flags:find("pvpdeath") then killedByAPlayer(boot) end
+  if flags:find("wolfdeath") then killedByAWolf(boot) end
   if not flags:find("nomail") then openMailbox(boot) end
   if not flags:find("noauctions") then boot.scripts.OnEvent(boot, "OWNED_AUCTIONS_UPDATED") end
   if flags:find("listings") then visitAuctionHouse(boot) end

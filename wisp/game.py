@@ -1616,8 +1616,9 @@ class Game:
         if args.get("show") is True:
             self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("How you died"), "table": deaths.card(which)})
             out["shown"] = "a card with the fight's timeline is now shown to the player: do not repeat its rows"
-        out["note"] = ("Worked out in code from the game's combat log, the last 30 seconds before the death, and only what touched the "
-                       "character. Another player is known by class and race, never by name. timeline is in order, the death at 0. "
+        out["note"] = ("Worked out in code from the game's combat log: the whole fight for a death to a player (up to three minutes), "
+                       "the last 30 seconds otherwise, and only what touched the character. The sums cover all of it; timeline is its "
+                       "last lines. Another player is known by class and race, never by name. timeline is in order, the death at 0. "
                        "held_by are the debuffs that were on the character: which of them stun, silence or slow is yours to say from "
                        "their names, as a likelihood. For 'how did I die': what did most of the damage, what held the character and "
                        "for how long, what they did in answer, then one or two things to do differently. Advice about a class or a "
@@ -2186,8 +2187,8 @@ TOOLS = [
     },
     {
         "name": "deaths",
-        "description": "How the character died: what the game's combat log showed in the last half minute before each of "
-                       "the last deaths. Without which: the deaths on record, newest first, each with who killed the "
+        "description": "How the character died: what the game's combat log showed of the fight before each of the last "
+                       "deaths: the whole fight when another player did it (up to three minutes), the last half minute otherwise. Without which: the deaths on record, newest first, each with who killed the "
                        "character (another player by class and race, or a creature), the damage taken and how long the "
                        "fight took. With which: that death in full: every enemy's share of the damage, damage by spell, "
                        "the killing blow, the debuffs that held the character and for how long, healing received, what "
@@ -2195,7 +2196,7 @@ TOOLS = [
                        "I have done', in PvP or not; with show true the player sees the timeline as a card.",
         "input_schema": {
             "type": "object",
-            "properties": {"which": {"type": "integer", "minimum": 1, "maximum": 8, "description": "1 is the latest death."},
+            "properties": {"which": {"type": "integer", "minimum": 1, "maximum": 16, "description": "1 is the latest death."},
                            "show": {"type": "boolean", "description": "true to also show the player the fight as a card."}},
             "additionalProperties": False,
         },

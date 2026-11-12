@@ -695,12 +695,14 @@ local function myKey() return tostring(GetRealmName()) .. "-" .. tostring(UnitNa
 
 -- ---- how the character died -------------------------------------------------------------------
 -- The game's own combat log, as every damage meter reads it, and only what touches this character:
--- the last half minute of it is kept in memory, and when the character dies that half minute is filed
--- as one record. Another player is written down by class and race, never by name: the name is not
+-- the last three minutes of it are kept in memory, and when the character dies the fight is filed as
+-- one record: the whole fight when another player did it (back to its first blow, three minutes at most;
+-- twenty seconds with nothing happening is where a fight began), the last half minute otherwise. Another player is written down by class and race, never by name: the name is not
 -- kept anywhere, not even in the game's own file. A creature keeps its name.
 --   WispData.deaths[character] = { { at, map, zone, level, maxHealth, pvp, who = { ... }, log = { ... } }, ... }
 --   who[i] = { class, race, level, pet = owner's index, name = a creature's }      log[j] = { seconds before death, kind, who, spell, amount, extra, health }
-local FIGHT_SECONDS, FIGHT_EVENTS, DEATHS_KEPT = 30, 160, 8
+local FIGHT_SECONDS, PVP_SECONDS, QUIET, FIGHT_EVENTS = 30, 180, 20, 400
+local KEPT = { [true] = 12, [false] = 4 }   -- deaths to a player, and others: one kind does not push the other out
 local fight, fighters, fighterOf = {}, {}, {}
 local band = bit and bit.band   -- without it a flag cannot be read, and then nothing is recorded: never a player taken for a creature
 local PLAYER_KIND, PLAYER_OWNED, HOSTILE = 0x400, 0x100, 0x40   -- the combat log's own flags: a player, something a player controls, an enemy
@@ -730,7 +732,8 @@ local function fighter(guid, name, flags)   -- who did something, as a small num
 end
 
 local function fought(kind, who, spell, amount, extra)
-  if #fight >= FIGHT_EVENTS then table.remove(fight, 1) end
+  local now = GetTime()
+  while fight[1] and (#fight >= FIGHT_EVENTS or now - fight[1].at > PVP_SECONDS) do table.remove(fight, 1) end
   fight[#fight + 1] = { at = GetTime(), kind = kind, who = who, spell = type(spell) == "string" and clip((spell:gsub("|", "")), 50) or nil,
                         amount = type(amount) == "number" and amount or nil, extra = extra, health = UnitHealth("player") }
 end
@@ -762,12 +765,20 @@ end
 
 local function died()
   local now, log, seen, pvp = GetTime(), {}, {}, false
-  for _, e in ipairs(fight) do
-    if now - e.at <= FIGHT_SECONDS then
+  -- where this fight began: back from the death until nothing had happened for a while, the last half minute always in
+  local first, later = #fight + 1, now
+  for i = #fight, 1, -1 do
+    local e = fight[i]
+    if now - e.at > PVP_SECONDS or (later - e.at > QUIET and now - e.at > FIGHT_SECONDS) then break end
+    first, later = i, e.at
+    local by = fighters[e.who]
+    if by and by.enemy and (by.player or by.pet) and (e.kind == "hit" or e.kind == "tick" or e.kind == "debuff") then pvp = true end
+  end
+  for i = first, #fight do
+    local e = fight[i]
+    if pvp or now - e.at <= FIGHT_SECONDS then   -- a death to anything else: its last half minute is enough
       log[#log + 1] = { round1(now - e.at), e.kind, e.who, e.spell or false, e.amount or false, e.extra or false, e.health or false }
       seen[e.who] = true
-      local by = fighters[e.who]
-      if by and by.enemy and (by.player or by.pet) and (e.kind == "hit" or e.kind == "tick" or e.kind == "debuff") then pvp = true end
     end
   end
   fight = {}
@@ -788,7 +799,13 @@ local function died()
   local map = C_Map.GetBestMapForUnit("player")
   mine[#mine + 1] = { at = time(), map = map, zone = mapName(map), level = UnitLevel("player"), maxHealth = UnitHealthMax("player"),
                       pvp = pvp or nil, who = who, log = log }
-  while #mine > DEATHS_KEPT do table.remove(mine, 1) end
+  local count = 0   -- the oldest of this kind go once there are too many of it
+  for i = #mine, 1, -1 do
+    if (mine[i].pvp == true) == pvp then
+      count = count + 1
+      if count > KEPT[pvp] then table.remove(mine, i) end
+    end
+  end
 end
 
 local function deathRecord()
