@@ -2228,6 +2228,10 @@ def test_game_boundary(tmp: Path):
     card = slain.cards[-1]["table"]
     assert card["title"] == "Killed by: Rogue (Undead)" and card["rows"][-1] == ["Eviscerate", "0 s", "900", "0"]
     assert card["rows"][8] == ["healing: Healing Potion", "-1 s", "+150", "650"] and len(card["columns"]) == 4, "four columns: the window is narrow"
+    # a game that keeps the combat log from addons: it is not asked for (asking is itself a blocked action there), and Wisp says so
+    closed = Game.load(make_wow_dir(tmp / "secret", flags="pvpdeath,secretvalues"))
+    assert closed.snapshot["combatLog"] is False and "deaths" not in closed.snapshot and slain.snapshot["combatLog"] is True
+    assert "does not let addons read the combat log" in run_tool(closed, "deaths", {})["error"]
     mauled = run_tool(Game.load(make_wow_dir(tmp / "pve", flags="wolfdeath")), "deaths", {})["deaths"][0]
     assert (mauled["by"], mauled["killed_by_a_player"], mauled["damage_taken"], mauled["fight_lasted_seconds"]) == ("Prowler", False, 800, 30.0), \
         "a death to a creature: the last half minute of an hour-long fight is enough"

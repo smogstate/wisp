@@ -587,6 +587,7 @@ function GetLootSlotLink(slot) return lootSlots[slot][1] and ("|cffffffff|Hitem:
 function GetLootSourceInfo(slot) return (table.unpack or unpack)(lootSlots[slot][2]) end
 function UnitGUID(unit) return unit == "player" and "Player-1-ME" or unit == "target" and targetGuid or nil end
 -- The combat log: one line at a time, as the game hands it over. A fight with another player and the death it ends in.
+if flags:find("secretvalues") then function issecretvalue() return false end end   -- a game that hides combat from addons
 local uptime, health, logged = 1000, 1400, {}
 function GetTime() return uptime end
 function UnitHealth() return health end

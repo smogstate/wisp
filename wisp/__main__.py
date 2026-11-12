@@ -115,7 +115,8 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
             from .deaths import Deaths   # the combat log, read by the addon: whether this game lets it
             fallen = len(Deaths(game.snapshot).records)
             add(t("Deaths on record"), fallen > 0, str(fallen),
-                t("none yet: the addon files the last half minute of a fight when the character dies"), optional=True)
+                t("this game does not let addons read the combat log: deaths cannot be recorded") if game.snapshot.get("combatLog") is False
+                else t("none yet: the addon files the last half minute of a fight when the character dies"), optional=True)
             if (addons / "GatherMate2").is_dir():
                 add(t("Gathering nodes in the snapshot"), game.gathering.total > 0,
                     t("{places} places of {kinds} kinds", places=game.gathering.total, kinds=len(game.gathering.nodes)),

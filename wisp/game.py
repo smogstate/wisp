@@ -1725,6 +1725,9 @@ class Game:
             return {"error": self.problem}
         from .deaths import Deaths
         deaths = Deaths(self.snapshot)
+        if self.snapshot.get("combatLog") is False and not deaths.records:
+            return {"error": "This game does not let addons read the combat log (WoW Forever keeps it from them), so Wisp's addon "
+                             "cannot record how the character died, and does not try. Nothing about a death is in Wisp's data."}
         if not deaths.records:
             return {"deaths": [], "note": "No death is on record. Wisp's addon keeps the last half minute of the game's combat log and "
                                           "files it when the character dies; it reaches Wisp at the next logout or /wisp sync. "

@@ -6,6 +6,24 @@ Backlog from the 2026-11-09 design session. Nothing here is committed.
 
 Denis: "write down, we come to this later". Known gaps as of commit `4a49a2c`, none of them started.
 
+### Warcraft Logs comparison — for later (Denis, 2026-11-12)
+
+Denis: "for future: we will add wow logs comparison, check their API". Checked the same day, from public pages only (the official docs pages refused an automated read, so the details below are second-hand and need a real look before anything is built):
+
+- **The API is GraphQL (v2), with OAuth.** A client-credentials token gives public data: reports, fights, their events, rankings and a character's parses. Private reports need the user flow. The player would make their own API client, as with Blizzard's. The budget is a number of points per hour; Archon (who run the site) began testing tighter limits for heavy requests on 2026-10-20.
+- **No WoW Forever site was found.** A public issue from late October says `forever.warcraftlogs.com` answers 404 and nothing was announced. Without it there is nothing to compare against.
+- **Their data is what players upload** from the game's own combat log file, mostly raids and dungeons. A comparison would be the character's parses against others of its class, not PvP.
+- **Whether Forever still writes that log file** (`/combatlog`) was not found. It matters twice: for Warcraft Logs, and as the only way left to read a fight at all (below).
+
+### The combat log is closed to addons on WoW Forever — found 2026-11-12
+
+While checking the above: several addon-development sources say that on WoW Forever (as on Retail since 12.0) an addon cannot read the combat log. `CombatLogGetCurrentEventInfo` is not available to addon code, registering `COMBAT_LOG_EVENT_UNFILTERED` is itself a blocked action that warns the player, and values such as the player's health come back as "secret values" that cannot be compared or added. Not verified on Denis's own client.
+
+What that means for Wisp:
+
+- **"How you died" very likely records nothing on WoW Forever.** It was built the same day on the assumption that the log could be read, and marked unconfirmed. The addon now does not ask for the combat log where the game has secret values (`issecretvalue` exists), so there is no warning on screen; Wisp says that deaths cannot be read in this game. On a game without secret values it works as built.
+- **The only other source of a fight is the combat log file** the game itself writes when logging is on, if Forever writes one. Reading it would be reading a file the game puts on disk, like the saved variables; it is still a decision for Denis, since `Red-Lines.md` says no live data leaves the game.
+
 ### How you died (PvP): what the record does not see
 
 The feature works on the test fight; a real fight shows more than it keeps.

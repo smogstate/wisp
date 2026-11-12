@@ -844,6 +844,10 @@ local function myKey() return tostring(GetRealmName()) .. "-" .. tostring(UnitNa
 -- kept anywhere, not even in the game's own file. A creature keeps its name.
 --   WispData.deaths[character] = { { at, map, zone, level, maxHealth, pvp, who = { ... }, log = { ... } }, ... }
 --   who[i] = { class, race, level, pet = owner's index, name = a creature's }      log[j] = { seconds before death, kind, who, spell, amount, extra, health }
+-- A game with "secret values" (WoW Forever, Retail since 12.0) keeps the combat log from addons: there even
+-- registering for it is a blocked action, and the player gets a warning for it. So where the game has secret
+-- values the log is not asked for at all, nothing is recorded, and Wisp says that deaths cannot be read here.
+local COMBAT_LOG_OPEN = type(issecretvalue) ~= "function"
 local FIGHT_SECONDS, PVP_SECONDS, QUIET, FIGHT_EVENTS = 30, 180, 20, 400
 local KEPT = { [true] = 12, [false] = 4 }   -- deaths to a player, and others: one kind does not push the other out
 local fight, fighters, fighterOf = {}, {}, {}
@@ -1860,6 +1864,7 @@ local function buildSnapshot()
     listings = ladders,
     xp = progress,
     deaths = deaths,
+    combatLog = COMBAT_LOG_OPEN,   -- whether this game lets an addon read the combat log at all
     itemSkill = okS and needs or nil,
     trainerWindows = okT and taught or nil,
     vendor = vendor,
@@ -2088,8 +2093,10 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("TRAINER_SHOW")
 frame:RegisterEvent("TRAINER_UPDATE")
-frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-frame:RegisterEvent("PLAYER_DEAD")
+if COMBAT_LOG_OPEN then   -- never on a game that forbids it: see "how the character died"
+  frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+  frame:RegisterEvent("PLAYER_DEAD")
+end
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("TRADE_SKILL_SHOW")
@@ -2128,9 +2135,9 @@ frame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then
     pcall(trainerSeen)
   elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-    pcall(combatLogged)
+    if COMBAT_LOG_OPEN then pcall(combatLogged) end
   elseif event == "PLAYER_DEAD" then
-    pcall(died)
+    if COMBAT_LOG_OPEN then pcall(died) end
   elseif event == "PLAYER_XP_UPDATE" then
     pcall(xpChanged)
   elseif event == "QUEST_TURNED_IN" then

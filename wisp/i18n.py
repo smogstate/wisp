@@ -79,6 +79,7 @@ RU = {
     "Trainers, books and quests as Questie lists them. A trainer's title often says the rank it teaches.": "Учителя, книги и задания по данным Questie. Звание учителя часто говорит, какому рангу он учит.",
     # how the character died (wisp/deaths.py)
     "Deaths on record": "Записано смертей",
+    "this game does not let addons read the combat log: deaths cannot be recorded": "эта игра не даёт аддонам читать журнал боя: записать гибель нельзя",
     "What happened": "Что произошло",
     "none yet: the addon files the last half minute of a fight when the character dies": "пока нет: аддон записывает последние полминуты боя, когда персонаж погибает",
     "a player": "игрок",
