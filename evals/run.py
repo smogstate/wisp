@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT), str(ROOT / "tests"), str(ROOT / "evals")]
 
 import test_mvp   # noqa: E402  the test game, and the tests' clock
-from cases import CASES   # noqa: E402
+from cases import CASES, RU_NAMES   # noqa: E402
 from wisp import i18n, llm   # noqa: E402
 from wisp.assets import Assets   # noqa: E402
 from wisp.game import Game   # noqa: E402
@@ -65,6 +65,25 @@ def new_game(wow: Path) -> Game:
     return game
 
 
+def russian(wow: Path) -> Path:
+    """The same saved game with its names in Russian, as on a Russian client: see cases.RU_NAMES."""
+    def renamed(found):
+        try:
+            text = base64.b64decode(found.group(2)).decode("utf-8")
+        except ValueError:
+            return found.group(0)   # a key, not packed data
+        for english in sorted(RU_NAMES, key=len, reverse=True):
+            text = text.replace(english, RU_NAMES[english])
+        return f'{found.group(1)} = "{base64.b64encode(text.encode("utf-8")).decode()}"'
+    out = Path(tempfile.mkdtemp(prefix="wisp-eval-game-ru-"))
+    saved = wow / "WTF/Account/TEST/SavedVariables/Wisp.lua"
+    there = out / saved.relative_to(wow)
+    there.parent.mkdir(parents=True)
+    there.write_text(re.sub(r'^(Wisp(?:Snapshot|Quests|Items|Recipes)) = "([^"]*)"', renamed, saved.read_text(encoding="utf-8"), flags=re.M),
+                     encoding="utf-8")
+    return out
+
+
 class Scripted:
     """A stand-in model that plays a written answer: per question, its tool calls, then its text."""
     provider, research, model = "scripted", False, "scripted"
@@ -97,9 +116,9 @@ class Scripted:
             yield {"type": "end", "reason": "end_turn", "calls": []}
 
 
-def run_case(case, wow, make_chat, ceiling=180):
+def run_case(case, games, make_chat, ceiling=180):
     """One conversation through the real answer(). Returns everything the grader and the trace need."""
-    game, chat = new_game(wow), make_chat(case)
+    game, chat = new_game(games[case.get("game", "en")]), make_chat(case)
     questions = [case["ask"]] if isinstance(case["ask"], str) else case["ask"]
     started = time.monotonic()
     # ponytail: the ceiling is checked between requests only; one hung request waits for the SDK's own timeout
@@ -172,11 +191,12 @@ def serve(wow: Path, log: Path):
         print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}, ensure_ascii=False), flush=True)
 
 
-def run_case_cli(case, wow, model, ceiling=300):
+def run_case_cli(case, games, model, ceiling=300):
     """The same case through `claude -p`: Wisp's system prompt and tools, but Claude Code's loop
     in place of answer(). So what differs from the window: the tools are named mcp__wisp__<name>,
     the round limit is --max-turns instead of MAX_HOPS with its "last lookup" nudge, and Claude Code
     adds a little of its own to the prompt. Good for 'right tool, true answer'; not a test of answer()."""
+    wow = games[case.get("game", "en")]
     work = Path(tempfile.mkdtemp(prefix="wisp-eval-cli-"))   # empty: no project instructions leak in
     log, config, session = work / "calls.jsonl", work / "mcp.json", str(uuid.uuid4())
     config.write_text(json.dumps({"mcpServers": {"wisp": {
@@ -311,6 +331,7 @@ def main():
 
     i18n.set_language("ru")
     wow = test_mvp.make_wow_dir(Path(tempfile.mkdtemp(prefix="wisp-eval-game-")), flags="questindex,alts,rewards")
+    wow = {"en": wow, "ru": russian(wow)}
     only = set(filter(None, args.only.split(",")))
     cases = [c for c in CASES if not only or c["id"] in only]
     assert len({c["id"] for c in CASES}) == len(CASES), "two cases share an id"

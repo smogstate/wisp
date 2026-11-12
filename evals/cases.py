@@ -14,6 +14,7 @@ A case:
   never       patterns that must not be in the assistant's own text
   card        patterns found on the cards (a card's game command is read decoded)
   card_never  patterns that must not be on the cards
+  game        "ru": asked on the test game with Russian names (RU_NAMES), as on Denis's client
   lang        the language the answer must be in: that of the question
   oracle      per question: (tool calls, text) of a right answer. `run.py --check`
               plays it through the real tools and requires every check to pass,
@@ -27,6 +28,30 @@ def money(*parts):
     units = {"g": "gз", "s": "sс", "c": "cм"}
     return r"(?<!\d)" + r"\W{0,3}".join(rf"{p[:-1]}\s?[{units[p[-1]]}]\w*" for p in parts)
 
+
+# The test game speaks English; Denis's client is Russian. For the cases marked "game": "ru" the runner renames
+# everything below throughout the saved game (run.russian), longest name first, so that names are searched for the
+# way a Russian player writes them. The names only have to be Russian and consistent, not Blizzard's own wording.
+RU_NAMES = {
+    "Scout through the Jasperlode Mine": "Разведать Яшмовую шахту",
+    "Eagan |cffff0000Peltskinner": "Иган |cffff0000Шкуродер", "Eagan Peltskinner": "Иган Шкуродер",
+    "Bolt of Silk Cloth": "Рулон шелка", "Bolt of Linen Cloth": "Рулон льняной ткани", "Silk Cloth": "Шелк",
+    "Linen Cloth": "Льняная ткань", "Azure Silk Hood": "Лазурный шелковый капюшон", "Small Silk Pack": "Маленькая шелковая сумка",
+    "Blue Dye": "Синяя краска", "Fine Thread": "Тонкая нить", "Copper Ore": "Медная руда", "Copper Vein": "Медная жила",
+    "Tough Wolf Meat": "Жесткое волчье мясо", "Charred Wolf Meat": "Обугленное волчье мясо",
+    "Herb Baked Egg": "Яйцо с травами", "Recipe: ": "Рецепт: ", "Pattern: ": "Выкройка: ", "Not Learned Yet": "Неизученная накидка",
+    "Miner's Cape": "Плащ рудокопа", "Kobold Mining Shovel": "Кобольдская лопата", "Huge Gnoll Claw": "Огромный коготь гнолла",
+    "Rhahk'Zor's Hammer": "Молот Рак'Зора", "Rhahk'Zor": "Рак'Зор", "Rockslicer": "Камнерез", "Peacebloom": "Мироцвет",
+    "Marshal Dughan": "Маршал Дуган", "Gryan Stoutmantle": "Гриан Камнегрив", "Edwin VanCleef": "Эдвин ван Клиф",
+    "Alexandra Bolero": "Александра Болеро", "Roaming Mob": "Бродячий волк", "Prowler": "Крадущийся зверь",
+    "Wanted Poster": "Объявление о розыске", "Rudra Amberstill": "Рудра Янтарь",
+    "Wolves Across the Border": "Волки на границе", "The Jasperlode Mine": "Яшмовая шахта", "A Fishy Peril": "Рыбная напасть",
+    "An Unwelcome Guest": "Незваный гость", "Wanted: Hogger": "Разыскивается: Дробитель", "Protecting the Herd": "Защита стада",
+    "What Comes Around": "Что посеешь", "Back to Billy": "Назад к Билли", "The Defias Brotherhood": "Братство Справедливости",
+    "Kobold Camp Cleanup": "Зачистка лагеря кобольдов",
+    "Elwynn Forest": "Элвиннский лес", "Westfall": "Западный Край", "Stormwind City": "Штормград", "Dun Morogh": "Дун Морог",
+    "The Deadmines": "Мертвые копи", "Hall of Thanes": "Зал Танов", "Ironforge": "Стальгорн",
+}
 
 EGG = [("recipes", {"search": "Herb Baked Egg"})]
 PATTERN = [("recipes", {"search": "Not Learned Yet"})]
@@ -92,6 +117,7 @@ CASES = [
     {"id": "craft-bolt-profit", "tags": ["crafting", "gold"], "lang": "ru",
      "ask": "Сколько я заработаю на одном Bolt of Silk Cloth, если сделаю и продам?",
      "tools": ["gold|recipes|craft_plan|craft_tree|item_uses"], "say": [money("3s"), money("18s") + "|" + money("21s")],
+     "never": [money("19s")],   # its own 4 × 4s 50c, once worked out as 19s
      "oracle": [([("gold", {"view": "crafts"})],
                  "Материалы 18s, продаётся за 21s: прибыль 3s с одного.")]},
     {"id": "craft-what-pays", "tags": ["crafting", "gold"], "lang": "ru",
@@ -134,6 +160,7 @@ CASES = [
     {"id": "quest-by-name", "tags": ["quests", "any-quest"], "lang": "ru",
      "ask": "Найди задание The Defias Brotherhood: кто его даёт и где?",
      "tools": ["quest_search"], "say": ["Gryan Stoutmantle", "Westfall|Западн"],
+     "never": [r"155[^.\n]{0,80}(недоступ|нужен 14|не открыт)", r"(недоступ|не открыт)[^.\n]{0,60}\b155\b"],
      "oracle": [([("quest_search", {"name": "The Defias Brotherhood"})],
                  "Его даёт Gryan Stoutmantle в Westfall.")]},
     {"id": "quest-why-closed", "tags": ["quests", "any-quest"], "lang": "ru",
@@ -232,6 +259,55 @@ CASES = [
      "ask": "Сколько я нафармил и где?",
      "tools": ["farming"], "say": ["Elwynn", money("21s", "53c")],
      "oracle": [([("farming", {"view": "spots"})], "В Elwynn Forest: добычи на 21s 53c.")]},
+
+    # --- a Russian client: names written the way a player writes them, endings and all ---
+    {"id": "ru-recipe-drop", "tags": ["russian-names", "recipes"], "lang": "ru", "game": "ru",
+     "ask": "Где взять рецепт яйца с травами?",
+     "tools": ["recipes|item_links"], "say": ["Бродячий волк|Крадущийся зверь|ван Клиф"],
+     "oracle": [([("recipes", {"search": "Яйцо с травами"})],
+                 "Рецепт падает с Бродячий волк, Крадущийся зверь и с Эдвин ван Клиф в подземелье.")]},
+    {"id": "ru-pattern-seller", "tags": ["russian-names", "recipes"], "lang": "ru", "game": "ru",
+     "ask": "Где купить выкройку неизученной накидки?",
+     "tools": ["recipes|item_links"], "say": ["Александра Болеро", "Штормград"],
+     "oracle": [([("recipes", {"search": "Неизученная накидка"})], "Её продаёт Александра Болеро, Штормград.")]},
+    {"id": "ru-craft-hood", "tags": ["russian-names", "crafting"], "lang": "ru", "game": "ru",
+     "ask": "Что нужно на 3 лазурных шелковых капюшона?",
+     "tools": ["craft_tree"], "args": {"craft_tree": {"quantity": 3}}, "say": ["Шелк", "Синяя краска", r"\b20\b"],
+     "oracle": [([("craft_tree", {"item": "Лазурный шелковый капюшон", "quantity": 3})],
+                 "Нужно 20 Шелк, 6 Синяя краска и 3 Тонкая нить; докупить только 1 Синяя краска.")]},
+    {"id": "ru-craft-shopping", "tags": ["russian-names", "crafting"], "lang": "ru", "game": "ru",
+     "ask": "Собери список покупок на 3 лазурных шелковых капюшона",
+     "tools": ["craft_tree|shopping_list"], "card": [r"auctionator[^}]*Синяя краска"], "card_never": [r'auctionator[^}]*"Шелк"'],
+     "oracle": [([("craft_tree", {"item": "Лазурный шелковый капюшон", "quantity": 3, "show": True})],
+                 "Список на карточке: докупить нужно только 1 Синяя краска.")]},
+    {"id": "ru-silk-uses", "tags": ["russian-names", "crafting"], "lang": "ru", "game": "ru",
+     "ask": "Куда идёт шелк, во что его превращают?",
+     "tools": ["item_uses|item_links"], "say": ["Рулон шелка", "Лазурный шелковый капюшон"],
+     "oracle": [([("item_uses", {"item": "Шелк"})], "Из него делают Рулон шелка, а дальше Лазурный шелковый капюшон.")]},
+    {"id": "ru-quest-xp", "tags": ["russian-names", "quests"], "lang": "ru", "game": "ru",
+     "ask": "Сколько опыта дадут за квест волки на границе?",
+     "tools": ["quests|quest_search|questing_route"], "text": [r"\b460\b"],
+     "oracle": [([("quest_search", {"name": "волков на границе"})], "За Волки на границе дадут 460 опыта.")]},
+    {"id": "ru-quest-by-name", "tags": ["russian-names", "quests"], "lang": "ru", "game": "ru",
+     "ask": "Кто даёт задание братства справедливости и где он стоит?",
+     "tools": ["quest_search"], "say": ["Гриан Камнегрив", "Западный Край"],
+     "oracle": [([("quest_search", {"name": "Братство Справедливости"})], "Его даёт Гриан Камнегрив, Западный Край.")]},
+    {"id": "ru-quest-rewards", "tags": ["russian-names", "quests"], "lang": "ru", "game": "ru",
+     "ask": "Что дадут за Яшмовую шахту?",
+     "tools": ["quests|quest_search"], "say": [r"\b700\b", "Плащ рудокопа", "Кобольдская лопата"],
+     "oracle": [([("quests", {})], "700 опыта, 3с 50м, Плащ рудокопа и на выбор: 5 × Шелк или Кобольдская лопата.")]},
+    {"id": "ru-prices", "tags": ["russian-names", "auction"], "lang": "ru", "game": "ru",
+     "ask": "Почём сейчас шелк и рулоны шелка на аукционе?",
+     "tools": ["auction_prices|price_history"], "say": [money("4s", "50c"), money("21s")],
+     "oracle": [([("auction_prices", {"items": ["Шелк", "Рулон шелка"]})], "Шелк 4с 50м, Рулон шелка 21с.")]},
+    {"id": "ru-thread-waypoint", "tags": ["russian-names", "waypoint"], "lang": "ru", "game": "ru",
+     "ask": "Поставь метку на продавца тонкой нити",
+     "tools": ["item_links|recipes", "waypoint"], "card": ["Александра Болеро", r"43\.2"],
+     "oracle": [([("item_links", {"item": "Тонкая нить"}), ("waypoint", {"refs": ["i2321.vendor.1.1"]})], "Метка готова.")]},
+    {"id": "ru-elite", "tags": ["russian-names", "quests"], "lang": "ru", "game": "ru",
+     "ask": "Какие элитные задания мне сейчас доступны?",
+     "tools": ["available_quests"], "say": ["Дробитель", "Защита стада"], "never": ["Hogger", "Рыбная напасть"],
+     "oracle": [([("available_quests", {"kind": "elite"})], "Разыскивается: Дробитель и Защита стада.")]},
 
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",

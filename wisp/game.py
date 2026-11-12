@@ -1247,9 +1247,11 @@ class Game:
         if show not in ("skill_up", "all"):
             return {"error": "show must be skill_up or all"}
         if isinstance(search, str) and search.strip():   # one recipe by name, learned or not, and how to come by it
-            words = _clean(search, 80).lower().split()
-            hits = [r for r in [r for b in books for r in b["recipes"]] + self.crafting.world_recipes   # and every other recipe in the game
-                    if all(w in (r["name"] + " " + (self.crafting.name(r["makes"]) if r["makes"] else "")).lower() for w in words)]
+            from .questdb import best   # by the recipe's name or by what it makes, endings and case as the player wrote them
+            pool = [r for b in books for r in b["recipes"]] + self.crafting.world_recipes   # and every other recipe in the game
+            wanted = _clean(search, 80)
+            hits = [pool[i] for i in dict.fromkeys(best(wanted, [(i, r["name"]) for i, r in enumerate(pool)])
+                                                   + best(wanted, [(i, self.crafting.name(r["makes"])) for i, r in enumerate(pool) if r["makes"]]))]
             if not hits:
                 return {"found": 0, "note": "No recipe of the professions read so far is named like that ("
                                             + ", ".join(b["profession"] for b in books) + "). The game lists a profession's recipes, "
@@ -1646,7 +1648,8 @@ class Game:
             return None, {"error": "item must be an item name"}
         found = self.graph.find(name)
         if not found:
-            return None, {"error": f"Wisp knows no item named like '{name}'. Names are as the player's game writes them."}
+            return None, {"error": f"Wisp knows no item named like '{name}'. Names are as the player's game writes them, in the "
+                                   "language of their game: ask with the player's own words, not a translation."}
         if len(found) > 1:
             return None, {"several_items_match": [self.graph.names[i] for i in found], "note": "Ask again with one of these names exactly."}
         return found[0], None
@@ -1688,6 +1691,9 @@ class Game:
                        "bags and bank, as each was at its own last logout; already_held says where. to_buy is what is left. who_can is "
                        "information only: another player can do a craft for them, so a missing profession is no obstacle. Prices "
                        "are the lowest listings from the player's own scans. A craft that makes several at once may leave some over. "
+                       "all_materials_worth is every material at its listed price, held or not (a held one could be sold instead), "
+                       "and profit_over_materials is product_listed_for less that, before the auction house's cut: for 'what do I "
+                       "earn making X' give these two as they are, never a sum of your own. "
                        + self._recipes_note())
         return out
 
@@ -2293,11 +2299,16 @@ investments are doing, call investments and show the card: every figure there is
 bought and sold at the auction house is in auction_ledger, from the house's own mail; where investments lists such \
 mail that is not recorded, offer it once and record it with from_mail only on a yes.
 
+Everything in the tools is named in the language of the player's game. Look a name up in the words the player used, in \
+their language, as the dictionary form of what they wrote; never translate a name into another language to search for it.
+
 Never state a quest id, an NPC, a location or coordinates from memory. WoW Forever differs from every earlier version \
 of the game, so what you remember is unreliable. If the tools do not have something, say that plainly.
 
-For professions, recipes and their materials come only from the recipes tool, and every quantity and cost from \
-craft_plan: choose what to craft and how many times, and let it do the sums. Once you have chosen, always call \
+For what one item takes to make, or a shopping list for it, call craft_tree (with show true for the list): it goes down \
+to raw materials and counts what every character of the player's already holds. For professions otherwise (what to craft \
+to level, a plan of several recipes), recipes and their materials come only from the recipes tool, and every quantity and \
+cost from craft_plan: choose what to craft and how many times, and let it do the sums. Once you have chosen, always call \
 shopping_list with those crafts: it shows the player the plan as a card with the steps, the materials, what the bags \
 cover, what to buy and the cost. Your text then adds at most two short sentences the card cannot say, such as why this \
 order or what is uncertain; never repeat its steps or numbers. Prices are the player's own last auction \
@@ -2332,7 +2343,7 @@ links name the node an item is gathered from; from there, ask gathering for its 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
 into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.
 
-Answer in the player's language, but write every name (quest, item, creature, person, place) exactly as the tools \
+Answer in the language the player's own words are in, whatever language the names in their question are in, but write every name (quest, item, creature, person, place) exactly as the tools \
 give it: never translate or respell a name, the player searches the game by it. Be brief: this is read in a narrow window between fights. Never a wall of text: when \
 there are steps or several items, put each on its own short line, numbered when the order matters. Plain text only: no \
 markdown symbols and no tables."""

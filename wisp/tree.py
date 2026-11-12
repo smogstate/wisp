@@ -136,6 +136,15 @@ def breakdown(game, item: int, quantity: int) -> dict:
     listed = cost_of(item)
     if listed is not None:
         out["product_listed_for"] = coins(listed * quantity)
+    # What the materials are worth whether held or bought: a held material is not free, it could be sold instead.
+    # Worked out here so that the profit is never the model's own sum.
+    worths = [cost_of(some) for some in set(raw) | set(taken)]
+    if None not in worths:
+        worth = sum(cost_of(some) * (raw.get(some, 0) + sum(taken.get(some, {}).values())) for some in set(raw) | set(taken))
+        out["all_materials_worth"] = coins(worth)
+        if listed is not None:
+            gain = listed * quantity - worth
+            out["profit_over_materials"] = ("-" if gain < 0 else "+") + coins(abs(gain))
     if dearer:
         out["cheaper_to_buy_than_to_make"] = dearer[:10]
     elsewhere = [f"{r['item']}: {r['_where']}" for r in rows if r["_where"]]

@@ -55,8 +55,33 @@ def _ids(value) -> list[int]:
 
 
 def fold(text: str) -> str:
-    """For matching names as people type them: case, ё/е and punctuation do not matter."""
-    return " ".join(re.sub(r"[^\w]+", " ", str(text).casefold().replace("ё", "е")).split())
+    """For matching names as people type them: case, ё/е, й/и and punctuation do not matter."""
+    return " ".join(re.sub(r"[^\w]+", " ", str(text).casefold().replace("ё", "е").replace("й", "и")).split())
+
+
+def stems(text: str) -> list[str]:
+    """A name's words without their endings: 'тонкую нить' is 'Тонкая нить', 'рулоны шелка' is 'Рулон шелка', 'eggs' is 'Egg'.
+    ponytail: the last letter or two cut off, no dictionary; a real stemmer if this ever mismatches."""
+    return [w if len(w) <= 3 else w[:-1] if len(w) == 4 else w[:-2] for w in fold(text).split()]
+
+
+def best(query: str, names) -> list:
+    """The keys of the names a typed query means, best first; names is (key, name) pairs.
+    The exact name alone; else every name holding the query's words, as written or by their stems
+    (a player writes a name in whatever case their sentence needs), those of the query's own length
+    first ('шелка' is 'Шелк' before it is 'Рулон шелка'), shorter names first."""
+    wanted = fold(query)
+    if not wanted:
+        return []
+    folded = [(key, fold(name)) for key, name in names]
+    exact = [key for key, text in folded if text == wanted]
+    if exact:
+        return exact
+    words, cut = wanted.split(), stems(query)
+    near = [(key, text) for key, text in folded
+            if all(w in text for w in words) or all(any(part.startswith(s) for part in text.split()) for s in cut)]
+    same = [n for n in near if len(n[1].split()) == len(words)]
+    return [key for key, text in sorted(same or near, key=lambda n: (len(n[1]), n[1], str(n[0])))]
 
 
 class QuestDB:

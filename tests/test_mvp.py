@@ -2008,7 +2008,9 @@ def test_whole_graph(tmp: Path):
     # the card's button makes the shopping list for exactly what is missing
     listed = stub("paste", card["wisp"])
     assert 'LIST Azure Silk Hood = "Blue Dye";6' in listed, listed
-    run_tool(game, "craft_tree", {"item": "Bolt of Silk Cloth", "show": True})
+    bolts = run_tool(game, "craft_tree", {"item": "Bolt of Silk Cloth", "show": True})
+    assert (bolts["all_materials_worth"], bolts["profit_over_materials"]) == ("18s", "+3s"), \
+        "the cloth is held, so nothing is bought, yet it is worth 18s: the profit is worked out here, not by the model"
     assert "wisp" not in game.cards[-1] and game.cards[-1]["table"]["sub"].startswith("nothing to buy: you hold it all"), "all held: no button"
     # a profession nobody of the player's has: still broken down, and it says who cannot
     egg = run_tool(game, "craft_tree", {"item": "Herb Baked Egg"})
@@ -2126,6 +2128,19 @@ def test_quest_rewards(tmp: Path):
     assert quiet[0]["xp"] == 450 and "reward_items" not in quiet[1] and "money" not in quiet[1], "a silent game: Questie's experience, no rewards listed"
 
 
+def test_names_as_typed():
+    """A name is found the way a player writes it: Russian endings, ё, a plural; and the plain item before a longer one."""
+    from wisp.questdb import best
+    names = [(1, "Шелк"), (2, "Рулон шелка"), (3, "Тонкая нить"), (4, "Лазурный шелковый капюшон"), (5, "Яйцо с травами"),
+             (6, "Silk Cloth"), (7, "Bolt of Silk Cloth"), (8, "Herb Baked Egg")]
+    for typed, found in (("шелка", 1), ("шёлк", 1), ("рулоны шелка", 2), ("тонкую нить", 3), ("тонкой нити", 3),
+                         ("лазурных шелковых капюшона", 4), ("яиц с травами", 5), ("яйца с травами", 5),
+                         ("silk cloth", 6), ("bolts of silk cloth", 7), ("eggs", 8)):
+        assert best(typed, names)[:1] == [found], (typed, best(typed, names))
+    assert best("silk", names) == [6, 7], "several: the shorter name first, and the caller asks which"
+    assert best("мифрил", names) == [] and best("  ", names) == []
+
+
 def test_eval_cases():
     """The assistant's eval (evals/) stays answerable: each case's written right answer still
     passes on this test game, and an empty answer does not. Free: no model is asked."""
@@ -2198,5 +2213,6 @@ if __name__ == "__main__":
         test_localization(Path(loc))
     with tempfile.TemporaryDirectory() as u:
         test_update(Path(u))
+    test_names_as_typed()
     test_eval_cases()
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))
