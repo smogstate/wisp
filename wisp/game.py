@@ -1691,7 +1691,10 @@ class Game:
         if not self.graph.trainers_read:
             out["trainers_note"] = ("Wisp's addon has not read Questie's list of trainers yet: it does after the next login, and the "
                                     "list is here after the logout or /wisp sync that follows.")
-        if args.get("show") is True:
+        elif not known:   # read, and empty for this one: not the same as 'never visited'
+            out["trainers_note"] = ("Questie's list, which Wisp has read, names no trainer of this profession that this character can "
+                                    "talk to. That list does not depend on where the player has been.")
+        if args.get("show") is True and (steps or people):   # an empty card says nothing
             def zone(people_):   # a seller's places are a list, a quest giver's one place
                 where = people_[0].get("where") if people_ else None
                 where = where[0] if isinstance(where, list) and where else where
@@ -1709,9 +1712,9 @@ class Game:
         out["note"] = ("A profession as a path, from data kept between sessions. can_rise_to is the cap of the rank the character has: "
                        "skill cannot pass it until the next rank is learned. steps are the ways it goes on, in order of at_skill: the "
                        "skill at which a step can be taken, as the game itself states it (a book says it on itself, a quest needs it, a "
-                       "trainer's window listed it when the player stood there). at_skill null: the game has not said yet (a trainer "
-                       "never visited, a book not read by the game yet): say it is not known, never fill it in. next_for_the_character "
-                       "is worked out from that list: give it as it is. trainers are who trains the profession and where, the "
+                       "trainer's window listed it when the player stood there). at_skill null means the game has not said yet (a trainer "
+                       "never visited, a book the game has not described yet): such a skill is unknown and no number is given for "
+                       "it. next_for_the_character is worked out from that list and is given as it is. trainers are who trains the profession and where, the "
                        "character's own zone first; a title often says the rank. Every place has a ref for the waypoint tool. Answer "
                        "for the skill asked about first, then where this character stands.")
         return out

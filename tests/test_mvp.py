@@ -2284,13 +2284,17 @@ def test_profession_path(tmp: Path):
     assert tailoring["next_for_the_character"] == {"can_be_taken_at_its_skill": [],
                                                    "the_next_one_after": [{"how": "trainer", "what": "Tailoring (Artisan)", "at_skill": 200}]}
     assert "professions" in path("Juggling") and "trainers_note" not in fishing
+    cards = len(game.cards)
+    none = run_tool(game, "profession_path", {"profession": "Enchanting", "show": True})
+    assert none["steps"] == [] and "names no trainer" in none["trainers_note"] and "shown" not in none and len(game.cards) == cards, \
+        "nothing on record for a profession: said why, and no empty card"
     shown = run_tool(game, "profession_path", {"profession": "Fishing", "show": True})
     assert game.cards[-1]["table"]["rows"] == [["Quest: Nat Pagle, Angler Extreme — Gryan Stoutmantle", "Westfall", "225"],
                                                ["Old Tom Reel (Fishing Trainer)", "Elwynn Forest", "–"]] and "shown" in shown
     waypoint = run_tool(game, "waypoint", {"refs": [fishing["trainers"][0]["where"][0]["ref"]]})
     assert waypoint["shown"] == 1 and "Old Tom Reel" in game.cards[-1]["lines"][0]["text"], "a trainer's place can be sent to the game"
     old = run_tool(Game.load(make_wow_dir(tmp / "old", flags="questindex")), "profession_path", {"profession": "Fishing"})
-    assert old["trainers"] == [] and old["steps"] == [] and "trainers_note" not in old, "Questie without that list: none, and nothing promised"
+    assert old["trainers"] == [] and old["steps"] == [] and "names no trainer" in old["trainers_note"], "Questie without that list: none, and said so"
 
 
 def test_eval_cases():
