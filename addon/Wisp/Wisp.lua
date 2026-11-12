@@ -206,13 +206,28 @@ local function indexKey(DB, pointers, ...)
   local okV, version = pcall(meta, "Questie", "Version")
   local count = 0
   for _ in pairs(pointers) do count = count + 1 end
-  return table.concat({ "f3", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f3: texts cut between letters
+  return table.concat({ "f4", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f4: the game's own names for items
 end
 
 local function questIndexKey(DB)
   local _, race = UnitRace("player")
   local _, class = UnitClass("player")
   return indexKey(DB, DB.QuestPointers, tostring(race), tostring(class))
+end
+
+-- An item's name as the game itself writes it, in the player's language, when the game has the item at hand
+-- (it has, for anything it has shown: an auction scan covers most materials). Asks the server nothing.
+local function ownItemName(id)
+  local kept = type(WispData) == "table" and type(WispData.items) == "table" and WispData.items[id]
+  if type(kept) == "string" and kept ~= "" then return kept end
+  local I = C_Item
+  if I and I.IsItemDataCachedByID and I.GetItemNameByID then
+    local okC, cached = pcall(I.IsItemDataCachedByID, id)
+    if okC and cached then
+      local okN, name = pcall(I.GetItemNameByID, id)
+      if okN and type(name) == "string" and name ~= "" then return name end
+    end
+  end
 end
 
 local function ask(fn, id, field)   -- one field of one Questie record, or nil
@@ -356,6 +371,7 @@ local function buildQuestIndex(DB, ZoneDB, key)
   local npcs = named(DB.QueryNPCSingle, wantNpc, true)
   local objects = named(DB.QueryObjectSingle, wantObject, true)
   local items = named(DB.QueryItemSingle, wantItem, false)
+  for _, entry in ipairs(items) do entry.name = ownItemName(entry.id) or entry.name end
   return { v = 1, key = key, quests = quests, npcs = npcs, objects = objects, items = items, maps = maps }
 end
 
@@ -400,7 +416,7 @@ local function buildItemIndex(DB, ZoneDB, key)
   for i, id in ipairs(order) do
     if i % QUESTS_PER_SLICE == 0 then coroutine.yield() end
     if #items >= 30000 then break end
-    local name = ask(Q, id, "name")
+    local name = ownItemName(id) or ask(Q, id, "name")   -- Questie's may be English where the game's is not
     if type(name) == "string" and name ~= "" then
       local vendors, drops, objects = {}, ids(ask(Q, id, "npcDrops")) or {}, ids(ask(Q, id, "objectDrops")) or {}
       for _, npc in ipairs(ids(ask(Q, id, "vendors")) or {}) do

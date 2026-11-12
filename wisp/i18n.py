@@ -181,6 +181,7 @@ RU = {
     "item 4306 is {name}; an item has: {fields}": "предмет 4306 — {name}; поля предмета: {fields}",
     "Blizzard API: skill a recipe needs": "API Blizzard: навык, нужный для рецепта",
     "fields that may hold it: {fields}": "поля, где он может быть: {fields}", "no such field; a tier has: {fields}": "такого поля нет; поля ступени: {fields}",
+    "Blizzard API: lists of names": "API Blizzard: списки названий",
     "Blizzard API: professions": "API Blizzard: профессии", "no professions listed": "профессии не перечислены", "{n}: {names}": "{n}: {names}",
     "Blizzard API: recipes": "API Blizzard: рецепты",
     "{profession} has no skill tiers; it has: {fields}": "у профессии «{profession}» нет ступеней навыка; есть поля: {fields}",

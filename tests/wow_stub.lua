@@ -404,7 +404,9 @@ local itemNames = { [4306] = "Silk Cloth", [4305] = "Bolt of Silk Cloth", [6260]
                     [7048] = "Azure Silk Hood", [6948] = "Hearthstone", [4245] = "Small Silk Pack" }   -- 4234 is not cached
 -- 2996 is an item the game has not loaded yet: its name comes only after it is asked for
 local late, asked = { [2996] = "Bolt of Linen Cloth" }, {}
+if flags:find("russian") then itemNames[2321] = "Тонкая нить" end   -- as a Russian game names what it has at hand
 C_Item = {
+  IsItemDataCachedByID = function(id) return itemNames[id] ~= nil end,
   GetItemNameByID = function(id) return itemNames[id] or (asked[id] and late[id]) or nil end,
   RequestLoadItemDataByID = function(id) asked[id] = true end,
 }

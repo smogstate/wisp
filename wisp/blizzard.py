@@ -24,6 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from . import i18n
 from .i18n import t
 
 OAUTH = "https://oauth.battle.net/token"
@@ -111,8 +112,9 @@ class Blizzard:
         """One API document. kind: static, dynamic or profile."""
         return self._get_ns(path, self._static_namespace() if kind == "static" else f"{kind}-forever-{self.region}", timeout)
 
-    def _get_ns(self, path: str, namespace: str, timeout: float) -> dict:
-        query = urllib.parse.urlencode({"namespace": namespace, "locale": "en_US"})
+    def _get_ns(self, path: str, namespace: str, timeout: float, more: dict | None = None) -> dict:
+        # names in the player's language, as the game writes them
+        query = urllib.parse.urlencode({"namespace": namespace, "locale": "ru_RU" if i18n.LANG == "ru" else "en_US", **(more or {})})
         request = urllib.request.Request(f"{self.api}{path}?{query}", headers={"Authorization": "Bearer " + self.token()})
         try:
             data = json.loads(self._open(request, timeout))
@@ -165,6 +167,7 @@ def probe(api: Blizzard, snapshot: dict, remember=None) -> list[tuple[str, bool,
         except BlizzardError as e:   # many items are missing from Blizzard's data: not the end of the check
             out.append((t("Blizzard API: items"), False, str(e)))
         out.extend(recipes_probe(api))
+        out.extend(names_probe(api))
 
     if not own_auctions(snapshot):
         try:
@@ -239,6 +242,25 @@ def recipes_probe(api: Blizzard) -> list[tuple[str, bool, str]]:
     except BlizzardError as e:
         lines.append((t("Blizzard API: recipes"), False, str(e)))
     return lines
+
+
+def names_probe(api: Blizzard) -> list[tuple[str, bool, str]]:
+    """Whether Blizzard hands out whole lists with names in every language: a page of items, a page of
+    creatures. With them every item and NPC could be named as the player's game names it."""
+    found, any_list = [], False
+    for kind in ("item", "creature"):
+        try:
+            page = api._get_ns(f"/data/wow/search/{kind}", api._static_namespace(), 60, {"orderby": "id", "_pageSize": 5, "_page": 1})
+            first = next((r.get("data") for r in page.get("results") or [] if isinstance(r, dict) and isinstance(r.get("data"), dict)), {})
+            name = first.get("name")
+            tongues = ", ".join(sorted(name)) if isinstance(name, dict) else "one language only"
+            sample = name.get("ru_RU" if i18n.LANG == "ru" else "en_US") if isinstance(name, dict) else name
+            found.append(f"{kind}: {page.get('pageCount', '?')} pages of {page.get('pageSize', '?')} (up to {page.get('maxPageSize', '?')}), "
+                         f"names in {tongues}, e.g. {first.get('id')} = {sample}")
+            any_list = True
+        except BlizzardError as e:
+            found.append(f"{kind}: {e}")
+    return [(t("Blizzard API: lists of names"), any_list, "; ".join(found))]
 
 
 def _listed_line(house: dict, auctions: list, goods: list):

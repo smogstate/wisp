@@ -1607,6 +1607,11 @@ def test_quest_search(tmp: Path):
     checked = {what: (status, detail) for what, status, detail in check(wow, call_model=False)}
     assert checked["Every quest from Questie"] == ("ok", f"{len(db.quests)} quests this character could take")
 
+    # a Russian client: the game's own name for an item it has at hand, Questie's (English, here) for the rest
+    ru = Game.load(make_wow_dir(tmp / "ru", flags="questindex,russian"))
+    assert ru.graph.names[2321] == "Тонкая нить" and ru.graph.world[2321]["name"] == "Тонкая нить", "the game's name, not Questie's Fine Thread"
+    assert ru.graph.world[7090]["name"] == "Pattern: Not Learned Yet", "an item the game has not shown yet keeps Questie's name"
+
     # every item, too: who sells a recipe the character has never held
     assert sorted(game.graph.world) == [2321, 4306, 6325, 7090], "items that come from nowhere, or only from the other faction's vendors, are left out"
     # a recipe that only drops: the creatures one can walk to come first, each with a point in the thick of its spawn points
@@ -1678,6 +1683,7 @@ def test_blizzard(wow: Path):
     stack = {"on": False}   # whether the stand-in prices a listing for the whole stack
     recipes = {"on": True}   # whether the stand-in has professions at all: nobody knows yet whether Forever's does
     static = {"ns": "static-forever-eu"}   # the name game data answers under: the plain one, or one that names the data's version
+    asked_in = []   # the language each request asked for
 
     def house(number):
         if number == 110:
@@ -1716,6 +1722,10 @@ def test_blizzard(wow: Path):
                 return self.reply(401, {})
             if ns.startswith("static-") and ns != static["ns"]:   # game data answers under one name only
                 return self.reply(403, {})
+            asked_in.append(parse_qs(url.query).get("locale", [""])[0])
+            if url.path == "/data/wow/search/item" and ns == static["ns"]:   # whole lists, every language at once
+                return self.reply(200, {"page": 1, "pageSize": 5, "maxPageSize": 1000, "pageCount": 4012, "results": [
+                    {"data": {"id": 25, "name": {"en_US": "Worn Shortsword", "ru_RU": "Иззубренный короткий меч"}}}]})
             if url.path == "/data/wow/playable-class/index" and ns == static["ns"]:
                 return self.reply(200, {"classes": [{"id": 8, "name": "Mage"}]})
             if url.path == "/data/wow/item/4306" and ns == static["ns"]:
@@ -1757,7 +1767,16 @@ def test_blizzard(wow: Path):
         lines = run()
         assert lines["Blizzard API: the client"] == (True, "accepted (EU)")
         assert lines["Blizzard API: WoW Forever"] == (True, "2 rulesets: Normal, Hardcore")
-        assert lines["Blizzard API: game data"] == (True, "answers as static-forever-eu")
+        assert lines["Blizzard API: game data"] == (True, "answers as static-forever-eu") and set(asked_in) == {"en_US"}
+        assert lines["Blizzard API: lists of names"] == (True, "item: 4012 pages of 5 (up to 1000), names in en_US, ru_RU, e.g. 25 = Worn Shortsword; "
+                                                         "creature: HTTP 404"), "items come as whole lists in every language; creatures do not, here"
+        from wisp import i18n
+        try:   # a Russian player: Blizzard is asked in Russian
+            i18n.set_language("ru")
+            asked_in.clear()
+            assert "25 = Иззубренный короткий меч" in run()["API Blizzard: списки названий"][1] and set(asked_in) == {"ru_RU"}
+        finally:
+            i18n.set_language("en")
         assert lines["Blizzard API: items"] == (True, "item 4306 is Silk Cloth; an item has: id, level, name")
         assert lines["Blizzard API: skill a recipe needs"] == (True, "fields that may hold it: profession.skill_tiers, tier.maximum_skill_level, tier.minimum_skill_level")
         # game data under a name that carries its version, the plain one refused: found from what the API links to
