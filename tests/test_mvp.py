@@ -2212,6 +2212,21 @@ def test_game_boundary(tmp: Path):
     bobber = [src for src in sources if str(src.get("key", "")).startswith("o35591")]
     assert bobber and "Васян" not in json.dumps(fished.snapshot["loot"], ensure_ascii=False), "a heal's target is not the bobber's name"
 
+    # killed by another player: the fight's last half minute, summed up; the player is a class and a race, never a name
+    slain = Game.load(make_wow_dir(tmp / "pvp", flags="pvpdeath"))
+    assert "Gankmaster" not in json.dumps(slain.snapshot, ensure_ascii=False), "the killer's name is not written down at all"
+    one = run_tool(slain, "deaths", {})["deaths"][0]
+    assert (one["by"], one["killed_by_a_player"], one["damage_taken"], one["fight_lasted_seconds"]) == ("Rogue (Undead)", True, 1800, 5.0)
+    full = run_tool(slain, "deaths", {"which": 1, "show": True})
+    assert full["killing_blow"] == {"spell": "Eviscerate", "from": "Rogue (Undead)", "damage": 900}
+    assert [(d["spell"], d["damage"], d["share"]) for d in full["damage_by_spell"]] == [("Eviscerate", 900, "50%"), ("Sinister Strike", 600, "33%"), ("melee swing", 300, "17%")]
+    assert full["held_by"] == [{"debuff": "Cheap Shot", "from": "Rogue (Undead)", "seconds": 3.0}] and full["healing_received"] == 150
+    assert full["what_you_cast"] == [{"seconds_before_death": 2.5, "spell": "Frost Nova"}] and len(full["timeline"]) == 7, "the wolf's hit a minute before is not this fight"
+    card = slain.cards[-1]["table"]
+    assert card["title"] == "Killed by: Rogue (Undead)" and card["rows"][-1] == ["Eviscerate", "0 s", "900", "0"]
+    assert card["rows"][5] == ["healing: Healing Potion", "-1 s", "+150", "650"] and len(card["columns"]) == 4, "four columns: the window is narrow"
+    assert "error" in run_tool(slain, "deaths", {"which": 2}) and run_tool(Game.load(make_wow_dir(tmp / "alive")), "deaths", {})["deaths"] == []
+
     for damaged in ('{"v":1,"takenAt":1e999}', '{"v":1,"quests":[{"id":[1],"title":"x"}]}', "[" * 100000):
         folder = tmp / str(abs(hash(damaged)))
         (folder / "WTF/Account/T/SavedVariables").mkdir(parents=True)

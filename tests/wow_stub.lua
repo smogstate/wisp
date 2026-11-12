@@ -6,6 +6,14 @@
 --   WISP_STUB=noquestie,notomtom,nojournal,noauctionator,nogathermate removes those addons;
 --   noprofession leaves the profession window closed
 
+bit = bit or { band = function(a, b)   -- the game has this library; a plain Lua does not
+  local out, place = 0, 1
+  while a > 0 and b > 0 do
+    if a % 2 == 1 and b % 2 == 1 then out = out + place end
+    a, b, place = math.floor(a / 2), math.floor(b / 2), place * 2
+  end
+  return out
+end }
 local mode, ARG = arg[1], arg[2] or ""
 if ARG == "@long" then ARG = "WISP1:" .. ("A"):rep(90000) end   -- too long for a command line on Windows: made here
 local flags = os.getenv("WISP_STUB") or ""
@@ -537,7 +545,33 @@ local lootSlots, targetGuid = {}, nil
 function GetNumLootItems() return #lootSlots end
 function GetLootSlotLink(slot) return lootSlots[slot][1] and ("|cffffffff|Hitem:" .. lootSlots[slot][1] .. "::::|h[x]|h|r") or nil end
 function GetLootSourceInfo(slot) return (table.unpack or unpack)(lootSlots[slot][2]) end
-function UnitGUID(unit) return unit == "target" and targetGuid or nil end
+function UnitGUID(unit) return unit == "player" and "Player-1-ME" or unit == "target" and targetGuid or nil end
+-- The combat log: one line at a time, as the game hands it over. A fight with another player and the death it ends in.
+local uptime, health, logged = 1000, 1400, {}
+function GetTime() return uptime end
+function UnitHealth() return health end
+function UnitHealthMax() return 1400 end
+function CombatLogGetCurrentEventInfo() return (table.unpack or unpack)(logged, 1, 21) end
+function GetPlayerInfoByGUID(guid)
+  if guid == "Player-1-ROGUE" then return "Rogue", "ROGUE", "Undead", "Scourge", 2, "Gankmaster", "Other Realm" end
+end
+local function killedByAPlayer(boot)
+  local ME, ROGUE, WOLF = "Player-1-ME", "Player-1-ROGUE", "Creature-0-1-2-3-118-X"
+  local foe, beast, mine = 0x548, 0xa48, 0x511   -- an enemy player, an enemy creature, the character
+  local function line(after, left, ...)
+    uptime, health, logged = uptime + after, left, { 0, ... }
+    boot.scripts.OnEvent(boot, "COMBAT_LOG_EVENT_UNFILTERED")
+  end
+  line(0, 1400, "SWING_DAMAGE", false, WOLF, "Prowler", beast, 0, ME, "x", mine, 0, 40, -1, 1)   -- a minute earlier: another fight
+  line(60, 1400, "SPELL_AURA_APPLIED", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 1833, "Cheap Shot", 1, "DEBUFF")
+  line(0.5, 1100, "SWING_DAMAGE", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 300, -1, 1, nil, nil, nil, false)
+  line(1, 500, "SPELL_DAMAGE", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 1752, "Sinister Strike", 1, 600, -1, 1, nil, nil, nil, true)
+  line(1, 500, "SPELL_CAST_SUCCESS", false, ME, "x", mine, 0, ROGUE, "Gankmaster", foe, 0, 122, "Frost Nova", 16)
+  line(0.5, 500, "SPELL_AURA_REMOVED", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 1833, "Cheap Shot", 1, "DEBUFF")
+  line(1, 650, "SPELL_HEAL", false, ME, "x", mine, 0, ME, "x", mine, 0, 439, "Healing Potion", 1, 150, 0)
+  line(1, 0, "SPELL_DAMAGE", false, ROGUE, "Gankmaster", foe, 0, ME, "x", mine, 0, 2098, "Eviscerate", 1, 900, 250, 1, nil, nil, nil, false)
+  boot.scripts.OnEvent(boot, "PLAYER_DEAD")
+end
 local function creature(npc, spawn) return "Creature-0-1-2-3-" .. npc .. "-" .. spawn end
 local function lootWindow(boot, after, coins, slots, target, targetName)
   clock = clock + after
@@ -703,6 +737,7 @@ if mode == "snapshot" then
     runTimers()
   end
   if not flags:find("noloot") then goLooting(boot) end
+  if flags:find("pvpdeath") then killedByAPlayer(boot) end
   if not flags:find("nomail") then openMailbox(boot) end
   if not flags:find("noauctions") then boot.scripts.OnEvent(boot, "OWNED_AUCTIONS_UPDATED") end
   if flags:find("listings") then visitAuctionHouse(boot) end

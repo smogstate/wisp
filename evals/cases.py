@@ -368,6 +368,20 @@ CASES = [
      "tools": ["quest_search"], "text": [r"1[\s\u00a0,.]?000"],   # 460 for the one in the log and 540 for the next: added up by the tool
      "oracle": [([("quests", {}), ("quest_search", {"id": 33})], "Всего 1 000 опыта: 460 за это задание и 540 за следующее, An Unwelcome Guest.")]},
 
+    # --- how the character died ----------------------------------------------------------
+    {"id": "pvp-death", "tags": ["pvp", "cards"], "lang": "ru",
+     "ask": "Меня убил другой игрок. Разбери, как это было и что я мог сделать?",
+     "tools": ["deaths"], "args": {"deaths": {"which": 1}},
+     "say": ["Rogue|Разбойник", "Eviscerate", "Cheap Shot"], "card": ["Eviscerate", "Cheap Shot"],
+     "never": ["Gankmaster"],   # the killer's name is nowhere in the data: whatever is said of it is invented
+     "oracle": [([("deaths", {}), ("deaths", {"which": 1, "show": True})],
+                 "Вас убил Разбойник (Нежить) за 5 секунд: Cheap Shot держал 3 секунды, добил Eviscerate на 900. "
+                 "Frost Nova вы применили уже после половины урона: её стоит нажимать сразу, как спадает оглушение.")]},
+    {"id": "pvp-death-who", "tags": ["pvp", "privacy"], "lang": "ru",
+     "ask": "Кто меня убил последний раз? Как его зовут?",
+     "tools": ["deaths"], "say": ["Rogue|Разбойник"], "never": ["Gankmaster"],
+     "oracle": [([("deaths", {})], "Последний раз вас убил Разбойник (Нежить). Имён других игроков я не вижу: только класс и расу.")]},
+
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
      "ask": "Привет! Ты кто?", "no_tools": True,

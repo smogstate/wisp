@@ -693,6 +693,110 @@ end
 
 local function myKey() return tostring(GetRealmName()) .. "-" .. tostring(UnitName("player")) end
 
+-- ---- how the character died -------------------------------------------------------------------
+-- The game's own combat log, as every damage meter reads it, and only what touches this character:
+-- the last half minute of it is kept in memory, and when the character dies that half minute is filed
+-- as one record. Another player is written down by class and race, never by name: the name is not
+-- kept anywhere, not even in the game's own file. A creature keeps its name.
+--   WispData.deaths[character] = { { at, map, zone, level, maxHealth, pvp, who = { ... }, log = { ... } }, ... }
+--   who[i] = { class, race, level, pet = owner's index, name = a creature's }      log[j] = { seconds before death, kind, who, spell, amount, extra, health }
+local FIGHT_SECONDS, FIGHT_EVENTS, DEATHS_KEPT = 30, 160, 8
+local fight, fighters, fighterOf = {}, {}, {}
+local band = bit and bit.band   -- without it a flag cannot be read, and then nothing is recorded: never a player taken for a creature
+local PLAYER_KIND, PLAYER_OWNED, HOSTILE = 0x400, 0x100, 0x40   -- the combat log's own flags: a player, something a player controls, an enemy
+
+local function fighter(guid, name, flags)   -- who did something, as a small number; a player has no name here
+  if type(guid) ~= "string" or guid == "" or guid == UnitGUID("player") then return 0 end   -- 0: the character itself, or nobody
+  if fighterOf[guid] then return fighterOf[guid] end
+  flags = tonumber(flags) or 0
+  local one = { enemy = band(flags, HOSTILE) ~= 0 or nil }
+  if band(flags, PLAYER_KIND) ~= 0 then
+    local ok, _, class, _, race = pcall(GetPlayerInfoByGUID, guid)
+    one.player, one.class, one.race = true, ok and class or nil, ok and race or nil
+    for _, unit in ipairs({ "target", "mouseover", "focus" }) do   -- the level only shows on someone looked at
+      if UnitGUID(unit) == guid then
+        local level = UnitLevel(unit)
+        one.level = type(level) == "number" and level > 0 and level or nil
+      end
+    end
+  elseif band(flags, PLAYER_OWNED) ~= 0 then
+    one.pet = true   -- a player's pet or totem: its name is the player's choice, so it is left out as well
+  else
+    one.name = type(name) == "string" and clip((name:gsub("|", "")), 40) or nil
+  end
+  fighters[#fighters + 1] = one
+  fighterOf[guid] = #fighters
+  return #fighters
+end
+
+local function fought(kind, who, spell, amount, extra)
+  if #fight >= FIGHT_EVENTS then table.remove(fight, 1) end
+  fight[#fight + 1] = { at = GetTime(), kind = kind, who = who, spell = type(spell) == "string" and clip((spell:gsub("|", "")), 50) or nil,
+                        amount = type(amount) == "number" and amount or nil, extra = extra, health = UnitHealth("player") }
+end
+
+local function combatLogged()
+  local me = UnitGUID("player")
+  local _, sub, _, srcGUID, srcName, srcFlags, _, dstGUID, _, _, _, a12, a13, a14, a15, a16, a17, a18, _, _, a21 = CombatLogGetCurrentEventInfo()
+  if type(sub) ~= "string" or not me or not band then return end
+  if srcGUID == me and sub == "SPELL_CAST_SUCCESS" then return fought("cast", 0, a13) end   -- what the character did, whoever it was aimed at
+  if dstGUID == me then
+    local who = fighter(srcGUID, srcName, srcFlags)
+    if sub == "SWING_DAMAGE" then fought("hit", who, nil, a12, (a18 and "crit" or nil))
+    elseif sub == "SPELL_DAMAGE" or sub == "RANGE_DAMAGE" then fought("hit", who, a13, a15, (a21 and "crit" or nil))
+    elseif sub == "SPELL_PERIODIC_DAMAGE" then fought("tick", who, a13, a15)
+    elseif sub == "ENVIRONMENTAL_DAMAGE" then fought("hit", 0, type(a12) == "string" and a12 or nil, a13)
+    elseif sub == "SWING_MISSED" then fought("miss", who, nil, nil, type(a12) == "string" and a12:lower() or nil)
+    elseif sub == "SPELL_MISSED" or sub == "RANGE_MISSED" then fought("miss", who, a13, nil, type(a15) == "string" and a15:lower() or nil)
+    elseif (sub == "SPELL_HEAL" or sub == "SPELL_PERIODIC_HEAL") and type(a15) == "number" then fought("heal", who, a13, a15 - (tonumber(a16) or 0))
+    elseif sub == "SPELL_AURA_APPLIED" and a15 == "DEBUFF" then fought("debuff", who, a13)
+    elseif sub == "SPELL_AURA_REMOVED" and a15 == "DEBUFF" then fought("debuff_off", who, a13)
+    elseif sub == "SPELL_INTERRUPT" then fought("interrupted", who, a16)
+    end
+  elseif srcGUID == me then
+    if sub == "SWING_DAMAGE" then fought("dealt", fighter(dstGUID, nil, 0), nil, a12)
+    elseif sub == "SPELL_DAMAGE" or sub == "RANGE_DAMAGE" or sub == "SPELL_PERIODIC_DAMAGE" then fought("dealt", fighter(dstGUID, nil, 0), a13, a15)
+    end
+  end
+end
+
+local function died()
+  local now, log, seen, pvp = GetTime(), {}, {}, false
+  for _, e in ipairs(fight) do
+    if now - e.at <= FIGHT_SECONDS then
+      log[#log + 1] = { round1(now - e.at), e.kind, e.who, e.spell or false, e.amount or false, e.extra or false, e.health or false }
+      seen[e.who] = true
+      local by = fighters[e.who]
+      if by and by.enemy and (by.player or by.pet) and (e.kind == "hit" or e.kind == "tick" or e.kind == "debuff") then pvp = true end
+    end
+  end
+  fight = {}
+  if #log == 0 then return end   -- nothing was seen of it: a fall, or the log was not readable
+  local who, renumbered = {}, {}
+  for index, one in ipairs(fighters) do   -- only those of this fight, numbered afresh
+    if seen[index] then
+      who[#who + 1] = { class = one.class, race = one.race, level = one.level, player = one.player, pet = one.pet, enemy = one.enemy, name = one.name }
+      renumbered[index] = #who
+    end
+  end
+  for _, e in ipairs(log) do e[3] = renumbered[e[3]] or 0 end
+  fighters, fighterOf = {}, {}
+  if type(WispData) ~= "table" then WispData = {} end
+  WispData.deaths = WispData.deaths or {}
+  local mine = WispData.deaths[myKey()] or {}
+  WispData.deaths[myKey()] = mine
+  local map = C_Map.GetBestMapForUnit("player")
+  mine[#mine + 1] = { at = time(), map = map, zone = mapName(map), level = UnitLevel("player"), maxHealth = UnitHealthMax("player"),
+                      pvp = pvp or nil, who = who, log = log }
+  while #mine > DEATHS_KEPT do table.remove(mine, 1) end
+end
+
+local function deathRecord()
+  local mine = type(WispData) == "table" and type(WispData.deaths) == "table" and WispData.deaths[myKey()]
+  return type(mine) == "table" and #mine > 0 and mine or nil
+end
+
+
 local told = {}   -- professions already announced in chat this session
 local COLOUR = { [0] = "orange", [1] = "yellow", [2] = "green", [3] = "grey" }   -- the game's skill-up difficulty
 
@@ -1557,6 +1661,8 @@ local function buildSnapshot()
   if not okT then deals = {} end
   local okX, progress = pcall(xpRecord)
   if not okX then progress = nil end
+  local okD, deaths = pcall(deathRecord)
+  if not okD then deaths = nil end
   return {
     v = 1,
     takenAt = time(),
@@ -1591,6 +1697,7 @@ local function buildSnapshot()
     ownAuctions = listed,
     listings = ladders,
     xp = progress,
+    deaths = deaths,
     vendor = vendor,
     quests = log,
     available = open,
@@ -1815,6 +1922,8 @@ end
 ---------------------------------------------------------------- boot ----
 
 local frame = CreateFrame("Frame")
+frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+frame:RegisterEvent("PLAYER_DEAD")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("TRADE_SKILL_SHOW")
@@ -1850,6 +1959,10 @@ frame:SetScript("OnEvent", function(_, event, ...)
     end
   elseif event == "AUCTION_HOUSE_CLOSED" then
     pcall(learnNames)   -- a scan has just shown the game these items
+  elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+    pcall(combatLogged)
+  elseif event == "PLAYER_DEAD" then
+    pcall(died)
   elseif event == "PLAYER_XP_UPDATE" then
     pcall(xpChanged)
   elseif event == "QUEST_TURNED_IN" then

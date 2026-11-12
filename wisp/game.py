@@ -1596,6 +1596,34 @@ class Game:
                 "note": note + " Give the route's ref to the waypoint tool to show the whole route as one card: nodes close "
                                "together are one stop, and each stop follows the nearest one before it."}
 
+    def tool_deaths(self, args: dict) -> dict:
+        """How the character died: the addon's record of the fight, summed up in wisp/deaths.py."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        from .deaths import Deaths
+        deaths = Deaths(self.snapshot)
+        if not deaths.records:
+            return {"deaths": [], "note": "No death is on record. Wisp's addon keeps the last half minute of the game's combat log and "
+                                          "files it when the character dies; it reaches Wisp at the next logout or /wisp sync. "
+                                          "A death from before the addon could do this is not there."}
+        which = args.get("which")
+        if which is None:
+            return {"deaths": [deaths.row(n) for n in range(1, len(deaths.records) + 1)],
+                    "note": "Newest first. Call again with which (1 is the latest) for one death in full."}
+        if not isinstance(which, int) or isinstance(which, bool) or not 1 <= which <= len(deaths.records):
+            return {"error": f"which must be a whole number from 1 to {len(deaths.records)}: 1 is the latest death"}
+        out = deaths.detail(which)
+        if args.get("show") is True:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("How you died"), "table": deaths.card(which)})
+            out["shown"] = "a card with the fight's timeline is now shown to the player: do not repeat its rows"
+        out["note"] = ("Worked out in code from the game's combat log, the last 30 seconds before the death, and only what touched the "
+                       "character. Another player is known by class and race, never by name. timeline is in order, the death at 0. "
+                       "held_by are the debuffs that were on the character: which of them stun, silence or slow is yours to say from "
+                       "their names, as a likelihood. For 'how did I die': what did most of the damage, what held the character and "
+                       "for how long, what they did in answer, then one or two things to do differently. Advice about a class or a "
+                       "spell is general knowledge of the game, not from their data: say it as a suggestion.")
+        return out
+
     def tool_farming(self, args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
@@ -2157,6 +2185,22 @@ TOOLS = [
         },
     },
     {
+        "name": "deaths",
+        "description": "How the character died: what the game's combat log showed in the last half minute before each of "
+                       "the last deaths. Without which: the deaths on record, newest first, each with who killed the "
+                       "character (another player by class and race, or a creature), the damage taken and how long the "
+                       "fight took. With which: that death in full: every enemy's share of the damage, damage by spell, "
+                       "the killing blow, the debuffs that held the character and for how long, healing received, what "
+                       "the character cast, and the timeline. Use it for 'how was I killed', 'who killed me', 'what could "
+                       "I have done', in PvP or not; with show true the player sees the timeline as a card.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"which": {"type": "integer", "minimum": 1, "maximum": 8, "description": "1 is the latest death."},
+                           "show": {"type": "boolean", "description": "true to also show the player the fight as a card."}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "farming",
         "description": "What farming is worth, measured. spots: the zones the character has farmed, with time spent "
                        "looting, coins, loot worth and gold per hour. sources: each kind of creature and node the "
@@ -2339,6 +2383,9 @@ How a profession goes on past a rank is in the data when it is a book (an item: 
 the items named like it; then see who sells the one that fits) or a quest (quest_search with profession). Wisp has no list of \
 trainers: when it is neither a book nor a quest, say that trainers are not in the data. What you remember of the game may tell \
 you what to look for, never what to say.
+
+How the character died, to another player or to anything else, is in deaths: for 'how was I killed' call it for that death \
+with show true, and explain the fight from its figures.
 
 Everything in the tools is named in the language of the player's game. Look a name up in the words the player used, in \
 their language, as the dictionary form of what they wrote; never translate a name into another language to search for it.

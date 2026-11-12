@@ -112,6 +112,10 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                     t("{rows} prices of {items} items, from {first} to {last}", rows=kept["rows"], items=kept["items"],
                       first=kept["first_day"], last=kept["last_day"]),
                     t("none yet: it grows with every day you scan the auction house"), optional=True)
+            from .deaths import Deaths   # the combat log, read by the addon: whether this game lets it
+            fallen = len(Deaths(game.snapshot).records)
+            add(t("Deaths on record"), fallen > 0, str(fallen),
+                t("none yet: the addon files the last half minute of a fight when the character dies"), optional=True)
             if (addons / "GatherMate2").is_dir():
                 add(t("Gathering nodes in the snapshot"), game.gathering.total > 0,
                     t("{places} places of {kinds} kinds", places=game.gathering.total, kinds=len(game.gathering.nodes)),
