@@ -27,6 +27,8 @@ class ItemGraph:
         self.people: dict[str, dict] = {"npc": {}, "object": {}}
         self.maps: dict[int, str] = {}
         self.teachers: dict[str, list[int]] = {}   # what a recipe item's name says it teaches -> those items
+        self.trainers: dict[int, list[int]] = {}   # a profession's skill line -> the NPCs who train it
+        self.trainers_read = False                 # whether the addon has read Questie's list of them yet
         self.names: dict[int, str] = dict(craft.names)
         self.used_in: dict[int, list] = {}    # item -> recipes that need it
         self.made_by: dict[int, list] = {}    # item -> recipes that make it
@@ -101,6 +103,10 @@ class ItemGraph:
         for kind, rows in (("npc", index.get("npcs")), ("object", index.get("objects"))):
             self.people[kind] = {r["id"]: r for r in _list(rows) if isinstance(r, dict) and isinstance(r.get("id"), int)}
         self.maps = {m["id"]: m.get("name") for m in _list(index.get("maps")) if isinstance(m, dict) and isinstance(m.get("id"), int)}
+        # who trains each profession (the game's skill line number -> NPCs), as Questie lists its townsfolk
+        self.trainers = {row["p"]: [n for n in _list(row.get("n")) if isinstance(n, int)] for row in _list(index.get("trainers"))
+                         if isinstance(row, dict) and isinstance(row.get("p"), int)}
+        self.trainers_read = "trainers" in index
         for entry in _list(index.get("items")):
             name = _text(entry.get("name"), 80) if isinstance(entry, dict) else None
             if not name or not isinstance(entry.get("id"), int) or isinstance(entry["id"], bool):

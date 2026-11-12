@@ -1596,6 +1596,76 @@ class Game:
                 "note": note + " Give the route's ref to the waypoint tool to show the whole route as one card: nodes close "
                                "together are one stop, and each stop follows the nearest one before it."}
 
+    def tool_profession_path(self, args: dict) -> dict:
+        """How a profession goes on: where the character stands, who trains it, its books, the quests that need its skill."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        from .questdb import PROFESSIONS, fold
+        asked = _clean(args.get("profession"), 40) if isinstance(args.get("profession"), str) else ""
+        which = best(asked, [(number, name) for number, names in PROFESSIONS.items() for name in names]) if asked else []
+        russian = str((self.snapshot.get("client") or {}).get("locale") or "").lower().startswith("ru")
+        if not which:
+            return {"error": f"no profession is named like '{asked}'" if asked else "profession must be a profession's name",
+                    "professions": [names[1 if russian else 0] for names in PROFESSIONS.values()]}
+        number = which[0]
+        names = PROFESSIONS[number]
+        mine = next((p for p in _as_list(self.snapshot.get("professions")) if isinstance(p, dict) and fold(p.get("name")) in map(fold, names)), None)
+        name = _clean(mine.get("name"), 40) if mine else names[1 if russian else 0]
+        out = {"profession": name,
+               "character": {"skill": mine.get("skill"), "can_rise_to": mine.get("max"),
+                             "at_its_cap": isinstance(mine.get("skill"), int) and isinstance(mine.get("max"), int) and mine["skill"] >= mine["max"]}
+               if mine else "the character does not have this profession"}
+        # who trains it: those in the character's own zone first, then zone by zone
+        here = (self.snapshot.get("character") or {}).get("map")
+        known = [k for k in (self.graph.people["npc"].get(n) for n in self.graph.trainers.get(number, [])) if k and _clean(k.get("name"), 60)]
+        known.sort(key=lambda k: (k.get("map") != here, self.graph.maps.get(k.get("map")) or "~", k["name"]))
+        people = self._who(f"t{number}.trainer", [{"kind": "npc", "name": k["name"], "places": [
+            {"map": k["map"], "zone": self.graph.maps.get(k["map"]), "x": k.get("x"), "y": k.get("y")}] if k.get("map") else []} for k in known[:12]],
+            t("{profession} trainer", profession=name))
+        for person, k in zip(people, known):
+            if _clean(k.get("title"), 60):
+                person["title"] = _clean(k["title"], 60)
+        out["trainers"] = people
+        if len(known) > 12:
+            out["trainers_left_out"] = len(known) - 12
+        if not self.graph.trainers_read:
+            out["trainers_note"] = ("Wisp's addon has not read Questie's list of trainers yet: it does after the next login, and the "
+                                    "list is here after the logout or /wisp sync that follows.")
+        # its books: the game's own recipe items of this profession that someone sells and that teach no single recipe
+        recipes = {fold(r["name"]) for b in self.crafting.books for r in b["recipes"]} | {fold(r["name"]) for r in self.crafting.world_recipes}
+        def book(item, entry):
+            title = self.graph.names.get(item, "")
+            if entry.get("b") != number or not entry.get("v"):
+                return False
+            teaches = fold(title.split(":", 1)[1]) if ":" in title else None
+            return teaches is None or (bool(recipes) and teaches not in recipes)   # "Pattern: X" teaches X; a skill book teaches a rank
+        books = sorted((self.graph.names[i], i) for i, e in self.graph.world.items() if i in self.graph.names and book(i, e))
+        out["books"] = [{"item": title, "sold_by": self.graph._from_world(i).get("sold_by", [])} for title, i in books[:6]]
+        # the quests that need its skill
+        db = self.questdb()
+        theirs = sorted(db.with_profession(names[0]) or [], key=lambda i: (db.quests[i].get("sk") or [0, 0])[1]) if db else []
+        out["quests"] = [{**db.row(i), "starts": db.detail(i).get("starts", [])} for i in theirs[:8]]
+        if args.get("show") is True:
+            rows = [[p["name"] + (f" ({p['title']})" if p.get("title") else ""), p["where"][0]["zone"] if p["where"] else "–", "–"] for p in people]
+            rows += [[t("Book: {item}", item=b["item"]) + (" — " + b["sold_by"][0]["name"] if b["sold_by"] else ""),
+                      b["sold_by"][0]["where"][0]["zone"] if b["sold_by"] and b["sold_by"][0]["where"] else "–", "–"] for b in out["books"]]
+            rows += [[t("Quest: {name}", name=q["name"]) + (" — " + q["starts"][0]["name"] if q["starts"] else ""),
+                      q.get("zone") or "–", q.get("needs_profession") or "–"] for q in out["quests"]]
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Profession"), "table": {
+                "title": t("{profession}: how it goes on", profession=name),
+                "sub": t("your skill: {skill} of {cap}", skill=mine.get("skill"), cap=mine.get("max")) if mine else t("your character does not have it"),
+                "columns": [t("Where to learn"), t("Zone"), t("Needs")], "rows": rows[:30],
+                "notes": [t("Trainers, books and quests as Questie lists them. A trainer's title often says the rank it teaches.")]}})
+            out["shown"] = "a card with these trainers, books and quests is now shown to the player: do not repeat its rows"
+        out["note"] = ("How this profession goes on, from data kept between sessions. can_rise_to is the cap of the rank the character has: "
+                       "skill cannot pass it until the next rank is learned, from a trainer, a book or a quest. trainers are Questie's "
+                       "list for this profession, the character's own zone first; a title often says the rank a trainer teaches "
+                       "(a higher rank's trainer also teaches the lower ones), and where there is no title the data does not say which "
+                       "rank: say so. books are the game's own skill books of this profession with who sells them. quests need its "
+                       "skill at the value given in needs_profession. Every place has a ref for the waypoint tool. Answer for the "
+                       "skill asked about first, then where this character stands.")
+        return out
+
     def tool_deaths(self, args: dict) -> dict:
         """How the character died: the addon's record of the fight, summed up in wisp/deaths.py."""
         if not self.snapshot:
@@ -2186,6 +2256,20 @@ TOOLS = [
         },
     },
     {
+        "name": "profession_path",
+        "description": "How a profession goes on, for any profession, whether the character has it or not: the character's "
+                       "skill and the cap of its rank, who trains the profession and where (with each trainer's title, which "
+                       "often says the rank), its skill books and who sells them, and the quests that need its skill. Use it "
+                       "for 'where do I learn X', 'where do I train X past 150', 'what is next for my X'. With show true the "
+                       "player sees it as a card.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"profession": {"type": "string", "description": "The profession's name, in the player's words."},
+                           "show": {"type": "boolean", "description": "true to also show the player the path as a card."}},
+            "required": ["profession"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "deaths",
         "description": "How the character died: what the game's combat log showed of the fight before each of the last "
                        "deaths: the whole fight when another player did it (up to three minutes), the last half minute otherwise. Without which: the deaths on record, newest first, each with who killed the "
@@ -2380,10 +2464,10 @@ Answer the question that was asked. When it is about a level, a skill or a stage
 one line on where this character stands, if that helps them. What the character has now is never, by itself, the answer \
 to such a question.
 
-How a profession goes on past a rank is in the data when it is a book (an item: item_links with the profession's name lists \
-the items named like it; then see who sells the one that fits) or a quest (quest_search with profession). Wisp has no list of \
-trainers: when it is neither a book nor a quest, say that trainers are not in the data. What you remember of the game may tell \
-you what to look for, never what to say.
+How a profession goes on is in profession_path: where the character stands, who trains it and where, its skill books and \
+who sells them, the quests that need its skill. Use it for 'where do I learn X past N' and 'what is next for my X', and say \
+which of them fits the skill asked about; where the data does not say which trainer teaches which rank, say that. What you \
+remember of the game may tell you what to look for, never what to say.
 
 How the character died, to another player or to anything else, is in deaths: for 'how was I killed' call it for that death \
 with show true, and explain the fight from its figures.
@@ -2430,7 +2514,8 @@ Where to gather comes only from the gathering tool: the places the player's Gath
 links name the node an item is gathered from; from there, ask gathering for its zones and then for a route.
 
 You cannot act in the game. The waypoint and shopping_list tools only show a card that the player copies and pastes \
-into the game. After calling one, tell the player in one short sentence to press Copy and then Ctrl+V twice in the game.
+into the game. Call waypoint only when the player asks to be shown or sent somewhere. After calling one, the answer to \
+their question still comes first; then one short sentence to press Copy and then Ctrl+V twice in the game.
 
 Write money the way the tools write it (4s 50c, 1g 20s), never in words: the window draws the coins. \
 Answer in the language the player's own words are in, whatever language the names in their question are in, but write every name (quest, item, creature, person, place) exactly as the tools \

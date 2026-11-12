@@ -343,7 +343,15 @@ local rawItems = {
   [6948] = { name = "Hearthstone" },                              -- comes from nowhere: left out
   [5000] = { name = "Horde Only Thing", vendors = { 3005 } },     -- nobody sells it to this character: left out
 }
-if flags:find("ranks") then rawItems[16084] = { name = "Expert First Aid - Under Wraps", vendors = { 1347 } } end   -- and as a book
+if flags:find("ranks") then   -- and as a book; a fishing pole is sold too and is named after a profession, but is no book
+  rawItems[16084] = { name = "Expert First Aid - Under Wraps", vendors = { 1347 } }
+  rawItems[6256] = { name = "Fishing Pole", vendors = { 1347 } }
+end
+-- the game's own class of an item: 9 is a recipe item, its subclass the profession (7 First Aid, 2 Tailoring, 5 Cooking)
+function GetItemInfoInstant(id)
+  local recipe = ({ [16084] = 7, [7090] = 2, [6325] = 5 })[id]
+  return id, "x", "x", "", 1, recipe and 9 or 7, recipe or 0
+end
 QuestieDB.ItemPointers = {}
 for id in pairs(rawItems) do QuestieDB.ItemPointers[id] = true end
 QuestieDB.IsFriendlyToPlayer = function(side) return not side or side == "AH" or side == "A" end
@@ -369,6 +377,12 @@ if flags:find("oldquestie") then AvailableQuests = {} end
 if not flags:find("noquestie") then
   local modules = { QuestieDB = QuestieDB, ZoneDB = ZoneDB, AvailableQuests = AvailableQuests, QuestXP = QuestXP,
                     QuestiePlayer = QuestiePlayer, QuestieCorrections = QuestieCorrections }
+  if flags:find("ranks") then   -- Questie's townsfolk: who trains what (skill line -> NPCs), one of them the other faction's
+    npcs[9001] = { name = "Mara Stitchwell", subName = "Artisan Tailor", spawns = { [1519] = { { 43.5, 73.5 } } } }
+    npcs[9002] = { name = "Old Tom Reel", subName = "Fishing Trainer", spawns = { [12] = { { 47.6, 62.1 } } } }
+    npcs[9003] = { name = "Grukk the Stitcher", subName = "Expert Tailor", friendlyToFaction = "H", spawns = { [12] = { { 1, 1 } } } }
+    modules.Townsfolk = { professionTrainers = { [197] = { 9001, 9003 }, [356] = { 9002 }, [129] = {} } }
+  end
   QuestieLoader = { ImportModule = function(_, name) return modules[name] or {} end }
 end
 -- DungeonJournal, in the shape of its own tables (made-up entries, not its data)

@@ -70,6 +70,11 @@ RU_COUNTED = {
 }
 
 RU = {
+    # how a profession goes on (profession_path)
+    "{profession} trainer": "учитель: {profession}", "Book: {item}": "Книга: {item}", "Quest: {name}": "Задание: {name}", "Profession": "Профессия",
+    "{profession}: how it goes on": "{profession}: как учить дальше", "your skill: {skill} of {cap}": "ваш навык: {skill} из {cap}",
+    "your character does not have it": "у вашего персонажа её нет", "Where to learn": "Где учить", "Zone": "Зона", "Needs": "Нужно",
+    "Trainers, books and quests as Questie lists them. A trainer's title often says the rank it teaches.": "Учителя, книги и задания по данным Questie. Звание учителя часто говорит, какому рангу он учит.",
     # how the character died (wisp/deaths.py)
     "Deaths on record": "Записано смертей",
     "What happened": "Что произошло",

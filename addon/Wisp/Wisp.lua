@@ -239,7 +239,7 @@ local function indexKey(DB, pointers, ...)
   local okV, version = pcall(meta, "Questie", "Version")
   local count = 0
   for _ in pairs(pointers) do count = count + 1 end
-  return table.concat({ "f6", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f6: the experience each quest gives
+  return table.concat({ "f7", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f7: who trains each profession
 end
 
 local function questIndexKey(DB)
@@ -420,6 +420,18 @@ end
 -- something drops or something holds, so that "who sells this recipe" has an answer for an item
 -- the character has never touched. Per item: vendors friendly to this character (up to four),
 -- the first few creatures and objects it comes from and how many there are in all.
+-- Which profession a recipe item or a skill book belongs to, by the game's own class of the item: a
+-- profession's books are "recipe" items of that profession, a fishing pole is not. The skill line's
+-- number, or 0 for a book of no one profession; nil for anything that is not a recipe item.
+local RECIPE_CLASS = 9
+local RECIPE_OF = { [0] = 0, [1] = 165, [2] = 197, [3] = 202, [4] = 164, [5] = 185, [6] = 171, [7] = 129, [8] = 333, [9] = 356, [10] = 755, [11] = 773 }
+local function recipeProfession(id)
+  local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+  if type(instant) ~= "function" then return nil end
+  local ok, _, _, _, _, _, class, subclass = pcall(instant, id)
+  if ok and class == RECIPE_CLASS then return RECIPE_OF[subclass] end
+end
+
 local function buildItemIndex(DB, ZoneDB, key)
   local Q = DB.QueryItemSingle
   local friendly = {}
@@ -464,7 +476,7 @@ local function buildItemIndex(DB, ZoneDB, key)
         if #vendors < 4 and sells(npc) then vendors[#vendors + 1] = npc end
       end
       if #vendors + #drops + #objects > 0 then
-        local entry = { id = id, name = name }
+        local entry = { id = id, name = name, b = recipeProfession(id) }
         if #vendors > 0 then entry.v = vendors end
         if #drops > 0 then entry.d, entry.dn = first(drops, 3, DB.QueryNPCSingle), #drops end
         if #objects > 0 then entry.o, entry.on = first(objects, 2, DB.QueryObjectSingle), #objects end
@@ -475,10 +487,30 @@ local function buildItemIndex(DB, ZoneDB, key)
       end
     end
   end
+  -- Who trains each profession: Questie's own list of townsfolk, the ones this character can talk to.
+  -- With the books (items, above) and the quests that need a skill, it is how every profession goes on.
+  local trainers, trains = {}, {}
+  local Townsfolk = questieModule("Townsfolk")
+  local listed = type(Townsfolk) == "table" and type(Townsfolk.professionTrainers) == "table" and Townsfolk.professionTrainers or {}
+  for profession, theirs in pairs(listed) do
+    if type(profession) == "number" and type(theirs) == "table" then
+      local those = {}
+      for _, npc in ipairs(theirs) do
+        if type(npc) == "number" and #those < 80 and sells(npc) then
+          those[#those + 1], wantNpc[npc], trains[npc] = npc, true, true
+        end
+      end
+      if #those > 0 then trainers[#trainers + 1] = { p = profession, n = those } end
+    end
+  end
   local named, maps = namer(ZoneDB)
   local npcs = named(DB.QueryNPCSingle, wantNpc, true)
+  for _, npc in ipairs(npcs) do   -- a trainer's title often says the rank it teaches: "Expert Tailor"
+    local title = trains[npc.id] and ask(DB.QueryNPCSingle, npc.id, "subName")
+    if type(title) == "string" and title ~= "" then npc.title = clip((title:gsub("|", "")), 60) end
+  end
   local objects = named(DB.QueryObjectSingle, wantObject, true)
-  return { v = 1, key = key, items = items, npcs = npcs, objects = objects, maps = maps }
+  return { v = 1, key = key, items = items, npcs = npcs, objects = objects, maps = maps, trainers = trainers }
 end
 
 -- Every recipe in the game, whatever professions this character has (WispRecipes, WispRecipesKey):

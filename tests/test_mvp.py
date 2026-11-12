@@ -2258,6 +2258,31 @@ def test_names_as_typed():
     assert "game is in Russian" not in run_tool(russian, "item_links", {"item": "мифрил"})["error"]
 
 
+def test_profession_path(tmp: Path):
+    """How any profession goes on, kept between sessions: who trains it, its books, the quests that need its skill."""
+    game = Game.load(make_wow_dir(tmp, flags="questindex,ranks"))
+    path = lambda name: {k: v for k, v in run_tool(game, "profession_path", {"profession": name}).items() if k != "note"}
+    fishing = path("Fishing")
+    assert fishing["character"] == {"skill": 31, "can_rise_to": 75, "at_its_cap": False}
+    assert [(t["name"], t["title"], t["where"][0]["zone"]) for t in fishing["trainers"]] == [("Old Tom Reel", "Fishing Trainer", "Elwynn Forest")]
+    assert fishing["books"] == [] and [(q["name"], q["needs_profession"]) for q in fishing["quests"]] == [("Nat Pagle, Angler Extreme", "Fishing 225")], \
+        "a fishing pole is sold and named after the profession, and is no book"
+    aid = path("first aid")
+    assert aid["character"] == "the character does not have this profession" and aid["trainers"] == []
+    assert [(b["item"], b["sold_by"][0]["name"]) for b in aid["books"]] == [("Expert First Aid - Under Wraps", "Alexandra Bolero")]
+    tailoring = path("портняжное дело")
+    assert [t["name"] for t in tailoring["trainers"]] == ["Mara Stitchwell"], "the other faction's trainer is not this character's"
+    assert tailoring["books"] == [], "a pattern teaches one recipe: it is not how the profession goes on"
+    assert "professions" in path("Juggling") and "trainers_note" not in fishing
+    shown = run_tool(game, "profession_path", {"profession": "Fishing", "show": True})
+    assert game.cards[-1]["table"]["rows"] == [["Old Tom Reel (Fishing Trainer)", "Elwynn Forest", "–"],
+                                               ["Quest: Nat Pagle, Angler Extreme — Gryan Stoutmantle", "Westfall", "Fishing 225"]] and "shown" in shown
+    waypoint = run_tool(game, "waypoint", {"refs": [fishing["trainers"][0]["where"][0]["ref"]]})
+    assert waypoint["shown"] == 1 and "Old Tom Reel" in game.cards[-1]["lines"][0]["text"], "a trainer's place can be sent to the game"
+    old = run_tool(Game.load(make_wow_dir(tmp / "old", flags="questindex")), "profession_path", {"profession": "Fishing"})
+    assert old["trainers"] == [] and "trainers_note" not in old, "Questie without that list: none, and nothing promised"
+
+
 def test_eval_cases():
     """The assistant's eval (evals/) stays answerable: each case's written right answer still
     passes on this test game, and an empty answer does not. Free: no model is asked."""
@@ -2335,5 +2360,7 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as gb:
         test_game_boundary(Path(gb))
     test_names_as_typed()
+    with tempfile.TemporaryDirectory() as pp:
+        test_profession_path(Path(pp))
     test_eval_cases()
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))
