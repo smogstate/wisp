@@ -312,6 +312,10 @@ raw[9001] = { name = "For the Horde!", questLevel = 16, requiredLevel = 10, requ
 raw[9002] = { name = "Never Seen", questLevel = 5, startedBy = { { 240 } } }
 raw[9003] = { name = "A Warrior's Training", questLevel = 10, requiredClasses = 1, startedBy = { { 240 } } }
 tags[166] = "dungeon"
+if flags:find("ranks") then   -- a profession's next rank as a quest: it needs the skill, not a level alone
+  raw[6607] = { name = "Nat Pagle, Angler Extreme", questLevel = 45, requiredLevel = 10, zoneOrSort = 40, requiredSkill = { 356, 225 },
+                startedBy = { { 234 } }, finishedBy = { { 234 } } }
+end
 QuestieDB.QuestPointers = {}
 for id in pairs(raw) do QuestieDB.QuestPointers[id] = true end
 QuestieDB.QueryQuestSingle = function(id, key) return raw[id] and raw[id][key] end
@@ -330,6 +334,7 @@ local rawItems = {
   [6948] = { name = "Hearthstone" },                              -- comes from nowhere: left out
   [5000] = { name = "Horde Only Thing", vendors = { 3005 } },     -- nobody sells it to this character: left out
 }
+if flags:find("ranks") then rawItems[16084] = { name = "Expert First Aid - Under Wraps", vendors = { 1347 } } end   -- and as a book
 QuestieDB.ItemPointers = {}
 for id in pairs(rawItems) do QuestieDB.ItemPointers[id] = true end
 QuestieDB.IsFriendlyToPlayer = function(side) return not side or side == "AH" or side == "A" end

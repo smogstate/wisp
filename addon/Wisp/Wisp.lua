@@ -239,7 +239,7 @@ local function indexKey(DB, pointers, ...)
   local okV, version = pcall(meta, "Questie", "Version")
   local count = 0
   for _ in pairs(pointers) do count = count + 1 end
-  return table.concat({ "f4", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f4: the game's own names for items
+  return table.concat({ "f5", okV and tostring(version) or "?", GetLocale(), count, ... }, "|")   -- f5: the profession skill a quest needs
 end
 
 local function questIndexKey(DB)
@@ -382,6 +382,8 @@ local function buildQuestIndex(DB, ZoneDB, key)
                   sn = ids(startedBy[1]), so = ids(startedBy[2]), si = ids(startedBy[3]), en = ids(finishedBy[1]), eo = ids(finishedBy[2]),
                   pre = ids(ask(Q, id, "preQuestSingle")), preAll = ids(ask(Q, id, "preQuestGroup")), excl = ids(ask(Q, id, "exclusiveTo")),
                   text = type(text) == "table" and type(text[1]) == "string" and clip(text[1], 240) or nil }
+      local skill = ask(Q, id, "requiredSkill")   -- { skill line, value }: how a profession's next rank is earned, where that is a quest
+      if type(skill) == "table" and type(skill[1]) == "number" and type(skill[2]) == "number" then q.sk = { skill[1], skill[2] } end
       local nextId, flags = ask(Q, id, "nextQuestInChain"), ask(Q, id, "specialFlags")
       if type(nextId) == "number" and nextId > 0 then q.next = nextId end
       if type(flags) == "number" and flags % 2 == 1 then q.repeatable = true end

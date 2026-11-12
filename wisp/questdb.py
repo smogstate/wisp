@@ -91,6 +91,14 @@ def pick(query: str, names, most: int = 8) -> list:
     return found[:1] if found and fold(dict(names)[found[0]]) == fold(query) else found[:most]
 
 
+# The game's skill lines, by the number Questie gives for the skill a quest needs: the same in every language.
+PROFESSIONS = {356: ("Fishing", "Рыбная ловля"), 129: ("First Aid", "Первая помощь"), 185: ("Cooking", "Кулинария"),
+               171: ("Alchemy", "Алхимия"), 164: ("Blacksmithing", "Кузнечное дело"), 333: ("Enchanting", "Наложение чар"),
+               202: ("Engineering", "Инженерное дело"), 182: ("Herbalism", "Травничество"), 165: ("Leatherworking", "Кожевничество"),
+               186: ("Mining", "Горное дело"), 393: ("Skinning", "Снятие шкур"), 197: ("Tailoring", "Портняжное дело"),
+               762: ("Riding", "Верховая езда")}
+
+
 class QuestDB:
     def __init__(self, index: dict, game):
         from .game import _clean   # game text: no colour codes or links, and not too long
@@ -111,6 +119,8 @@ class QuestDB:
         self.open = {q["id"] for q in game.available}
         self.level = (snap.get("character") or {}).get("level")
         self.folded = {qid: fold(q["name"]) for qid, q in self.quests.items()}
+        self.skills = {fold(p.get("name")): p.get("skill") for p in snap.get("professions") or [] if isinstance(p, dict)}
+        self.russian = str((snap.get("client") or {}).get("locale") or "").lower().startswith("ru")
 
     # -- finding -----------------------------------------------------------------
 
@@ -137,6 +147,22 @@ class QuestDB:
     def name(self, qid: int) -> str:
         return self.quests[qid]["name"] if qid in self.quests else f"quest {qid}"
 
+    def skill_needed(self, qid: int):
+        """(the profession's name as this player's game writes it, the skill a quest needs, what the character has or None)."""
+        sk = self.quests[qid].get("sk")
+        if not (isinstance(sk, list) and len(sk) == 2 and sk[0] in PROFESSIONS and isinstance(sk[1], int)):
+            return None
+        names = PROFESSIONS[sk[0]]
+        have = next((self.skills[fold(n)] for n in names if fold(n) in self.skills), None)
+        return names[1 if self.russian else 0], sk[1], have
+
+    def with_profession(self, text: str) -> list[int] | None:
+        """The quests that need a profession's skill, or None when no profession is named like that."""
+        which = set(best(text, [(number, name) for number, names in PROFESSIONS.items() for name in names]))
+        if not which:
+            return None
+        return sorted(qid for qid, q in self.quests.items() if isinstance(q.get("sk"), list) and q["sk"] and q["sk"][0] in which)
+
     def state(self, qid: int) -> tuple[str, list[str]]:
         """done | in the log | open now | closed | not yet, and why it is not open."""
         q = self.quests[qid]
@@ -153,6 +179,9 @@ class QuestDB:
         req = _int(q.get("req"))
         if req and isinstance(self.level, int) and self.level < req:
             why.append(f"needs level {req}")
+        needed = self.skill_needed(qid)
+        if needed and (needed[2] is None or needed[2] < needed[1]):
+            why.append(f"needs {needed[0]} at {needed[1]}: the character " + (f"has {needed[2]}" if needed[2] is not None else "does not have that profession"))
         before = _ids(q.get("pre"))
         if before and not any(b in self.done for b in before):
             why.append("first: " + " or ".join(f"{self.name(b)} (id {b})" for b in before))
@@ -212,6 +241,7 @@ class QuestDB:
         return {k: v for k, v in {"id": qid, "name": q["name"], "level": q.get("level"), "required_level": q.get("req"),
                                   "zone": q.get("zone"), "kind": q.get("kind"), "state": state,
                                   "colour": self.game.colour(q.get("level")),
+                                  "needs_profession": (lambda n: f"{n[0]} {n[1]}" if n else None)(self.skill_needed(qid)),
                                   **self.game.rewards.get(qid, {})}.items() if v is not None}
 
     def detail(self, qid: int) -> dict:

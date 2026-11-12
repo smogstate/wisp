@@ -1063,6 +1063,7 @@ class Game:
                              "a minute after login, with Questie running; the player then logs out once and it is here for good."
                              + ("" if (self.snapshot.get("addons") or {}).get("questie") else " Questie was not running at the last logout.")}
         query, qid, zone, kind = args.get("name"), args.get("id"), args.get("zone"), args.get("kind", "any")
+        profession = args.get("profession")
         if qid is not None and (not isinstance(qid, int) or isinstance(qid, bool)):
             return {"error": "id must be a whole number"}
         if kind not in ("any", "normal", "elite", "dungeon", "raid", "pvp"):
@@ -1083,8 +1084,8 @@ class Game:
                 return {"error": f"no quest {qid} in Questie's list for this character: it may be for another race or class, "
                                  "or hidden by Questie"}
             return {"quest": db.detail(qid), "character_level": db.level, "note": note}
-        if not any(isinstance(v, str) and v.strip() for v in (query, zone)) and kind == "any" and (low, high) == (0, 100):
-            return {"error": "give a name, an id, or at least a zone, a kind or a level range"}
+        if not any(isinstance(v, str) and v.strip() for v in (query, zone, profession)) and kind == "any" and (low, high) == (0, 100):
+            return {"error": "give a name, an id, or at least a zone, a kind, a profession or a level range"}
         found = db.find(query) if isinstance(query, str) and query.strip() else sorted(db.quests)
         if isinstance(zone, str) and zone.strip():
             wanted = _clean(zone, 60).lower()
@@ -1097,6 +1098,13 @@ class Game:
             found = [i for i in found if db.quests[i].get("zone") == match[0]]
         found = [i for i in found if kind == "any" or (db.quests[i].get("kind") or "normal") == kind]
         found = [i for i in found if low <= (db.quests[i].get("level") or 0) <= high]
+        if isinstance(profession, str) and profession.strip():
+            theirs = db.with_profession(_clean(profession, 40))
+            if theirs is None:
+                from .questdb import PROFESSIONS
+                return {"error": f"no profession is named like '{_clean(profession, 40)}'",
+                        "professions": [names[1 if db.russian else 0] for names in PROFESSIONS.values()]}
+            found = [i for i in found if i in theirs]
         if args.get("hide_done") is True:
             found = [i for i in found if i not in db.done]
         if not found:
@@ -1988,6 +1996,8 @@ TOOLS = [
                            "kind": {"type": "string", "enum": ["any", "normal", "elite", "dungeon", "raid", "pvp"]},
                            "min_level": {"type": "integer", "minimum": 0, "maximum": 100},
                            "max_level": {"type": "integer", "minimum": 0, "maximum": 100},
+                           "profession": {"type": "string", "description": "Only the quests that need this profession's skill "
+                                          "(needs_profession says how much): how a profession's next rank is earned, where that is a quest."},
                            "hide_done": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 40}},
             "additionalProperties": False,
         },
@@ -2315,6 +2325,16 @@ quantity and the price exactly as they gave them; if a number is missing, ask ra
 investments are doing, call investments and show the card: every figure there is worked out in code. What they really \
 bought and sold at the auction house is in auction_ledger, from the house's own mail; where investments lists such \
 mail that is not recorded, offer it once and record it with from_mail only on a yes.
+
+Answer the question that was asked. When it is about a level, a skill or a stage that is not the character's own right now \
+('where do I learn First Aid past 150', 'what is there to do at level 40'), answer it for that level from the tools; then add \
+one line on where this character stands, if that helps them. What the character has now is never, by itself, the answer \
+to such a question.
+
+How a profession goes on past a rank is in the data when it is a book (an item: item_links with the profession's name lists \
+the items named like it; then see who sells the one that fits) or a quest (quest_search with profession). Wisp has no list of \
+trainers: when it is neither a book nor a quest, say that trainers are not in the data. What you remember of the game may tell \
+you what to look for, never what to say.
 
 Everything in the tools is named in the language of the player's game. Look a name up in the words the player used, in \
 their language, as the dictionary form of what they wrote; never translate a name into another language to search for it.

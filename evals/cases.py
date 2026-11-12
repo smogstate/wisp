@@ -49,6 +49,7 @@ RU_NAMES = {
     "An Unwelcome Guest": "Незваный гость", "Wanted: Hogger": "Разыскивается: Дробитель", "Protecting the Herd": "Защита стада",
     "What Comes Around": "Что посеешь", "Back to Billy": "Назад к Билли", "The Defias Brotherhood": "Братство Справедливости",
     "Kobold Camp Cleanup": "Зачистка лагеря кобольдов",
+    "Expert First Aid - Under Wraps": "Первая помощь для знатоков: под бинтами", "Nat Pagle, Angler Extreme": "Нат Пэгл, рыболов-экстремал",
     "Elwynn Forest": "Элвиннский лес", "Westfall": "Западный Край", "Stormwind City": "Штормград", "Dun Morogh": "Дун Морог",
     "The Deadmines": "Мертвые копи", "Hall of Thanes": "Зал Танов", "Ironforge": "Стальгорн",
 }
@@ -326,6 +327,36 @@ CASES = [
      "ask": "Где копать медную жилу?",
      "tools": ["gathering"], "say": ["Элвиннск"],
      "oracle": [([("gathering", {"what": "медную жилу"})], "Все известные жилы в зоне Элвиннский лес.")]},
+
+    # --- the question as asked, then the character: Denis asked where First Aid goes on past 150 and was told only
+    #     that he was past 190; where fishing goes on past 225 and was told only that he was at 152 ---
+    {"id": "rank-book", "tags": ["as-asked", "professions"], "lang": "ru",
+     "ask": "Где учить First Aid после 150?",
+     "tools": ["item_links"], "say": ["Expert First Aid", "Alexandra Bolero"],
+     "oracle": [([("item_links", {"item": "First Aid"})],
+                 "Дальше это книга: Expert First Aid - Under Wraps, её продаёт Alexandra Bolero в Stormwind City. "
+                 "У вашего персонажа этой профессии пока нет.")]},
+    {"id": "rank-quest", "tags": ["as-asked", "professions"], "lang": "ru",
+     "ask": "Где учить Fishing после 225?",
+     "tools": ["quest_search"], "say": ["Nat Pagle", "Gryan Stoutmantle"], "text": [r"\b31\b"],   # the answer, then the hint
+     "oracle": [([("quest_search", {"profession": "Fishing"})],
+                 "После 225 это задание Nat Pagle, Angler Extreme, его даёт Gryan Stoutmantle в Westfall. "
+                 "У вас сейчас Fishing 31, до него ещё далеко.")]},
+    {"id": "ru-rank-book", "tags": ["as-asked", "professions", "russian-names"], "lang": "ru", "game": "ru",
+     "ask": "Где учить первую помощь после 150?",
+     "tools": ["item_links"], "say": [r"под бинтами", r"Александр\w+ Болеро"],
+     "oracle": [([("item_links", {"item": "первую помощь"})],
+                 "Дальше это книга «Первая помощь для знатоков: под бинтами», её продаёт Александра Болеро, Штормград.")]},
+    {"id": "ru-rank-quest", "tags": ["as-asked", "professions", "russian-names"], "lang": "ru", "game": "ru",
+     "ask": "Где учить рыбную ловлю после 225?",
+     "tools": ["quest_search"], "say": [r"Нат\w* Пэгл", r"Гриан\w* Камнегрив"], "text": [r"\b31\b"],
+     "oracle": [([("quest_search", {"profession": "рыбная ловля"})],
+                 "После 225 это задание «Нат Пэгл, рыболов-экстремал», его даёт Гриан Камнегрив. У вас сейчас 31.")]},
+    {"id": "rank-no-trainers", "tags": ["as-asked", "professions", "not-in-data"], "lang": "ru",
+     "ask": "Где учить Tailoring после 225?",
+     "tools": ["any"], "text": [r"тренер|учител|наставник"], "never": ["Georgio Bolero", "Timothy Worthington|Теребор|Josef Gregorian"],
+     "oracle": [([("quest_search", {"profession": "Tailoring"}), ("item_links", {"item": "Tailoring"})],
+                 "Ни книги, ни задания на это в данных нет: значит, это тренер, а тренеров в моих данных нет. У вас Tailoring 150.")]},
 
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
