@@ -652,15 +652,26 @@ def answer(chat, game: Game, question: str, should_stop=lambda: False, research:
         results = []
         for call in calls:
             shown_before = len(game.cards)
-            result = run_tool(game, call["name"], call["input"])
+            given = call["input"] if isinstance(call["input"], dict) else {}
+            if research and call["name"] == "investments" and given.get("action", "list") != "list":
+                # in a research run the model reads the open web: a page must not be able to have the player's records changed
+                result = {"error": "The player's records are not changed during a research run. Say in the report what you "
+                                   "would record; the player can ask for it in an ordinary question."}
+            else:
+                result = run_tool(game, call["name"], call["input"])
             if hop == hops - 2:   # one round left: better an answer on what there is than none
                 result["wisp"] = "This was the last lookup. " + ("Call report now with what you have." if research
                                                                  else "Answer now with what you have.")
             yield {"type": "tool", "name": call["name"], "ok": "error" not in result}
             for card in game.cards[shown_before:]:
                 yield {"type": "card", "card": card}
-            results.append({"id": call["id"], "content": json.dumps(result, ensure_ascii=False),
-                            "is_error": "error" in result})
+            content = json.dumps(result, ensure_ascii=False, default=str)
+            if research:
+                # The web tools open only addresses already in the conversation. A tool's answer can hold any text the
+                # model put in (a name it asked about, a string a query built), the player's data with it: so in a
+                # research run no address in a tool's answer is left whole enough to be opened.
+                content = content.replace("://", ": //")
+            results.append({"id": call["id"], "content": content, "is_error": "error" in result})
         chat.tool_results(results)
     yield {"type": "error", "message": t("That took too many lookups. Try a narrower question.")}
     yield {"type": "done", "reason": "error"}

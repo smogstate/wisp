@@ -225,10 +225,14 @@ class Market:
                 "last_day": date_of(last) if last is not None else None,
                 "days_covered": last - first + 1 if first is not None else 0}
 
+    LONGEST, ANSWER = 100_000, 12_000   # bytes in one value while a query runs; characters in what it hands back
+
     def query(self, snapshot: dict, sql: str, limit: int = 200) -> dict:
-        """Run one read-only SELECT the model wrote. The file is opened read-only,
-        an authorizer refuses everything but reading, and a query that runs long
-        is stopped. `p` is the shared market's prices with names and dates."""
+        """Run one read-only SELECT the model wrote. The file is opened read-only, an authorizer refuses everything
+        but reading the price tables (the same file holds the player's trades and auction mail, filed under their
+        characters' names: none of the model's business), a query that runs long is stopped, and what comes back is
+        bounded: no value over LONGEST, no answer over ANSWER characters. `p` is the shared market's prices with
+        names and dates."""
         self._open().close()   # make sure the file and its tables exist
         db = sqlite3.connect(f"file:{self.file.as_posix()}?mode=ro", uri=True, timeout=5)
         try:
@@ -237,8 +241,14 @@ class Market:
             db.execute(f"CREATE TEMP VIEW p AS SELECT price.item, item.name, date(price.day * 86400, 'unixepoch') AS date, "
                        f"{today} - price.day AS days_ago, price.low, price.high, price.listed "
                        f"FROM price JOIN item ON item.id = price.item WHERE price.market = '{market}'")
-            allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
-            db.set_authorizer(lambda action, *_: sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY)
+            allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
+
+            def may(action, table, *_):
+                if action == sqlite3.SQLITE_READ:   # a blank table is a column of a subquery's own result
+                    return sqlite3.SQLITE_OK if table in ("p", "price", "item", "", None) else sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
+            db.set_authorizer(may)
+            db.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, self.LONGEST)   # no value longer than this can even be built
             steps = [0]
 
             def tick():   # called every 100000 steps of the query: about two seconds' worth, then stop
@@ -246,10 +256,17 @@ class Market:
                 return steps[0] > 200
             db.set_progress_handler(tick, 100000)
             cursor = db.execute(sql)
-            rows = cursor.fetchmany(limit + 1)
-            return {"columns": [c[0] for c in cursor.description or []], "rows": [list(r) for r in rows[:limit]],
-                    **({"cut_off_at": limit} if len(rows) > limit else {})}
-        except sqlite3.Error as e:
+            rows, size, more = [], 0, False
+            for row in cursor:
+                row = [None if isinstance(v, bytes) else v[:300] if isinstance(v, str) else v for v in row]
+                size += len(json.dumps(row, ensure_ascii=False))
+                if len(rows) >= limit or size > self.ANSWER:
+                    more = True
+                    break
+                rows.append(row)
+            return {"columns": [c[0] for c in cursor.description or []], "rows": rows,
+                    **({"cut_off_at": len(rows)} if more else {})}
+        except (sqlite3.Error, UnicodeError) as e:
             return {"error": f"the query failed: {str(e)[:200]}"}
         finally:
             db.close()

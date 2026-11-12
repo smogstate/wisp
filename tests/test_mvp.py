@@ -2140,6 +2140,52 @@ def test_quest_rewards(tmp: Path):
     assert quiet[0]["xp"] == 450 and "reward_items" not in quiet[1] and "money" not in quiet[1], "a silent game: Questie's experience, no rewards listed"
 
 
+def test_model_boundary(tmp: Path):
+    """What the model may reach and change: only prices by SQL, nothing of the player's records in a research run,
+    no address left openable in a research run's tool answers, and a tool that breaks answers instead of raising."""
+    from wisp.assets import Assets
+    from wisp.llm import new_usage
+    game = Game.load(make_wow_dir(tmp))
+    game.market = Market(tmp / "m.sqlite")
+    game.market.ingest(game.snapshot)
+    game.assets = Assets(game.market.file)
+    game.assets.ingest_mail("all", "Test Realm-Тест", [{"kind": "buy", "id": 1, "item": 4306, "name": "Silk Cloth", "count": 1, "n": 1, "bid": 5, "sent": 9}])
+    ask = lambda sql: run_tool(game, "market_query", {"sql": sql})
+    assert ask("SELECT count(*) FROM p")["rows"][0][0] > 0 and ask("SELECT name FROM item LIMIT 1")["rows"]
+    for private in ("SELECT who FROM mail", "SELECT * FROM trade", "SELECT name FROM sqlite_master",
+                    "SELECT (SELECT who FROM mail LIMIT 1) FROM p"):
+        assert "prohibited" in ask(private)["error"], private   # the mail is filed under the characters' names
+    assert ask("SELECT x'00'")["rows"] == [[None]] and ask("SELECT printf('%.*c', 50000000, 'x')")["rows"] == [[None]]
+    assert "error" in ask("SELECT sum(length(hex(zeroblob(20000000))))"), "no value that large is even built"
+    wide = ask("SELECT group_concat(name, ', ') || group_concat(name) || group_concat(name) FROM p, p AS q")
+    assert len(json.dumps(wide)) < 2000, "a long value is cut"
+    for broken in (("market_scan", {"find": []}), ("craft_plan", {"crafts": [{"recipe_id": [], "times": 1}]})):
+        assert "could not work with these arguments" in run_tool(game, *broken)["error"]
+
+    class Asks:   # a model that does what a web page told it to
+        provider, research, model = "scripted", False, "scripted"
+        def __init__(self, calls): self.calls, self.messages, self.usage, self.got = calls, [], new_usage(), []
+        def web_pages(self, since=0): return {}, {}
+        def user(self, text): self.messages.append({"role": "user", "content": text})
+        def stopped(self, partial): pass
+        def tool_results(self, results): self.got += results; self.messages.append({"role": "user", "content": "results"})
+        def stream(self, should_stop):
+            self.messages.append({"role": "assistant", "content": "…"})
+            calls, self.calls = self.calls, []
+            yield {"type": "end", "reason": "tool_use" if calls else "end_turn",
+                   "calls": [{"id": f"t{i}", "name": n, "input": a} for i, (n, a) in enumerate(calls)]}
+    told = [("investments", {"action": "buy", "item": "Silk Cloth", "quantity": 1000000, "price_each": "1c"}),
+            ("investments", {"action": "list"}), ("item_links", {"item": "https://example.com/?gold=15"})]
+    chat = Asks(list(told))
+    list(answer(chat, game, "research this", research=True))
+    refused, listed, echoed = (json.loads(r["content"]) for r in chat.got)
+    assert "not changed during a research run" in refused["error"] and not listed.get("investments"), "nothing was recorded"
+    assert "://" not in chat.got[2]["content"] and "https: //example.com" in echoed["error"], "no address a web tool could open"
+    chat = Asks(list(told))
+    list(answer(chat, game, "an ordinary question"))
+    assert "recorded" in json.loads(chat.got[0]["content"]) and "https://example.com" in chat.got[2]["content"], "outside research: as before"
+
+
 def test_names_as_typed():
     """A name is found the way a player writes it: Russian endings, ё, a plural; and the plain item before a longer one."""
     from wisp.questdb import best
@@ -2229,6 +2275,8 @@ if __name__ == "__main__":
         test_localization(Path(loc))
     with tempfile.TemporaryDirectory() as u:
         test_update(Path(u))
+    with tempfile.TemporaryDirectory() as mb:
+        test_model_boundary(Path(mb))
     test_names_as_typed()
     test_eval_cases()
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))
