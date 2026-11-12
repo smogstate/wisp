@@ -45,9 +45,9 @@ NO_FOLDER = "That folder has no Interface\\AddOns inside. Choose the World of Wa
 
 
 def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthropic",
-          model: str | None = None, battlenet=None, found_house=None) -> list[tuple[str, str, str]]:
+          model: str | None = None, battlenet=None, found_house=None, spend=None) -> list[tuple[str, str, str]]:
     """Everything a first run depends on, as (what, "ok" | "FAIL" | "note", detail).
-    A "note" is something optional that is missing. Makes one small real model call."""
+    A "note" is something optional that is missing. Makes one small real model call, whose cost goes to `spend`."""
     out = []
 
     def add(what, ok, good="", bad="", optional=False):
@@ -74,7 +74,7 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 "enabled": t("the game has the addon but has not saved yet: log in with your character, then log out to the character screen (the game only writes addon data at logout)"),
                 "unknown": t("restart the game so it sees the addon, log in with your character, then log out to the character screen (the game only writes addon data at logout)"),
             }[seen])
-            return _key_checks(out, add, call_model, provider, model)
+            return _key_checks(out, add, call_model, provider, model, spend)
         add(t("Snapshot file"), True, str(saved))
         game = Game.load(wow_dir)
         if game.problem:
@@ -153,14 +153,14 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                 from .blizzard import probe
                 for what, worked, detail in probe(battlenet, game.snapshot, remember=found_house):
                     add(what, worked, detail, detail)
-    return _key_checks(out, add, call_model, provider, model)
+    return _key_checks(out, add, call_model, provider, model, spend)
 
 
 def provider_key(provider: str) -> tuple[str | None, str | None]:
     return local.get_key(provider, PROVIDERS[provider]["env"])
 
 
-def _key_checks(out, add, call_model, provider: str = "anthropic", model: str | None = None):
+def _key_checks(out, add, call_model, provider: str = "anthropic", model: str | None = None, spend=None):
     for name, info in PROVIDERS.items():
         key, source = provider_key(name)
         add(t("{company} key", company=info["company"]), key is not None, t("from environment") if source == "environment" else t("saved on this PC"),
@@ -185,6 +185,8 @@ def _key_checks(out, add, call_model, provider: str = "anthropic", model: str | 
                 problem = event["message"]
     except Exception as e:   # no network
         problem = str(e)[:200]
+    if spend:
+        spend(chat.usage.get("counted", chat.usage["cost"]))
     add(t("A real call to the model"), bool(text.strip()) and not problem, t("{model} answered: {reply}", model=model, reply=text.strip()[:40]),
         problem or t("the model sent no text"))
     return out
@@ -224,6 +226,7 @@ class App:
                       "daily_cap": saved["daily_cap"] if isinstance(saved.get("daily_cap"), (int, float))
                                    and not isinstance(saved.get("daily_cap"), bool) and 0 <= saved["daily_cap"] <= 1000 else DAILY_CAP}
         self.spend_file = (local.APP_DIR if persist else Path(tempfile.mkdtemp(prefix="wisp-spend-"))) / "spend.json"
+        self._spent_here: dict[str, float] = {}   # today's total as this run counted it: stands when the file cannot
         # this copy's own version, and where the newer one stands: off (run from source, or switched off),
         # current, downloading, ready (downloaded and checked: a restart away), failed
         mine = update.current()
@@ -322,7 +325,9 @@ class App:
 
     # -- what today has cost ----------------------------------------------------
     # One number per day, in dollars, across every conversation: {"2026-11-10": 0.42}.
-    # It counts what Wisp can price. A model with no known price is not counted.
+    # Every model response is counted: at its price where Wisp knows it, at the dearest price it knows otherwise
+    # (llm.add_usage, "counted"). The day's total is kept in a file and in memory, whichever is higher, so a file
+    # that cannot be read or written does not open the limit while Wisp runs.
 
     def _spend(self) -> dict:
         try:
@@ -332,14 +337,17 @@ class App:
             return {}
 
     def spent_today(self) -> float:
-        value = self._spend().get(time.strftime("%Y-%m-%d"))
-        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+        today = time.strftime("%Y-%m-%d")
+        value = self._spend().get(today)
+        kept = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+        return max(kept, self._spent_here.get(today, 0.0))
 
     def add_spend(self, dollars: float):
         if dollars <= 0:
             return
         ledger, today = self._spend(), time.strftime("%Y-%m-%d")
         ledger[today] = round(self.spent_today() + dollars, 6)
+        self._spent_here = {today: ledger[today]}
         for day in sorted(ledger)[:-60]:   # two months is plenty
             del ledger[day]
         try:
@@ -729,7 +737,8 @@ class App:
         self.stop.clear()
         game = self.load_game()   # re-read: you may have logged out since the last question
         session, chat = self.session, self.chat
-        counted, over = chat.usage["cost"], [False]
+        spent_so_far = lambda usage: usage.get("counted", usage["cost"])   # a conversation kept by an older Wisp has no "counted"
+        counted, over = spent_so_far(chat.usage), [False]
         turn = {"items": [{"type": "user", "text": question}], "end": 0}
         session["turns"].append(turn)
         session["title"] = session["title"] or question[:60]
@@ -737,8 +746,8 @@ class App:
         try:
             for event in answer(chat, game, question, lambda: self.stop.is_set() or over[0], research=research):
                 if event["type"] == "usage":   # after every model response: add what it cost to the day
-                    self.add_spend(event["usage"]["cost"] - counted)
-                    counted = event["usage"]["cost"]
+                    self.add_spend(spent_so_far(event["usage"]) - counted)
+                    counted = spent_so_far(event["usage"])
                     over[0] = bool(cap) and self.spent_today() >= cap
                 if event["type"] == "done" and event["reason"] == "stopped" and over[0] and not self.stop.is_set():
                     said = {"type": "error", "message": t("Stopped here: today's spending limit of ${cap} is reached. It starts again tomorrow; the limit is in Settings.",
@@ -887,8 +896,9 @@ def make_handler(app: App, port: int):
                     return self.send_json(200, app.install_addon())
                 if self.path == "/api/browse":
                     return self.send_json(200, app.browse())
-                results = check(app.wow_dir, call_model=not app.fake, provider=app.provider, model=app.models[app.provider],
-                                battlenet=app.battlenet(), found_house=app.live.found)
+                within = not app.prefs["daily_cap"] or app.spent_today() < app.prefs["daily_cap"]   # the limit holds here too
+                results = check(app.wow_dir, call_model=not app.fake and within, provider=app.provider, model=app.models[app.provider],
+                                battlenet=app.battlenet(), found_house=app.live.found, spend=app.add_spend)
                 return self.send_json(200, {"results": [{"what": w, "status": s, "detail": d} for w, s, d in results]})
             if self.path != "/api/ask":
                 return self.send_json(404, {"error": "not found"})

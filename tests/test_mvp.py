@@ -131,8 +131,16 @@ def test_question_to_waypoint(wow: Path):
     total = new_usage()
     add_usage(total, "claude-opus-5-5", input_tokens=1_000_000, output_tokens=500_000, cache_read=1_000_000)
     assert total["cost"] == 4 + 10 + 0.20 and total["priced"]
-    add_usage(total, "some-other-model", input_tokens=10)
-    assert total["input"] == 1_000_010 and not total["priced"], "an unknown model is counted but not priced"
+    assert total["counted"] == total["cost"], "a known price: what is shown is what goes against the day's limit"
+    add_usage(total, "some-other-model", input_tokens=1_000_000)
+    assert total["input"] == 2_000_000 and not total["priced"] and total["cost"] == 14.20, "an unknown model is shown without a price"
+    assert total["counted"] == 14.20 + 10, "but it counts against the day's limit, at the dearest price Wisp knows"
+    haiku = new_usage()
+    add_usage(haiku, "claude-haiku-5-5", input_tokens=1_000, output_tokens=1_000_000, cache_read=50_000, cache_write=1_000_000)
+    assert haiku["priced"] and abs(haiku["cost"] - (0.0005 + 2.50 + 0.0025 + 0.625)) < 1e-9, "past 100,000 prompt tokens: the higher rate"
+    small = new_usage()
+    add_usage(small, "claude-haiku-5-5-20261001", input_tokens=10_000, output_tokens=1_000_000)
+    assert small["priced"] and abs(small["cost"] - (0.001 + 0.50)) < 1e-9, "a dated id is its model; a small prompt, the lower rate"
 
     lines = stub("paste", card["wisp"])
     assert "WAY tomtom 1429 0.489 0.402 Eagan Peltskinner (turn in)" in lines, lines
@@ -997,6 +1005,9 @@ def test_spending_cap(wow: Path):
     assert app.chat.usage["requests"] == asked and app.spent_today() == spent and len(app.session["turns"]) == 2
     app.new_chat()
     assert list(app.ask("in a new conversation?"))[0]["type"] == "error"
+    # the day's total stands when its file cannot be read: this run counted it too
+    app.spend_file.write_text("not json", encoding="utf-8")
+    assert app.spent_today() == spent and list(app.ask("with the file broken?"))[0]["type"] == "error"
 
     # raised, or switched off by choice, it answers again; nonsense is ignored
     app.save_settings({"daily_cap": 0})
@@ -1008,12 +1019,13 @@ def test_spending_cap(wow: Path):
     # another day starts from nothing; old days are kept two months
     ledger = {f"2026-{m:02d}-{d:02d}": 1.0 for m in (1, 2, 3) for d in range(1, 29)}
     app.spend_file.write_text(json.dumps(ledger))
+    app._spent_here = {}   # as a Wisp started on that other day
     assert app.spent_today() == 0.0
     app.add_spend(0.25)
     kept = json.loads(app.spend_file.read_text())
     assert len(kept) == 60 and kept[time.strftime("%Y-%m-%d")] == 0.25 and "2026-01-01" not in kept
     app.spend_file.write_text("not json")
-    assert app.spent_today() == 0.0, "a damaged file is an empty one"
+    assert app.spent_today() == 0.25, "a damaged file does not open the limit: what this run counted stands"
 
 
 def test_localization(tmp: Path):

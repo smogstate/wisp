@@ -66,14 +66,40 @@ PROVIDERS = {
                    "env": "OPENROUTER_API_KEY", "hint": "sk-or-…"},
 }
 
-# US dollars per million tokens, from Anthropic's price list as of 2026-11-03.
-# A model that is not listed here is counted in tokens and shown without a price:
-# a missing number is better than a confident wrong one.
-PRICES = {"claude-opus-5-5": {"input": 4.00, "output": 20.00, "cache_read": 0.20}}
+# US dollars per million tokens, from Anthropic's model reference as of 2026-11-12. Cache reads are as listed, or a
+# tenth of the input price where the reference gives none; cache writes are 1.25 times the input price (the 5-minute
+# rate). Haiku 5.5 costs five times as much once a request's prompt passes 100,000 tokens.
+# A model that is not listed is shown without a price (a missing number is better than a confident wrong one), but
+# it is still COUNTED against the daily limit, at the dearest price here: a limit that counts nothing is no limit.
+PRICES = {
+    "claude-fable-5-2": {"input": 8.00, "output": 40.00, "cache_read": 0.20},
+    "claude-fable-5-1": {"input": 10.00, "output": 50.00, "cache_read": 0.25},
+    "claude-opus-5-5": {"input": 4.00, "output": 20.00, "cache_read": 0.20},
+    "claude-opus-5": {"input": 5.00, "output": 25.00, "cache_read": 0.50},
+    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00, "cache_read": 0.10},
+    "claude-haiku-5-5": {"input": 0.10, "output": 0.50, "cache_read": 0.01,
+                         "past": 100_000, "then": {"input": 0.50, "output": 2.50, "cache_read": 0.05}},
+}
+KINDS = ("input", "output", "cache_read", "cache_write")
+
+
+def price_of(model: str, prompt_tokens: int = 0) -> dict:
+    """A model's price per million tokens of each kind, or {} when Wisp has none. A dated id counts as its model."""
+    name = max((known for known in PRICES if str(model).startswith(known)), key=len, default=None)
+    if name is None:
+        return {}
+    price = PRICES[name]
+    if prompt_tokens > price.get("past", float("inf")):
+        price = price["then"]
+    return {"cache_write": price["input"] * 1.25, **{k: v for k, v in price.items() if k in KINDS}}
+
+
+DEAREST = {kind: max(price_of(m, 10**9).get(kind, 0) for m in PRICES) for kind in KINDS}   # what an unknown model is counted at
 
 
 def new_usage() -> dict:
-    return {"requests": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "cost": 0.0, "priced": True}
+    # cost is what Wisp can state; counted is what goes against the daily limit: the same, or more where a price is unknown
+    return {"requests": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "cost": 0.0, "counted": 0.0, "priced": True}
 
 
 def add_usage(total: dict, model: str, input_tokens=0, output_tokens=0, cache_read=0, cache_write=0,
@@ -84,18 +110,22 @@ def add_usage(total: dict, model: str, input_tokens=0, output_tokens=0, cache_re
     counts = {"input": input_tokens or 0, "output": output_tokens or 0,
               "cache_read": cache_read or 0, "cache_write": cache_write or 0}
     total["requests"] += 1
-    price = price or PRICES.get(model, {})
+    price = price or price_of(model, counts["input"] + counts["cache_read"] + counts["cache_write"])
+    before = total["cost"]
+    limit = 0.0   # what an unpriced part is counted at, for the daily limit only
     for kind, tokens in counts.items():
         total[kind] += tokens
         if cost is None:
             if tokens and kind not in price:
                 total["priced"] = False
+                limit += tokens * DEAREST[kind] / 1_000_000
             total["cost"] += tokens * price.get(kind, 0) / 1_000_000
     if cost is not None:
         total["cost"] += cost
     if searches:   # web searches are billed apiece, on top of the tokens
         total["searches"] = total.get("searches", 0) + searches
         total["cost"] += searches * SEARCH_PRICE
+    total["counted"] = total.get("counted", before) + (total["cost"] - before) + limit
 
 
 def merge_reasoning(parts: list, new) -> None:
@@ -202,11 +232,19 @@ class AnthropicChat:
                         betas=["server-side-fallback-2026-07-01"],
                         fallbacks="default",
                     ) as stream:
+                        written = 0
                         for event in stream:
                             if should_stop():
+                                # paid for all the same: the prompt as the server counted it, the output by its length
+                                used = getattr(getattr(stream, "current_message_snapshot", None), "usage", None)
+                                add_usage(self.usage, self.model, getattr(used, "input_tokens", 0) or 0,
+                                          max(getattr(used, "output_tokens", 0) or 0, written // 3),
+                                          getattr(used, "cache_read_input_tokens", 0) or 0,
+                                          getattr(used, "cache_creation_input_tokens", 0) or 0)
                                 yield {"type": "end", "reason": "stopped", "calls": []}
                                 return
                             if event.type == "text":
+                                written += len(event.text)
                                 yield {"type": "text", "text": event.text}
                             elif event.type == "content_block_stop":   # a web search or a page read has been asked for
                                 block = getattr(event, "content_block", None)
@@ -326,6 +364,9 @@ class OpenAIChat:
             for chunk in chunks:
                 if should_stop():
                     chunks.close()
+                    # paid for all the same, and this wire reports usage only at the end: counted by length instead
+                    add_usage(self.usage, self.model, len(json.dumps(self.request(), default=str)) // 3, len(text) // 3,
+                              price=self.price_for(self.model))
                     yield {"type": "end", "reason": "stopped", "calls": []}
                     return
                 if chunk.usage:

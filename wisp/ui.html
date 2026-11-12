@@ -666,7 +666,7 @@ const RU = {
   "Wisp installs its addon into the game's AddOns folder when you save the game folder.": "Wisp установит свой аддон в папку AddOns игры, когда вы сохраните папку игры.",
   "How solid the window is while you are not using it. It is fully solid under the mouse and while you type.": "Непрозрачность окна, пока вы им не пользуетесь. Под мышью и при вводе оно полностью непрозрачно.",
   "Transparency needs Wisp's own window.": "Для прозрачности нужно собственное окно Wisp.",
-  "Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.": "Потрачено сегодня: {spent}. Когда лимит достигнут, Wisp больше ничего не спрашивает до завтра; 0 — без лимита. Считается то, чему Wisp знает цену: цены Kimi неизвестны, поэтому Kimi не считается.",
+  "Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. A model whose price Wisp does not know is counted at the dearest price it knows, so the limit holds for it too.": "Потрачено сегодня: {spent}. Когда лимит достигнут, Wisp больше ничего не спрашивает до завтра; 0 — без лимита. Модель, цену которой Wisp не знает, считается по самой высокой известной цене, так что лимит действует и для неё.",
   "This copy runs from source and does not update itself.": "Эта копия запущена из исходников и не обновляется.",
   "This is version {version}": "Это версия {version}", " of {date}": " от {date}", "It is the newest.": "Она последняя.",
   "Fetching version {new}…": "Загружается версия {new}…", "Version {new} is ready: it starts the next time Wisp does.": "Версия {new} готова: она запустится при следующем старте Wisp.",
@@ -1320,7 +1320,7 @@ function showSettings(s) {
   $("bnet-id").value = $("bnet-secret").value = "";
   $("bnet-secret").placeholder = s.battlenet ? "•••••••• (" + T(s.battlenet === "saved" ? "saved on this PC" : s.battlenet) + ")" : T("Client secret");
   $("cap").value = s.spend.cap;
-  $("cap-hint").textContent = T("Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. It counts what Wisp can price: Kimi's prices are not known, so Kimi is not counted.", { spent: dollars(s.spend.today) });
+  $("cap-hint").textContent = T("Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. A model whose price Wisp does not know is counted at the dearest price it knows, so the limit holds for it too.", { spent: dollars(s.spend.today) });
   showVersion(s.update || {});
   // who answers: a provider and one of its models; and a key for each provider
   const provider = $("provider");

@@ -128,7 +128,7 @@ A fourth OpenAI-compatible provider is a few lines of configuration, not a new i
 - **Tools are ours, so they work everywhere.** Wowhead, character, screenshot and the game commands run in Python; any model with tool calling can use them ([Tools](Tools.md)).
 - **Web search** is secondary — Wisp works primarily on Wowhead. It starts as the provider's built-in search, used in research runs only; Wisp's own search tool is a later step if needed ([Tools](Tools.md)).
 - **Vision.** On a text-only model the screenshot option is hidden, not left to fail.
-- **Cost caps** apply on every provider: tool calls per question, spend per day, fail closed. Where the price is unknown the cap counts tokens.
+- **Cost caps** apply on every provider: tool calls per question, spend per day, fail closed. Where the price is unknown the response is shown without a price but counted against the day at the dearest price Wisp knows (`llm.DEAREST`), so the limit holds for every model; the day's total is kept in a file and in memory, whichever is higher. Check setup's one real call and an answer stopped midway are counted too.
 
 ## Open
 
