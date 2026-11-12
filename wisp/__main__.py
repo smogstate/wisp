@@ -36,7 +36,15 @@ from .llm import CHATS, PROVIDERS, FakeChat, answer, list_models
 from .sessions import Sessions, record
 
 UI = Path(__file__).with_name("ui.html")
-SIZE = (430, 680)   # the open window
+SIZE = (430, 680)   # the open window, until the player drags it to another size
+SMALLEST, LARGEST = (340, 420), (1000, 1400)
+
+
+def sized(value) -> tuple[int, int] | None:
+    """A window size as asked for (by the page's grip, or kept in the config), held within what makes sense."""
+    if not (isinstance(value, (list, tuple)) and len(value) == 2 and all(isinstance(v, int) and not isinstance(v, bool) for v in value)):
+        return None
+    return tuple(max(low, min(high, v)) for v, low, high in zip(value, SMALLEST, LARGEST))
 ORB = 64            # the collapsed one: a small square holding the wisp
 THEMES = ("auto", "dark", "light")
 BATTLENET = "battlenet"   # the credential store's entry for the player's Blizzard developer client: "id:secret"
@@ -209,6 +217,7 @@ class App:
         self.active = True                       # the mouse is over it or it has the keyboard
         self.collapsed = False
         self.round = False                       # whether the collapsed window really is a disc
+        self.size = (sized(local.load_config().get("size")) if persist else None) or SIZE   # the open window, as last dragged
         self.hotkey = None                       # the global show/hide key, when Windows granted it
         saved = local.load_config() if persist else {}
         models = saved.get("models") if isinstance(saved.get("models"), dict) else {}
@@ -635,7 +644,7 @@ class App:
         if not self.frameless:
             return
         from webview.window import FixPoint
-        self.window.resize(*SIZE, fix_point=FixPoint.NORTH | FixPoint.EAST)   # a borderless window starts a little small
+        self.window.resize(*self.size, fix_point=FixPoint.NORTH | FixPoint.EAST)   # a borderless window starts a little small
         self.handle = local.window_handle(self.window)
         local.round_window_corners(self.handle)
         self.apply_alpha()
@@ -647,7 +656,7 @@ class App:
         if self.window is not None:
             if self.frameless:
                 from webview.window import FixPoint
-                width, height = (ORB, ORB) if self.collapsed else SIZE
+                width, height = (ORB, ORB) if self.collapsed else self.size
                 self.handle = local.window_handle(self.window) or self.handle   # asked for anew: Windows may have made the window again
                 if not self.collapsed:
                     local.set_window_round(self.handle, False)
@@ -661,6 +670,17 @@ class App:
             else:
                 self.window.restore()
         return {"collapsed": self.collapsed, "round": self.round}   # not round: the page draws a square tile instead
+
+    def set_size(self, size, keep: bool = False) -> dict:
+        """The page's grip was dragged: Wisp's own window follows, its top-right corner staying where it is."""
+        size = sized(size)
+        if size is not None and self.window is not None and self.frameless and not self.collapsed:
+            from webview.window import FixPoint
+            self.size = size
+            self.window.resize(*size, fix_point=FixPoint.NORTH | FixPoint.EAST)
+            if keep and self.persist:
+                local.save_config({**local.load_config(), "size": list(size)})
+        return {"size": list(self.size)}
 
     def window_resized(self, *_):
         """Whatever resizes the collapsed window afterwards (a change of screen or scaling) leaves the old cut: cut it again."""
@@ -884,6 +904,8 @@ def make_handler(app: App, port: int):
                     return self.send_json(200, app.close_window())
                 if isinstance(body.get("collapsed"), bool):
                     return self.send_json(200, app.set_collapsed(body["collapsed"]))
+                if "size" in body:
+                    return self.send_json(200, app.set_size(body.get("size"), body.get("keep") is True))
                 if isinstance(body.get("active"), bool):
                     return self.send_json(200, app.set_active(body["active"]))
                 return self.send_json(400, {"error": "nothing to do"})
@@ -1107,16 +1129,16 @@ def main():
         sys.exit("--smoke needs pywebview")
     if webview and not in_browser:
         plain = "--plain" in args or app.prefs["plain_window"]
-        options = {"width": SIZE[0], "height": SIZE[1], "on_top": True}
+        options = {"width": app.size[0], "height": app.size[1], "on_top": True}
         if plain:
             options["min_size"] = (320, 400)
         else:   # Wisp's own window: no title bar, see-through, collapsible to a small square
             options.update(frameless=True, easy_drag=False, transparent=True, min_size=(ORB, ORB))
         corner = local.load_config().get("corner") if app.persist else None
         if isinstance(corner, dict) and isinstance(corner.get("right"), int) and isinstance(corner.get("top"), int):
-            x, y = corner["right"] - SIZE[0], corner["top"]
+            x, y = corner["right"] - app.size[0], corner["top"]
             # only if that spot is still on a screen
-            if any(s.x <= x and x + SIZE[0] <= s.x + s.width and s.y <= y and y + 80 <= s.y + s.height for s in webview.screens):
+            if any(s.x <= x and x + app.size[0] <= s.x + s.width and s.y <= y and y + 80 <= s.y + s.height for s in webview.screens):
                 options.update(x=x, y=y)
         window = webview.create_window("Wisp", url, **options)
         app.window, app.frameless = window, not plain

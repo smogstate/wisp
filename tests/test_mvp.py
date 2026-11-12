@@ -1474,6 +1474,9 @@ def test_settings_api(wow: Path):
         assert call("/api/window", {"collapsed": True})["collapsed"] is True   # and "round": whether the window really is a disc
         assert call("/api/state")["window"]["collapsed"] is True
         assert call("/api/window", {"collapsed": False})["collapsed"] is False
+        from wisp.__main__ import sized   # the grip's size: whole numbers, kept within what makes sense
+        assert sized([100, 5000]) == (340, 1400) and sized([500, 700]) == (500, 700) and sized("x") is None and sized([500.5, 700]) is None
+        assert call("/api/window", {"size": [500, 700]}) == {"size": [430, 680]}, "no window of Wisp's own here: nothing to resize"
         assert call("/api/window", {"active": False}) == {"active": False}, "the page reports when it is not in use"
     finally:
         server.shutdown()

@@ -229,6 +229,26 @@
   dialog { width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 16px;
     background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px; }
   dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  /* Settings: the title and Save stay put, what is between them scrolls */
+  #settings[open] { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+  #settings .head { padding: 14px 16px 10px; }
+  #settings .body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px 14px; }
+  #settings .foot { padding: 10px 16px 14px; border-top: 1px solid var(--line); }
+  #settings .foot .actions { margin-top: 0; }
+  #settings .foot .problem { margin: 0 0 8px; }
+  #settings h3 { margin: 22px 0 -4px; font-size: 11px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
+  #settings .body > h3:first-of-type { margin-top: 6px; }
+  #settings #results:empty + .actions { display: none; }
+  #settings #results { margin: 0 0 4px; }
+  #settings details { margin-top: 6px; } #settings summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  #other-keys { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  #other-keys .row span { width: 92px; flex: none; color: var(--muted); }
+  #settings .value { width: 40px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* resizing Wisp's own window: a grip in the corner opposite the one the window is pinned by */
+  #grip { display: none; position: fixed; left: 0; bottom: 0; width: 18px; height: 18px; z-index: 5; cursor: nesw-resize; touch-action: none; opacity: .5;
+          background: linear-gradient(45deg, transparent 0 14%, var(--muted) 14% 21%, transparent 21% 32%, var(--muted) 32% 39%, transparent 39%); }
+  #grip:hover { opacity: 1; }
+  body.glass #grip, body.fade #grip { display: block; }
   dialog h2 { margin: 0 0 12px; font-size: 16px; }
   dialog label { display: block; font-weight: 600; margin: 12px 0 4px; }
   dialog .row { display: flex; gap: 8px; align-items: center; }
@@ -253,6 +273,7 @@
 </style>
 </head>
 <body>
+<div id="grip" title="Drag to resize"></div>
 <div id="orb" class="pywebview-drag-region" data-state="idle">
   <button type="button" aria-label="Open Wisp" title="Open Wisp"></button>
 </div>
@@ -275,8 +296,13 @@
   <button id="send" class="primary icon" type="submit" aria-label="Send" title="Send" data-state="send"></button>
 </form>
 <dialog id="settings" aria-labelledby="settings-title">
-  <div class="row"><h2 id="settings-title" style="flex:1;margin:0">Settings</h2>
+  <div class="row head"><h2 id="settings-title" style="flex:1;margin:0">Settings</h2>
     <button id="close" class="icon" type="button" aria-label="Close" title="Close"></button></div>
+  <div class="body">
+  <ul id="results"></ul>
+  <div class="actions"><button id="copy-results" type="button" hidden>Copy the results</button></div>
+
+  <h3>Game</h3>
   <label for="folder">Game folder</label>
   <div class="row">
     <input id="folder" autocomplete="off" spellcheck="false" placeholder="…\World of Warcraft\_forever_" autofocus>
@@ -290,6 +316,8 @@
     <button id="install" type="button">Install addon</button>
   </div>
   <div class="hint" id="addon-hint"></div>
+
+  <h3>Answers</h3>
   <label for="provider">Answers come from</label>
   <div class="row">
     <select id="provider" aria-label="Provider"></select>
@@ -297,25 +325,23 @@
     <datalist id="models"></datalist>
   </div>
   <div class="hint" id="model-hint"></div>
-  <label>API keys</label>
+  <label>API key</label>
   <div id="keys"></div>
-  <div class="hint">Kept in this PC's credential store. Each key is sent only to its own provider.</div>
-  <label for="bnet-id">Blizzard auction data (optional)</label>
-  <div class="row">
-    <input id="bnet-id" autocomplete="off" spellcheck="false" placeholder="Client ID" aria-label="Blizzard client ID" style="flex:1;min-width:0">
-    <input id="bnet-secret" type="password" autocomplete="off" spellcheck="false" placeholder="Client secret" aria-label="Blizzard client secret" style="flex:1;min-width:0">
-    <select id="bnet-region" aria-label="Region"><option value="eu">EU</option><option value="us">US</option><option value="kr">KR</option><option value="tw">TW</option></select>
-  </div>
-  <div class="hint">A free client from develop.battle.net. For now Check setup tries it: every auction of your auction house, without scanning. Kept in this PC's credential store and sent only to Blizzard.</div>
+  <details id="more-keys"><summary>Keys of the other providers</summary><div id="other-keys"></div></details>
+  <div class="hint">Kept in this PC's credential store; each key goes only to its own provider.</div>
   <label for="cap">Spending limit per day, in dollars</label>
   <div class="row"><input id="cap" type="number" min="0" max="1000" step="0.5" inputmode="decimal" style="max-width:110px"></div>
   <div class="hint" id="cap-hint"></div>
-  <label for="theme">Appearance</label>
+
+  <h3>Window</h3>
+  <label for="theme">Theme</label>
+  <div class="row"><select id="theme" aria-label="Theme">
+    <option value="auto">Follow Windows</option><option value="dark">Dark</option><option value="light">Light</option>
+  </select></div>
+  <label for="opacity">Opacity</label>
   <div class="row">
-    <select id="theme" aria-label="Theme">
-      <option value="auto">Follow Windows</option><option value="dark">Dark</option><option value="light">Light</option>
-    </select>
     <input id="opacity" type="range" min="30" max="100" step="5" aria-label="How solid the window is">
+    <span id="opacity-value" class="value"></span>
   </div>
   <div class="hint" id="opacity-hint"></div>
   <label class="check"><input id="plain" type="checkbox"> Use an ordinary window, with a title bar and no transparency</label>
@@ -324,17 +350,27 @@
   <div class="row"><select id="language" aria-label="Language">
     <option value="auto">Same as the game / Как в игре</option><option value="ru">Русский</option><option value="en">English</option>
   </select></div>
+
+  <h3>More</h3>
+  <label for="bnet-id">Blizzard auction data (optional)</label>
+  <div class="row"><input id="bnet-id" autocomplete="off" spellcheck="false" placeholder="Client ID" aria-label="Blizzard client ID"></div>
+  <div class="row" style="margin-top:6px">
+    <input id="bnet-secret" type="password" autocomplete="off" spellcheck="false" placeholder="Client secret" aria-label="Blizzard client secret" style="flex:1;min-width:0">
+    <select id="bnet-region" aria-label="Region"><option value="eu">EU</option><option value="us">US</option><option value="kr">KR</option><option value="tw">TW</option></select>
+  </div>
+  <div class="hint">A free client from develop.battle.net: every listing of your auction house, without scanning. Sent only to Blizzard.</div>
   <label class="check"><input id="auto-update" type="checkbox"> Keep Wisp up to date by itself</label>
   <div class="row"><span class="hint" id="version" style="flex:1;margin:0"></span>
     <button id="check-update" type="button">Check for updates</button></div>
-  <div class="problem" id="settings-problem" role="alert"></div>
-  <div class="actions">
-    <button id="check" type="button">Check setup</button>
-    <span class="grow"></span>
-    <button id="save" type="button" class="primary">Save</button>
   </div>
-  <ul id="results"></ul>
-  <div class="actions"><button id="copy-results" type="button" hidden>Copy the results</button></div>
+  <div class="foot">
+    <div class="problem" id="settings-problem" role="alert"></div>
+    <div class="actions">
+      <button id="check" type="button">Check setup</button>
+      <span class="grow"></span>
+      <button id="save" type="button" class="primary">Save</button>
+    </div>
+  </div>
 </dialog>
 <dialog id="sessions" aria-labelledby="sessions-title">
   <div class="row">
@@ -467,6 +503,24 @@ async function setCollapsed(on) {
   }
 }
 function toggleCollapsed() { setCollapsed(!collapsed); }
+
+// ---- resizing: drag the grip. The window is pinned by its top-right corner, so left is wider and down is taller. ----
+const grip = document.getElementById("grip");
+grip.onpointerdown = down => {
+  grip.setPointerCapture(down.pointerId);
+  const from = { x: down.screenX, y: down.screenY, w: innerWidth, h: innerHeight };
+  let want = null, sending = false;
+  grip.onpointermove = move => {
+    want = [Math.round(from.w - (move.screenX - from.x)), Math.round(from.h + (move.screenY - from.y))];
+    if (sending) return;   // one at a time: the next move sends the newest size
+    sending = true;
+    post("/api/window", { size: want }).then(() => { sending = false; });
+  };
+  grip.onpointerup = grip.onpointercancel = () => {
+    grip.onpointermove = grip.onpointerup = grip.onpointercancel = null;
+    if (want) post("/api/window", { size: want, keep: true });   // where it was let go is the size Wisp opens at from now on
+  };
+};
 window.toggleCollapsed = toggleCollapsed;   // the global key calls this
 window.setCollapsed = setCollapsed;
 
@@ -720,7 +774,11 @@ const RU = {
   "Wisp installs its addon into the game's AddOns folder when you save the game folder.": "Wisp установит свой аддон в папку AddOns игры, когда вы сохраните папку игры.",
   "How solid the window is while you are not using it. It is fully solid under the mouse and while you type.": "Непрозрачность окна, пока вы им не пользуетесь. Под мышью и при вводе оно полностью непрозрачно.",
   "Transparency needs Wisp's own window.": "Для прозрачности нужно собственное окно Wisp.",
-  "Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. A model whose price Wisp does not know is counted at the dearest price it knows, so the limit holds for it too.": "Потрачено сегодня: {spent}. Когда лимит достигнут, Wisp больше ничего не спрашивает до завтра; 0 — без лимита. Модель, цену которой Wisp не знает, считается по самой высокой известной цене, так что лимит действует и для неё.",
+  "Spent today: {spent}. At the limit Wisp asks nothing more until tomorrow; 0 means no limit.": "Потрачено сегодня: {spent}. На лимите Wisp больше ничего не спрашивает до завтра; 0 — без лимита.",
+  "Game": "Игра", "Answers": "Ответы", "Window": "Окно", "More": "Ещё", "API key": "Ключ API", "Theme": "Тема", "Opacity": "Непрозрачность",
+  "Keys of the other providers": "Ключи других провайдеров", "Drag to resize": "Потяните, чтобы изменить размер",
+  "Kept in this PC's credential store; each key goes only to its own provider.": "Хранятся в хранилище учётных данных этого компьютера; каждый ключ уходит только своему провайдеру.",
+  "A free client from develop.battle.net: every listing of your auction house, without scanning. Sent only to Blizzard.": "Бесплатный клиент с develop.battle.net: все лоты вашего аукциона без сканирования. Отправляется только Blizzard.",
   "This copy runs from source and does not update itself.": "Эта копия запущена из исходников и не обновляется.",
   "This is version {version}": "Это версия {version}", " of {date}": " от {date}", "It is the newest.": "Она последняя.",
   "Fetching version {new}…": "Загружается версия {new}…", "Version {new} is ready: it starts the next time Wisp does.": "Версия {new} готова: она запустится при следующем старте Wisp.",
@@ -760,7 +818,7 @@ function TN(n, one, many) {
 // conversation holds is never touched.
 function localize() {
   document.documentElement.lang = lang;
-  const fixed = n => ["log", "peek-log", "session-list", "results", "keys"].includes(n.id) || n.tagName === "SCRIPT" ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+  const fixed = n => ["log", "peek-log", "session-list", "results", "keys", "other-keys"].includes(n.id) || n.tagName === "SCRIPT" ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, { acceptNode: fixed });
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     if (n.nodeType === Node.TEXT_NODE) {
@@ -1365,7 +1423,7 @@ function showSettings(s) {
   $("addon-hint").textContent = s.addon_note
     || T(s.addon === "installed" ? "Wisp keeps this copy up to date by itself." : "Wisp installs its addon into the game's AddOns folder when you save the game folder.");
   $("theme").value = s.theme;
-  $("opacity").value = s.opacity;
+  $("opacity").value = s.opacity; $("opacity-value").textContent = s.opacity + "%";
   $("opacity").disabled = !s.glass;
   $("opacity-hint").textContent = T(s.glass ? "How solid the window is while you are not using it. It is fully solid under the mouse and while you type."
     : "Transparency needs Wisp's own window.");
@@ -1376,12 +1434,12 @@ function showSettings(s) {
   $("bnet-id").value = $("bnet-secret").value = "";
   $("bnet-secret").placeholder = s.battlenet ? "•••••••• (" + T(s.battlenet === "saved" ? "saved on this PC" : s.battlenet) + ")" : T("Client secret");
   $("cap").value = s.spend.cap;
-  $("cap-hint").textContent = T("Spent today: {spent}. Once the limit is reached Wisp asks nothing more until tomorrow; 0 means no limit. A model whose price Wisp does not know is counted at the dearest price it knows, so the limit holds for it too.", { spent: dollars(s.spend.today) });
+  $("cap-hint").textContent = T("Spent today: {spent}. At the limit Wisp asks nothing more until tomorrow; 0 means no limit.", { spent: dollars(s.spend.today) });
   showVersion(s.update || {});
   // who answers: a provider and one of its models; and a key for each provider
   const provider = $("provider");
   provider.textContent = "";
-  $("keys").textContent = "";
+  $("keys").textContent = ""; $("other-keys").textContent = "";
   for (const one of s.providers) {
     const option = document.createElement("option");
     option.value = one.id; option.textContent = one.label + (one.key ? "" : T(" (no key yet)"));
@@ -1393,9 +1451,11 @@ function showSettings(s) {
     field.setAttribute("aria-label", T("{company} API key", one));
     field.placeholder = one.key ? "•••••••• (" + T(one.key === "saved" ? "saved on this PC" : one.key) + ")" : one.hint;
     row.append(name, field);
+    row.dataset.provider = one.id;
     $("keys").append(row);
   }
   provider.value = s.provider;
+  placeKeys(s.provider);
   showModels(s.provider);
   return true;
 }
@@ -1435,7 +1495,11 @@ async function showModels(provider) {
 $("model").addEventListener("focus", e => { e.target.value = ""; });
 $("model").addEventListener("blur", e => { if (!e.target.value.trim()) e.target.value = e.target.placeholder; });
 
-const keysNow = () => Object.fromEntries([...document.querySelectorAll("#keys input")].filter(f => f.value.trim()).map(f => [f.dataset.provider, f.value]));
+// only the key of the provider that answers is in sight; the others wait folded, with whatever was typed in them
+function placeKeys(chosen) {
+  for (const row of document.querySelectorAll("#keys > .row, #other-keys > .row")) $(row.dataset.provider === chosen ? "keys" : "other-keys").append(row);
+}
+const keysNow = () => Object.fromEntries([...document.querySelectorAll("#keys input, #other-keys input")].filter(f => f.value.trim()).map(f => [f.dataset.provider, f.value]));
 const modelNow = () => ({ keys: keysNow(), provider: $("provider").value, model: $("model").value, bnet_region: $("bnet-region").value,
                           ...($("bnet-id").value.trim() && $("bnet-secret").value.trim() ? { battlenet: { id: $("bnet-id").value, secret: $("bnet-secret").value } } : {}) });
 
@@ -1450,12 +1514,12 @@ async function post(path, body) {
 }
 
 $("gear").onclick = openSettings;
-$("provider").onchange = () => showModels($("provider").value);
+$("provider").onchange = () => { showModels($("provider").value); placeKeys($("provider").value); };
 $("close").onclick = () => dialog.close();
 const lookNow = () => ({ theme: $("theme").value, opacity: parseInt($("opacity").value, 10), plain_window: $("plain").checked,
                          auto_update: $("auto-update").checked, language: $("language").value,
                          ...(Number.isFinite(parseFloat($("cap").value)) ? { daily_cap: parseFloat($("cap").value) } : {}) });
-$("theme").onchange = $("opacity").oninput = () => applyLook($("theme").value, parseInt($("opacity").value, 10));   // see it before saving
+$("theme").onchange = $("opacity").oninput = () => { $("opacity-value").textContent = $("opacity").value + "%"; applyLook($("theme").value, parseInt($("opacity").value, 10)); };   // see it before saving
 $("save").onclick = async () => {
   const saved = await post("/api/settings", { wow_dir: $("folder").value, ...modelNow(), ...lookNow() });
   if (!showSettings(saved)) return;
@@ -1480,6 +1544,7 @@ $("check").onclick = async () => {
   if (!showSettings(saved)) return;
   $("results").textContent = "";
   $("check").disabled = true; $("check").textContent = T("Checking…");
+  document.querySelector("#settings .body").scrollTop = 0;   // the results come in at the top
   const { results = [], error } = await post("/api/check", {});
   $("check").disabled = false; $("check").textContent = T("Check setup");
   if (error) { $("settings-problem").textContent = error; return; }
