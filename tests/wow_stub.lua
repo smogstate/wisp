@@ -414,6 +414,7 @@ end
 -- DungeonJournal, in the shape of its own tables (made-up entries, not its data)
 local completedIds = { [65] = true, [132] = true }
 C_QuestLog.IsQuestFlaggedCompleted = function(id) return completedIds[id] == true end
+C_QuestLog.GetTitleForQuestID = function(id) return ({ [33] = "Волки на границе" })[id] end   -- the game's own word, where it has one
 C_QuestLog.GetLogIndexForQuestID = function(id) if id == 33 or id == 76 then return 2 end end
 if not flags:find("nojournal") then
   ForeverDungeonJournal_NS = {

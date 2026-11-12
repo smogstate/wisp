@@ -160,6 +160,16 @@ def check(wow_dir: Path | None, call_model: bool = True, provider: str = "anthro
                     not_yet("items"), optional=True)
             places = sum(1 for ref in game.places if ref.startswith("q") and (".start." in ref or ".end." in ref))
             add(t("Quest locations found"), places > 0, t("{n} for quest givers and turn-ins", n=places), t("none: is your quest log empty?"))
+            probe = game.snapshot.get("nameProbe") if isinstance(game.snapshot.get("nameProbe"), dict) else None
+            if probe:   # whose names Wisp shows: Questie's, next to the game's own, for a few of the character's quests
+                said = lambda v: f"«{v}»" if isinstance(v, str) and v else "–"
+                for kind, label in (("quests", t("Names of quests")), ("people", t("Names of people"))):
+                    rows = [r for r in probe.get(kind) or [] if isinstance(r, dict)][:3]
+                    if rows:
+                        add(label, True, "; ".join(f"Questie {said(r.get('questie'))}, {t('the game')} {said(r.get('game') or r.get('log'))}" for r in rows))
+                add(t("Languages"), True, f"{t('the game')}: {probe.get('locale') or '?'} · Questie: {probe.get('questieLocale') or '?'} · "
+                    + t("the game can be asked for a quest's name: {a}, for a person's: {b}",
+                        a=t("yes") if probe.get("canAskTitle") else t("no"), b=t("yes") if probe.get("canAskPerson") else t("no")))
             if battlenet == "missing":
                 add(t("Blizzard API"), False, bad=t("not set up: optional, in Settings"), optional=True)
             elif battlenet is not None:   # the player's own developer client: try Blizzard's data for real

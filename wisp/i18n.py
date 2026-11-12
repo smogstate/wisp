@@ -70,6 +70,14 @@ RU_COUNTED = {
 }
 
 RU = {
+    # whose names Wisp shows (Check setup)
+    "Names of quests": "Названия заданий",
+    "Names of people": "Имена персонажей",
+    "the game": "игра",
+    "Languages": "Языки",
+    "the game can be asked for a quest's name: {a}, for a person's: {b}": "у игры можно спросить название задания: {a}, имя персонажа: {b}",
+    "yes": "да",
+    "no": "нет",
     # how a profession goes on (profession_path)
     "At a trainer: {what}": "У учителя: {what}", "Step or trainer": "Шаг или учитель", "At skill": "С навыка",
     "The skill is the one the book, the quest or the trainer's window states. ? — the game has not said yet: visit that trainer once, or log in again for a book.": "Навык — тот, что указан в книге, в задании или в окне учителя. ? — игра ещё не сообщила: зайдите к этому учителю один раз или войдите в игру ещё раз (для книги).",

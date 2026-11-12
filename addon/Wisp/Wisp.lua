@@ -336,6 +336,49 @@ local function namer(ZoneDB)
   end, maps
 end
 
+-- Whose names Wisp shows, for Check setup: for a few of the character's own quests, the name Questie's
+-- database gives next to the one the game itself gives, and the same for the people those quests go back
+-- to. Names of quests and people come from Questie; if those are in another language than the game's, this
+-- shows it, and shows whether the game could be asked instead. A look, not a fix.
+local function nameProbe(DB)
+  local out = { locale = GetLocale(), quests = {}, people = {},
+                canAskTitle = (C_QuestLog and C_QuestLog.GetTitleForQuestID) and true or false,
+                canAskPerson = (C_TooltipInfo and C_TooltipInfo.GetHyperlink) and true or false }
+  local okL, l10n = pcall(questieModule, "l10n")
+  if okL and type(l10n) == "table" and type(l10n.GetUILocale) == "function" then
+    local okU, ui = pcall(l10n.GetUILocale, l10n)
+    out.questieLocale = okU and type(ui) == "string" and ui or nil
+  end
+  if type(DB) ~= "table" then return out end
+  local function person(id)
+    if type(id) ~= "number" or #out.people >= 3 then return end
+    local row = { id = id, questie = ask(DB.QueryNPCSingle, id, "name") }
+    if out.canAskPerson then   -- what the game's own tooltip for that creature says, if the game knows it yet
+      local ok, data = pcall(C_TooltipInfo.GetHyperlink, "unit:Creature-0-0-0-0-" .. id .. "-0000000000")
+      local line = ok and type(data) == "table" and type(data.lines) == "table" and data.lines[1]
+      row.game = type(line) == "table" and type(line.leftText) == "string" and clip(line.leftText, 60) or nil
+    end
+    if type(row.questie) == "string" then row.questie = clip((row.questie:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")), 60) end
+    out.people[#out.people + 1] = row
+  end
+  for i = 1, C_QuestLog.GetNumQuestLogEntries() do
+    local info = C_QuestLog.GetInfo(i)
+    if info and not info.isHeader and not info.isHidden and #out.quests < 3 then
+      local id = info.questID
+      local row = { id = id, log = info.title, questie = ask(DB.QueryQuestSingle, id, "name") }
+      if out.canAskTitle then
+        local ok, title = pcall(C_QuestLog.GetTitleForQuestID, id)
+        row.game = ok and type(title) == "string" and title or nil
+      end
+      if type(row.questie) == "string" then row.questie = clip(row.questie, 60) end
+      out.quests[#out.quests + 1] = row
+      local ends = ask(DB.QueryQuestSingle, id, "finishedBy")
+      person(type(ends) == "table" and type(ends[1]) == "table" and ends[1][1] or nil)
+    end
+  end
+  return out
+end
+
 local function buildQuestIndex(DB, ZoneDB, key)
   local Player, Corrections = questieModule("QuestiePlayer"), questieModule("QuestieCorrections")
   local XP = questieModule("QuestXP")
@@ -1894,6 +1937,7 @@ local function buildSnapshot()
   if not okX then progress = nil end
   local okD, deaths = pcall(deathRecord)
   if not okD then deaths = nil end
+  local okN, named = pcall(nameProbe, DB)
   local okS, needs = pcall(itemSkills)
   local okQ, rare = pcall(rarities)
   local okT, taught = pcall(trainerWindows)
@@ -1934,6 +1978,7 @@ local function buildSnapshot()
     deaths = deaths,
     combatLog = COMBAT_LOG_OPEN,   -- whether this game lets an addon read the combat log at all
     itemSkill = okS and needs or nil,
+    nameProbe = okN and named or nil,
     quality = okQ and rare or nil,
     trainerWindows = okT and taught or nil,
     vendor = vendor,
