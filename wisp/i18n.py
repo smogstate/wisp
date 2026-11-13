@@ -93,6 +93,8 @@ RU = {
     "none yet: the addon files the last half minute of a fight when the character dies": "пока нет: аддон записывает последние полминуты боя, когда персонаж погибает",
     "a player": "игрок",
     "level {n}": "уровень {n}",
+    "Upgrades on the auction house": "Улучшения на аукционе", "Upgrades for the money": "Улучшения за свои деньги", "Price": "Цена",
+    "auction house, {price}": "аукцион, {price}", "Prices from your last auction scans: an item may be sold since.": "Цены из ваших последних сканов аукциона: предмет могли уже купить.",
     "Upgrades": "Улучшения", "Upgrades by Pawn": "Улучшения по Pawn", "Upgrade": "Лучше", "Replaces": "Вместо",
     "reward: {quest}": "награда: {quest}", "a choice: {quest}": "на выбор: {quest}", "in the bags": "в сумках", "empty slot": "пустой слот",
     "Pawn's own reckoning from the item's stats and your scale, as on its tooltips.": "Расчёт самого Pawn по характеристикам предмета и вашей шкале, как в его подсказках.",

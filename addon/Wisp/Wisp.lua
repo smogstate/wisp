@@ -1960,7 +1960,44 @@ end
 -- What the Pawn addon says of the items Wisp may be asked about: the quest log's rewards, what is carried,
 -- the dungeon journal's loot. Pawn knows the item stats and the player's scales; Wisp asks it, as its own
 -- tooltip does, and keeps the answer: for each scale, how much of an upgrade an item is and what it replaces.
-local PAWN_ITEMS = 150   -- at most this many asked, at logout
+local PAWN_ITEMS, PAWN_MARKET = 150, 250   -- at most this many asked, at logout: items Wisp knows of, then gear on the auction house
+local NOT_WORN = { INVTYPE_BAG = true, INVTYPE_QUIVER = true, INVTYPE_TABARD = true, INVTYPE_BODY = true, INVTYPE_AMMO = true, INVTYPE_NON_EQUIP_IGNORE = true }
+
+-- Gear the auction house had, at its lowest price: from Auctionator's record, which keeps gear under its own
+-- keys (g:item:item level), and from a full scan this session. Only what this character can wear at its level,
+-- the closest to that level first: an item far below it is seldom an upgrade.
+local function marketGear()
+  local lowest = {}
+  local function seen(id, price)
+    if type(id) == "number" and type(price) == "number" and price > 0 and (not lowest[id] or price < lowest[id]) then lowest[id] = price end
+  end
+  local db = type(Auctionator) == "table" and type(Auctionator.Database) == "table" and Auctionator.Database.db
+  if type(db) == "table" then
+    for key, row in pairs(db) do
+      local id = tonumber(key) or tonumber(type(key) == "string" and key:match("^g:(%d+):") or nil)
+      if id and type(row) == "table" then seen(id, row.m) end
+    end
+  end
+  for id, entry in pairs(listings) do
+    local least
+    for price in pairs(entry.prices or {}) do if not least or price < least then least = price end end
+    seen(id, least)
+  end
+  local level, out = UnitLevel("player") or 0, {}
+  local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+  local info = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+  for id, price in pairs(lowest) do
+    local okI, _, _, _, slot = pcall(instant, id)
+    if okI and type(slot) == "string" and slot ~= "" and not NOT_WORN[slot] then
+      local okL, name, _, _, _, needs = pcall(info, id)
+      if okL and name and type(needs) == "number" and needs <= level then
+        out[#out + 1] = { id = id, price = price, needs = needs, name = name }
+      end
+    end
+  end
+  table.sort(out, function(a, b) if a.needs ~= b.needs then return a.needs > b.needs end return a.id < b.id end)
+  return out
+end
 
 local function pawnVerdicts(log, carried, journal)
   if not (PawnIsInitialized and type(PawnGetItemData) == "function" and type(PawnIsItemAnUpgrade) == "function") then return nil end
@@ -1984,10 +2021,11 @@ local function pawnVerdicts(log, carried, journal)
     end
   end
   local items, unknown = {}, 0
-  for _, id in ipairs(wanted) do
+  local function rate(id, extra)
     local okI, item = pcall(PawnGetItemData, "item:" .. id)
     if okI and type(item) == "table" and item.Link then
-      local entry = { id = id }
+      local entry = extra or {}
+      entry.id = id
       local okU, upgrades = pcall(PawnIsItemAnUpgrade, item)
       if okU and type(upgrades) == "table" then
         for _, u in ipairs(upgrades) do
@@ -2004,9 +2042,19 @@ local function pawnVerdicts(log, carried, journal)
           if okV and type(value) == "number" then entry.v = entry.v or {}; entry.v[i] = math.floor(value * 10 + 0.5) / 10 end
         end
       end
-      if entry.up or entry.v then items[#items + 1] = entry end
+      if entry.up or entry.v and not entry.ah then items[#items + 1] = entry end   -- from the market: only an upgrade is worth the room
     elseif okI and type(item) == "table" then
       unknown = unknown + 1   -- the game has not described it yet: Pawn has no stats for it
+    end
+  end
+  for _, id in ipairs(wanted) do rate(id) end
+  local okM, gear = pcall(marketGear)
+  local asked = 0
+  for _, g in ipairs(okM and gear or {}) do
+    if asked >= PAWN_MARKET then break end
+    if not seen[g.id] then
+      seen[g.id], asked = true, asked + 1
+      rate(g.id, { ah = g.price, n = g.name })
     end
   end
   local names = {}

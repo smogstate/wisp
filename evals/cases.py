@@ -434,6 +434,13 @@ CASES = [
                  "По оценке Pawn лучший апгрейд — Rockslicer с Rhahk'Zor в The Deadmines: +42% для шкалы Mage: frost, слот сейчас пустой. "
                  "Награда Miner's Cape лучше вашего Linen Cloak на 15% по шкале Fire WoWSims Weights.")]},
 
+    {"id": "pawn-auction", "tags": ["sim", "cards", "gold"], "lang": "ru",
+     "ask": "Что из шмота на аукционе мне стоит купить? Чтобы подешевле и с толком.",
+     "tools": ["upgrades"], "args": {"upgrades": {"source": "auction"}}, "say": ["Cheap Bracers", "8\\s*(?:s|с)"], "never": ["Too High Helm", "Fine Necklace"],
+     "oracle": [([("upgrades", {"source": "auction", "show": True})],
+                 "Выгоднее всего Cheap Bracers за 8с: +10% по шкале Fire WoWSims Weights. Owl Robe за 1з 20с даёт +30% для Mage: frost. "
+                 "Кнопка на карточке сделает список покупок в Auctionator.")]},
+
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
      "ask": "Привет! Ты кто?", "no_tools": True,

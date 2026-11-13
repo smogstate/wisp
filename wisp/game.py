@@ -161,6 +161,8 @@ class Game:
             values = {scales[i]: v for i, v in enumerate(_as_list(item.get("v"))[:len(scales)]) if number(v)}
             if up or values:
                 out[item["id"]] = {"up": sorted(up, key=lambda u: -u[1]), "values": values}
+                if isinstance(item.get("ah"), int) and not isinstance(item["ah"], bool) and item["ah"] > 0:   # gear on the auction house
+                    out[item["id"]].update(price=item["ah"], name=_clean(item.get("n"), 80) or f"item {item['id']}")
         return out, scales
 
     def _pawn_says(self, item) -> str | None:
@@ -1847,8 +1849,8 @@ class Game:
         if not self.snapshot:
             return {"error": self.problem}
         source = args.get("source", "any")
-        if source not in ("any", "quests", "bags", "dungeons"):
-            return {"error": "source must be any, quests, bags or dungeons"}
+        if source not in ("any", "quests", "bags", "dungeons", "auction"):
+            return {"error": "source must be any, quests, bags, dungeons or auction"}
         addons = self.snapshot.get("addons") if isinstance(self.snapshot.get("addons"), dict) else {}
         if not isinstance(self.snapshot.get("pawn"), dict):
             return {"error": "No word from Pawn. " + ("The Pawn addon was not seen in the game at the last sync: with it installed, Wisp asks "
@@ -1874,22 +1876,45 @@ class Game:
                     for drop in (i for i in _as_list(b.get("loot")) if isinstance(i, list) and len(i) >= 2 and isinstance(i[0], int)):
                         boss = f"{_clean(b.get('name'), 80)}, {_clean(d.get('name'), 80)}"
                         where.setdefault(drop[0], []).append((_clean(drop[1], 80), boss, boss))
+        if source in ("any", "auction"):
+            for item, said in self.pawn.items():
+                if said.get("price"):
+                    where.setdefault(item, []).append((said["name"], f"on the auction house for {coins(said['price'])}",
+                                                       t("auction house, {price}", price=coins(said["price"]))))
         found = []
         for item, places in where.items():
             said = self.pawn.get(item)
             if said and said["up"]:
                 name = self.graph.names.get(item) or places[0][0] or f"item {item}"
-                found.append({"item": name, "from": [p[1] for p in places][:3], "_shown": places[0][2],
+                found.append({"item": name, "from": [p[1] for p in places][:3], "_shown": places[0][2], "_id": item,
                               "upgrade": [{"scale": scale, "by": f"+{round(share * 100)}%", "replaces": replaces or "an empty slot"}
                                           for scale, share, replaces in said["up"]],
-                              **({"pawn_value": said["values"]} if said["values"] else {}), "_best": said["up"][0][1]})
-        found.sort(key=lambda f: -f["_best"])
+                              **({"pawn_value": said["values"]} if said["values"] else {}), "_best": said["up"][0][1],
+                              **({"price": coins(said["price"]), "_price": said["price"], "_name": said["name"]} if said.get("price") else {})})
+        if source == "auction":   # for the money: how much better per gold
+            found.sort(key=lambda f: -f["_best"] / max(f.get("_price", 1), 1))
+        else:
+            found.sort(key=lambda f: -f["_best"])
         unknown = (self.snapshot["pawn"].get("unknown") or 0) if isinstance(self.snapshot["pawn"].get("unknown"), int) else 0
         out = {"scales": self.pawn_scales, "upgrades": [{k: v for k, v in f.items() if not k.startswith("_")} for f in found[:20]]}
         if unknown:
             out["not_rated"] = (f"{unknown} items the game had not described yet, so Pawn had no stats for them: they show once seen in the "
                                 "game (a tooltip, the journal), then /wisp sync")
-        if args.get("show") is True and found:
+        if args.get("show") is True and found and source == "auction":
+            several = len(self.pawn_scales) > 1
+            top = found[:20]
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Upgrades on the auction house"), "table": {
+                "title": t("Upgrades for the money"), "sub": " · ".join(self.pawn_scales),
+                "columns": [t("Item"), t("Upgrade"), t("Price")],
+                "rows": [[f["item"] + (f" · {f['upgrade'][0]['scale']}" if several else ""), f["upgrade"][0]["by"], f["price"]] for f in top],
+                "notes": [t("Pawn's own reckoning from the item's stats and your scale, as on its tooltips."),
+                          t("Prices from your last auction scans: an item may be sold since.")]},
+                "wisp": encode_wisp1([{"do": "auctionator.shopping_list", "name": t("Upgrades"),
+                                       "items": [{"id": f["_id"], "name": f["_name"], "quantity": 1} for f in top[:10]]}]),
+                "hint": t("Shopping list for Auctionator: Copy, then in the game Ctrl+V twice")})
+            out["shown"] = ("a card with these upgrades and their prices is now shown to the player, with a button that makes an "
+                            "Auctionator shopping list of the first ten: do not repeat its rows")
+        elif args.get("show") is True and found:
             several = len(self.pawn_scales) > 1
             self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Upgrades"), "table": {
                 "title": t("Upgrades by Pawn"), "sub": " · ".join(self.pawn_scales),
@@ -1901,7 +1926,8 @@ class Game:
             out["shown"] = "a card with these upgrades is now shown to the player: do not repeat its rows"
         out["note"] = ("Pawn's verdict, from the game: it knows each item's stats and the player's scales (a scale is a set of stat "
                        "weights, from a sim or a guide). 'by' is how much better than what is worn in that slot, for that scale. "
-                       "Only items Wisp knows of are rated: the quest log's rewards, what is carried, the dungeon journal's loot. "
+                       "Only items Wisp knows of are rated: the quest log's rewards, what is carried, the dungeon journal's loot, "
+                       "and gear seen on the auction house that the character can wear now (by auction: sorted by upgrade per gold). "
                        "Nothing found means none of those is an upgrade by Pawn, not that there is none in the game.")
         return out
 
@@ -2554,7 +2580,8 @@ TOOLS = [
                        "the other tools also carry Pawn's verdict when there is one.",
         "input_schema": {
             "type": "object",
-            "properties": {"source": {"type": "string", "enum": ["any", "quests", "bags", "dungeons"]},
+            "properties": {"source": {"type": "string", "enum": ["any", "quests", "bags", "dungeons", "auction"],
+                                      "description": "auction: gear on the auction house, best upgrade for the money first."},
                            "show": {"type": "boolean", "description": "true to also show the player the upgrades as a card."}},
             "additionalProperties": False,
         },

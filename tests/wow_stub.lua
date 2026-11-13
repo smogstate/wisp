@@ -794,6 +794,25 @@ if flags:find("pawn") then   -- the Pawn addon's public import: it parses the sc
     if item.ID == 5444 then return name == "Fire WoWSims Weights" and 12.34 or 8 end
     if item.ID == 872 then return name == '"MrRobot":MAGE3' and 30.06 or nil end
   end
+  -- gear on the auction house, in Auctionator's record under its own keys: what it is, where it goes, the level it needs
+  local gear = { [2000] = { "Owl Robe", "INVTYPE_ROBE", 11, "g:2000:15", 12000 }, [2002] = { "Cheap Bracers", "INVTYPE_WRIST", 9, "g:2002:10", 800 },
+                 [2001] = { "Too High Helm", "INVTYPE_HEAD", 20, "g:2001:25", 900 }, [2004] = { "Fine Necklace", "INVTYPE_NECK", 12, "2004", 50000 } }
+  if Auctionator then
+    for _, g in pairs(gear) do Auctionator.Database.db[g[4]] = { m = g[5], h = {} } end
+    Auctionator.Database.db["g:2002:11"] = { m = 1500, h = {} }   -- the same bracers again, dearer: the lowest price counts
+  end
+  C_Item.GetItemInfoInstant = function(id)
+    if gear[id] then return id, "Armor", "Cloth", gear[id][2], 1, 4, 1 end
+    return GetItemInfoInstant(id)
+  end
+  C_Item.GetItemInfo = function(id) if gear[id] then return gear[id][1], "link", 2, 15, gear[id][3] end end
+  local upgradeOf = PawnIsItemAnUpgrade
+  PawnIsItemAnUpgrade = function(item)
+    if item.ID == 2000 then return { { '"MrRobot":MAGE3', "Mage: frost", 0.30, nil } } end
+    if item.ID == 2002 then return { { "Fire WoWSims Weights", "Fire WoWSims Weights", 0.10, "|cff9d9d9d|Hitem:3000::|h[Frayed Bracers]|h|r" } } end
+    if item.ID == 2001 then error("asked about an item the character cannot wear yet") end
+    return upgradeOf(item)
+  end
 end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
