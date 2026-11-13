@@ -55,7 +55,7 @@ Suggested first three: the attackers' own casts, loss-of-control data, the targe
 - **Trainers**: done on 2026-11-12 from Questie's own list (`profession_path`). The skill each step is taken at is now on the step: from the book itself, the quest, or the trainer's window once visited. Still open: the **skill a recipe needs** is recorded (trainer windows, sold recipe items) but not yet shown on recipe cards; a trainer never visited leaves its ranks unknown.
 - **Item rarity**: done on 2026-11-12 (learned from the game, names coloured in the window).
 - **Item properties** (bag slots, stats, armour type): "a 14 slot bag", "food with stamina" cannot be answered. Needs a probe of what the client and Blizzard's API give.
-- **The character's gear, talents and known spells**: not exported, so no "is this an upgrade" and no build advice.
+- **The character's gear and talents**: exported since 2026-11-13 (names and ids, for the sim export card). Still missing: item stats and known spells, so no "is this an upgrade" and no build advice from Wisp itself; a sim site does that from the exported text.
 - **Travel**: flight paths and how far things are across zones; a questing route stays inside one zone.
 - **Drop rates** beyond the player's own measured loot.
 - **Reputation, honour, PvP standing.**

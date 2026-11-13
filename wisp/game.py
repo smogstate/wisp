@@ -93,6 +93,7 @@ class Game:
         self.recipes_read = False          # whether the addon has read every recipe in the game
         self.web_seen: dict[str, str] = {}  # url -> title of every web page this conversation was given
         self.notes_dir: Path | None = None  # where research reports are kept, when the app has a place
+        self.sim_dir: Path | None = None    # where the sim's talent order is kept for a day, when the app has a place
         self.saved_file: Path | None = None  # the addon's saved file: Questie's whole quest list is kept there too
         self._questdb = None
 
@@ -1751,6 +1752,43 @@ class Game:
                        "spell is general knowledge of the game, not from their data: say it as a suggestion.")
         return out
 
+    def tool_character_build(self, args: dict) -> dict:
+        """What the character wears and its talents; for a sim site, the text it imports, on a card (wisp/sim.py)."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        from . import sim
+        me = self.snapshot.get("character") if isinstance(self.snapshot.get("character"), dict) else {}
+        for_sim = args.get("sim") is True
+        build = sim.Build(self.snapshot, sim.trees(str(me.get("class") or "").lower(), self.sim_dir),
+                          sim.version(self.sim_dir) if for_sim else sim.FORMAT)
+        if not build.read:
+            return {"error": "Wisp's addon has not told what the character wears or its talents yet. It does from the next "
+                             "/wisp sync or logout; right after an update of Wisp, /wisp sync twice."}
+        points = build.points()
+        out = {"worn": [{"slot": sim.SLOTS[place - 1], "item": g["name"], **({"enchanted": True} if "enchant" in g else {})}
+                        for place, g in sorted(build.gear.items())],
+               "empty_slots": [sim.SLOTS[place - 1] for place in range(1, len(sim.SLOTS) + 1) if place not in build.gear],
+               "talents": build.taken() if build.talents_read else "the game did not give the talents to the addon"}
+        if points:
+            out["points_by_tree"] = {tree["name"]: n for tree, n in zip(build.order, points)}
+        elif build.ranks:
+            out["talents_note"] = "the trees' names and order were not at hand (no network, or the sim's source did not answer)"
+        if for_sim:
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("For a sim"), "table": build.card(),
+                               "sim": {"text": build.text(), "url": build.page(), "site": "wowsims.com"}})
+            out["shown"] = ("a card is now shown to the player with the text sim sites import, a Copy button and a button that opens "
+                            "the sim's page for this class: never write that text yourself, and do not repeat the card's rows. Say "
+                            "it in a line or two: Copy, open the site, there Import, then Addon, paste. Wisp sends nothing to the "
+                            "site and does not run the sim: what the sim will show is not in your data.")
+            if build.talent_string() is None:
+                out["talents_in_the_text"] = "no: the talents were not read, or the sim's tree order was not at hand; the site keeps the talents set there"
+            elif build.unknown():
+                out["talents_in_the_text"] = f"all but {build.unknown()} that the sim's trees do not list"
+        out["note"] = ("From the game's own character window, as of the last sync. Item names only: an item's stats are not in "
+                       "Wisp's data, so which of two items is better is not yours to work out; a sim does that. Talent names are "
+                       "the game's own.")
+        return out
+
     def tool_farming(self, args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
@@ -1830,10 +1868,11 @@ class Game:
         if getattr(self, "_colours", None) is None:
             out = {}
             known = self.snapshot.get("quality") if isinstance(self.snapshot.get("quality"), dict) else {}
+            worn = {g.get("id"): g.get("name") for g in _as_list(self.snapshot.get("gear")) if isinstance(g, dict) and isinstance(g.get("name"), str)}
             for key, ids in known.items():
                 if key.isdigit() and int(key) != 1 and int(key) <= 7:
                     for item in _as_list(ids):
-                        name = self.graph.names.get(item) if isinstance(item, int) else None
+                        name = (self.graph.names.get(item) or worn.get(item)) if isinstance(item, int) else None
                         if name and len(name) >= 3:
                             out[name] = int(key)
             words = {word: number for number, word in QUALITY.items()}
@@ -2365,6 +2404,19 @@ TOOLS = [
         },
     },
     {
+        "name": "character_build",
+        "description": "What the character wears, slot by slot, and the talents it has taken with the points in each. "
+                       "With sim true the player also gets a card with the text that sim sites for this game import "
+                       "(wowsims.com and the sites built on it), a Copy button and a button that opens the sim: use it "
+                       "for 'sim my character', 'export my gear for a sim', 'how much damage should I do'. Wisp does "
+                       "not run the sim and has no item stats.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"sim": {"type": "boolean", "description": "true to show the player the card with the text for a sim site."}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "farming",
         "description": "What farming is worth, measured. spots: the zones the character has farmed, with time spent "
                        "looting, coins, loot worth and gold per hour. sources: each kind of creature and node the "
@@ -2550,6 +2602,10 @@ remember of the game may tell you what to look for, never what to say.
 
 How the character died, to another player or to anything else, is in deaths: for 'how was I killed' call it for that death \
 with show true, and explain the fight from its figures.
+
+What the character wears and its talents are in character_build. When the player wants to sim the character, or \
+wants its gear and talents for a sim site, call it with sim true: the card it shows carries the text such sites import. \
+Never write that text yourself, and never give a figure for damage or healing: Wisp runs no sim.
 
 Everything in the tools is named in the language of the player's game. Look a name up in the words the player used, in \
 their language, as the dictionary form of what they wrote; never translate a name into another language to search for it.

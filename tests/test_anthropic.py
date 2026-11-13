@@ -222,7 +222,7 @@ def main():
         assert "server-side-fallback-2026-07-01" in REQUESTS[0]["headers"].get("anthropic-beta", "")
         assert [t["name"] for t in first["tools"]] == ["character", "quests", "available_quests", "leveling", "questing_route", "gold", "investments",
             "live_auctions", "market_depth", "my_auctions", "auction_ledger", "quest_search", "quest_done", "changes", "dungeons", "dungeon", "recipes", "auction_prices", "price_history",
-            "market_scan", "market_query", "item_links", "gathering", "profession_path", "deaths", "farming",
+            "market_scan", "market_query", "item_links", "gathering", "profession_path", "deaths", "character_build", "farming",
             "craft_tree", "item_uses", "craft_plan",
             "shopping_list", "notes", "waypoint"], "and neither report nor the web outside a research run"
         assert all(t["eager_input_streaming"] is True for t in first["tools"])

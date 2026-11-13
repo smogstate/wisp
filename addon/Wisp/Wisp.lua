@@ -1898,6 +1898,62 @@ local function otherCharacters(wanted)
   return out
 end
 
+-- ---- what the character wears and its talents ------------------------------------------------
+-- As the game's own character window shows them, for a sim site: Wisp turns this into the text such
+-- a site imports, and the player pastes it there. The slots are in the order those sites expect.
+local SIM_SLOTS = { 1, 2, 3, 15, 5, 9, 10, 6, 7, 8, 11, 12, 13, 14, 16, 17, 18 }
+
+local function gearRecord()
+  local out = {}
+  for place, slot in ipairs(SIM_SLOTS) do
+    local link = GetInventoryItemLink("player", slot)
+    local body = type(link) == "string" and link:match("item:([%-%d:]+)")
+    if body then
+      local f = {}   -- item id, enchant, four gems, random suffix: the fields of the game's item link
+      for part in (body .. ":"):gmatch("([^:]*):") do f[#f + 1] = tonumber(part) or 0 end
+      if f[1] and f[1] > 0 then
+        out[#out + 1] = { slot = place, id = f[1], enchant = (f[2] or 0) ~= 0 and f[2] or nil,
+                          suffix = (f[7] or 0) ~= 0 and f[7] or nil, name = link:match("%[(.-)%]") }
+        pcall(noteRarity, f[1])
+      end
+    end
+  end
+  return out
+end
+
+-- The talents taken, each as { the game's number for the talent, points in it, its name }. This game
+-- keeps talents in the newer trait system, so they are read the way the WoWSims exporter addon reads them.
+local function talentRecord()
+  if not C_Traits then return nil end
+  local config = C_ClassTalents and C_ClassTalents.GetActiveConfigID and C_ClassTalents.GetActiveConfigID()
+  local S = C_SpecializationInfo
+  if not config and S and S.GetCombatConfigIDForSpecGroup then
+    config = S.GetCombatConfigIDForSpecGroup(S.GetActiveSpecGroup and S.GetActiveSpecGroup() or 1)
+  end
+  local info = config and C_Traits.GetConfigInfo(config)
+  if not info or not info.treeIDs then return nil end
+  local out = {}
+  for _, tree in ipairs(info.treeIDs) do
+    for _, nodeID in ipairs(C_Traits.GetTreeNodes(tree) or {}) do
+      local node = C_Traits.GetNodeInfo(config, nodeID)
+      local rank = node and (node.currentRank or node.ranksPurchased) or 0
+      if type(rank) == "number" and rank > 0 and node.activeEntry then
+        local entry = C_Traits.GetEntryInfo(config, node.activeEntry.entryID)
+        local id = entry and entry.definitionID
+        if type(id) == "number" then
+          local okN, name = pcall(function()
+            local spell = C_Traits.GetDefinitionInfo(id).spellID
+            return (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spell)) or (GetSpellInfo(spell))
+          end)
+          out[#out + 1] = { id, rank, okN and type(name) == "string" and name or nil }
+        end
+      end
+    end
+  end
+  table.sort(out, function(a, b) return a[1] < b[1] end)
+  return out
+end
+
 local inboxWorks = function() return false end   -- set by the one-click inbox, further down
 
 local function buildSnapshot()
@@ -1963,6 +2019,8 @@ local function buildSnapshot()
   local okS, needs = pcall(itemSkills)
   local okQ, rare = pcall(rarities)
   local okT, taught = pcall(trainerWindows)
+  local okW, worn = pcall(gearRecord)
+  local okU, spent = pcall(talentRecord)
   return {
     v = 1,
     takenAt = time(),
@@ -1973,7 +2031,7 @@ local function buildSnapshot()
     professions = skills,
     character = {
       xp = UnitXP and UnitXP("player") or nil, xpMax = UnitXPMax and UnitXPMax("player") or nil, money = GetMoney(),
-      class = classFile, race = (UnitRace("player")), level = UnitLevel("player"),
+      class = classFile, race = (UnitRace("player")), raceFile = select(2, UnitRace("player")), level = UnitLevel("player"),
       -- how many levels below the character a quest stays green before it turns grey: the game's own number
       greenRange = (GetQuestGreenRange and GetQuestGreenRange())
                    or (UnitQuestTrivialLevelRange and UnitQuestTrivialLevelRange("player")) or nil,
@@ -2004,6 +2062,9 @@ local function buildSnapshot()
     nameProbe = okN and named or nil,
     quality = okQ and rare or nil,
     trainerWindows = okT and taught or nil,
+    gear = okW and worn or nil,
+    talents = okU and spent or nil,
+    talentsRead = okU and spent ~= nil,   -- an empty list alone would not say whether the game answered
     vendor = vendor,
     quests = log,
     available = open,

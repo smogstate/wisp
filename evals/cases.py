@@ -405,6 +405,22 @@ CASES = [
      "tools": ["deaths"], "say": ["Rogue|Разбойник"], "never": ["Gankmaster"],
      "oracle": [([("deaths", {})], "Последний раз вас убил Разбойник (Нежить). Имён других игроков я не вижу: только класс и расу.")]},
 
+    # --- the character for a sim site ------------------------------------------------------
+    {"id": "sim-export", "tags": ["sim", "cards", "privacy"], "lang": "ru",
+     "ask": "Хочу просимить персонажа. Дай данные для сайта с симулятором.",
+     "tools": ["character_build"], "args": {"character_build": {"sim": True}},
+     "card": ["Linen Cloak", "flavor.{1,6}forever", "wowsims"], "text": ["Addon"],
+     "never": ["flavor", "Тестер", r"\d\s*(?:dps|урона в секунду)"],   # the text is the card's to carry, and Wisp runs no sim
+     "card_never": ["Тестер", "Test Realm"],
+     "oracle": [([("character_build", {"sim": True})],
+                 "Карточка с текстом для симулятора показана: нажмите «Скопировать», откройте сайт, там Import, затем Addon, и вставьте. "
+                 "Сам симулятор я не запускаю, поэтому цифр урона у меня нет.")]},
+    {"id": "worn-gear", "tags": ["sim"], "lang": "ru",
+     "ask": "Что на мне сейчас надето и какие слоты пустые?",
+     "tools": ["character_build"], "say": ["Hat of the Owl", "Linen Cloak", "Bent Staff"],
+     "oracle": [([("character_build", {})],
+                 "Надето три вещи: Hat of the Owl (голова), Linen Cloak (спина, с чарами) и Bent Staff (правая рука). Остальные 14 слотов пустые.")]},
+
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
      "ask": "Привет! Ты кто?", "no_tools": True,

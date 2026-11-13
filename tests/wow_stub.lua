@@ -321,6 +321,27 @@ raw[9001] = { name = "For the Horde!", questLevel = 16, requiredLevel = 10, requ
 raw[9002] = { name = "Never Seen", questLevel = 5, startedBy = { { 240 } } }
 raw[9003] = { name = "A Warrior's Training", questLevel = 10, requiredClasses = 1, startedBy = { { 240 } } }
 tags[166] = "dungeon"
+if flags:find("gear") then   -- what the character wears and the talents it took, as the game's own windows hold them
+  local worn = {
+    [1] = "|cff1eff00|Hitem:9999::::::1234:::::|h[Hat of the Owl]|h|r",   -- a newer link: empty fields, a random suffix
+    [15] = "|cffffffff|Hitem:2580:247:0:0:0:0:0:0|h[Linen Cloak]|h|r",     -- enchanted
+    [16] = "|cffffffff|Hitem:35:0:0:0:0:0:0:0|h[Bent Staff]|h|r",
+  }
+  function GetInventoryItemLink(unit, slot) return unit == "player" and worn[slot] or nil end
+  C_ClassTalents = { GetActiveConfigID = function() return 7 end }
+  -- node -> { the talent's definition, points, its spell }: two points in Arcane's second talent, one in Frost's first
+  local taken = { [11] = { 135343, 2, 1001 }, [12] = { 135310, 1, 1002 }, [13] = { 135326, 0, 1003 } }
+  C_Traits = {
+    GetConfigInfo = function(config) return config == 7 and { treeIDs = { 1 } } or nil end,
+    GetTreeNodes = function() return { 12, 11, 13 } end,
+    GetNodeInfo = function(_, node) return { currentRank = taken[node][2], activeEntry = { entryID = node * 10 } } end,
+    GetEntryInfo = function(_, entry) return { definitionID = taken[entry / 10][1] } end,
+    GetDefinitionInfo = function(id)
+      for _, talent in pairs(taken) do if talent[1] == id then return { spellID = talent[3] } end end
+    end,
+  }
+  C_Spell = { GetSpellName = function(spell) return ({ [1001] = "Arcane Focus", [1002] = "Frost Warding" })[spell] end }
+end
 if flags:find("ranks") then   -- a profession's next rank as a quest: it needs the skill, not a level alone
   raw[6607] = { name = "Nat Pagle, Angler Extreme", questLevel = 45, requiredLevel = 10, zoneOrSort = 40, requiredSkill = { 356, 225 },
                 startedBy = { { 234 } }, finishedBy = { { 234 } } }

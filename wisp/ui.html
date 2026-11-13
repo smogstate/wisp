@@ -753,6 +753,9 @@ const RU = {
   "Copy for the game": "Копировать для игры", "Copy as text, to share": "Копировать текстом, чтобы поделиться",
   "Copied as text": "Скопировано текстом", "Copied": "Скопировано", "Copy failed": "Не удалось скопировать",
   "Copied. Now in the game: Ctrl+V twice": "Скопировано. Теперь в игре: дважды Ctrl+V",
+  "Copy, then on the site: Import, Addon, paste": "Скопируйте, затем на сайте: Import, Addon, вставить",
+  "Copied. On the site: Import, Addon, paste": "Скопировано. На сайте: Import, Addon, вставить",
+  "Copy for the sim": "Скопировать для симулятора", "Open {site}": "Открыть {site}",
   "Could not reach the clipboard": "Не удалось обратиться к буферу обмена",
   // the window's fixed texts
   "Open Wisp": "Открыть Wisp", "starting…": "запуск…", "Conversations": "Разговоры", "New conversation": "Новый разговор",
@@ -799,7 +802,7 @@ const RU = {
   "gold": "золото", "investments": "вложения", "market_depth": "лоты на аукционе", "live_auctions": "аукцион сейчас (Blizzard)", "my_auctions": "мои лоты", "auction_ledger": "покупки и продажи",
   "quest_done": "выполненное задание", "quest_search": "поиск задания", "changes": "изменения", "dungeons": "подземелья", "dungeon": "подземелье", "recipes": "рецепты",
   "auction_prices": "цены аукциона", "price_history": "история цены", "market_scan": "обзор рынка", "market_query": "запрос к базе цен",
-  "item_links": "связи предмета", "gathering": "места сбора", "farming": "фарм", "deaths": "как вы погибли", "profession_path": "путь профессии", "craft_plan": "план изготовления", "craft_tree": "разбор до сырья", "item_uses": "где используется", "shopping_list": "список покупок",
+  "item_links": "связи предмета", "gathering": "места сбора", "farming": "фарм", "deaths": "как вы погибли", "character_build": "экипировка и таланты", "profession_path": "путь профессии", "craft_plan": "план изготовления", "craft_tree": "разбор до сырья", "item_uses": "где используется", "shopping_list": "список покупок",
   "notes": "заметки", "waypoint": "метка на карте", "report": "отчёт", "the web": "интернет", "a web page": "веб-страница",
   // commands
   "Start a new conversation": "Начать новый разговор", "Earlier conversations: search, peek, reopen": "Прежние разговоры: поиск, просмотр, продолжение",
@@ -1153,6 +1156,25 @@ function cardText(card, heading) {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+// The text a sim site imports: Copy puts it on the clipboard, and the site opens in the player's own browser.
+// Nothing is sent to the site from here: pasting it there is the player's step.
+function simFoot(sim) {
+  const foot = document.createElement("footer");
+  const hint = el("span", "", T("Copy, then on the site: Import, Addon, paste"));
+  const copyIt = el("button", "primary icon"); copyIt.type = "button";
+  setIcon(copyIt, "copy", T("Copy for the sim"));
+  copyIt.onclick = async () => {
+    const ok = await copy(sim.text);
+    copyIt.dataset.state = ok ? "copied" : "failed";
+    setIcon(copyIt, ok ? "check" : "x", T(ok ? "Copied" : "Copy failed"));
+    hint.textContent = T(ok ? "Copied. On the site: Import, Addon, paste" : "Could not reach the clipboard");
+  };
+  const open = el("button", "link", T("Open {site}", { site: sim.site })); open.type = "button";
+  open.onclick = () => api("/api/open", { url: sim.url });
+  foot.append(hint, open, copyIt);
+  return foot;
+}
+
 function showCard(card, into = log) {
   if (into === log && card.wisp) lastCard = card;
   const el = add("section", "card", undefined, into);
@@ -1210,7 +1232,7 @@ function showCard(card, into = log) {
   el.append(head, ...(card.plan ? [planBlock(card.plan)] : []), ...(card.chart ? [chartBlock(card.chart)] : []),
             ...(card.table ? [tableBlock(card.table, into === log)] : []), ...(card.report ? [reportBlock(card.report)] : []),
             ...(card.sources ? [sourcesList(card.sources)] : []), ...(card.route ? [routeBlock(card.route)] : []),
-            list, ...(card.wisp ? [foot] : []));
+            list, ...(card.wisp ? [foot] : card.sim ? [simFoot(card.sim)] : []));
   into.scrollTop = into.scrollHeight;
   return el;
 }

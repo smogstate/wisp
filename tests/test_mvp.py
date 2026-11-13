@@ -2340,6 +2340,63 @@ def test_item_rarity(tmp: Path):
     assert app.state()["item_colours"].startswith(f"{len(app.load_game().item_colours())}:"), "the page asks again only when this changes"
 
 
+def test_sim_export(tmp: Path):
+    """What the character wears and its talents, and the text a sim site imports: the WoWSims exporter's layout,
+    written by Wisp, with no name and no realm in it."""
+    from wisp import sim
+    wow = make_wow_dir(tmp, flags="gear")
+    game = Game.load(wow)
+    plain = run_tool(game, "character_build", {})
+    assert plain["worn"] == [{"slot": "Head", "item": "Hat of the Owl"}, {"slot": "Back", "item": "Linen Cloak", "enchanted": True},
+                             {"slot": "Main hand", "item": "Bent Staff"}] and len(plain["empty_slots"]) == 14
+    assert plain["talents"] == [{"talent": "Frost Warding", "points": 1}, {"talent": "Arcane Focus", "points": 2}], "the game's own names"
+    assert "not at hand" in plain["talents_note"] and not game.cards, "no folder: nothing is asked of the network, and no card unasked"
+
+    # the sim's trees, as its public source lists them; kept on disk, so nothing is fetched here
+    folder = tmp / "sim"
+    talent = lambda number, name: {"definitionId": number, "fancyName": name, "maxPoints": 5}
+    listed = [{"name": "Arcane", "talents": [talent(135345, "Arcane Subtlety"), talent(135343, "Arcane Focus"), talent(135332, "Wand Spec")]},
+              {"name": "Fire", "talents": [talent(135326, "Improved Fireball")]},
+              {"name": "Frost", "talents": [talent(135310, "Frost Warding"), talent(135309, "Improved Frostbolt")]}]
+    folder.mkdir()
+    (folder / "trees-mage.json").write_text(json.dumps(listed), encoding="utf-8")
+    (folder / "exporter.json").write_text(json.dumps({"tag_name": "v9.9.9"}), encoding="utf-8")
+    never = lambda url: (_ for _ in ()).throw(AssertionError("asked the network for " + url))
+    assert sim.trees("mage", folder, never)[2]["talents"][0] == (135310, "Frost Warding", 5) and sim.version(folder, never) == "v9.9.9"
+    assert sim.trees("mage", tmp / "none", lambda url: listed)[0]["name"] == "Arcane" and (tmp / "none" / "trees-mage.json").exists(), "fetched once, kept"
+    assert sim.trees("mage", tmp / "off", lambda url: 1 / 0) is None and sim.version(tmp / "off", lambda url: 1 / 0) == sim.FORMAT, \
+        "no network and nothing kept: no talents, and the format's own version"
+    assert sim.trees("../etc", folder, never) is None, "only a class the sim has"
+
+    game.sim_dir = folder
+    shown = run_tool(game, "character_build", {"sim": True})
+    assert shown["points_by_tree"] == {"Arcane": 2, "Fire": 0, "Frost": 1} and "talents_in_the_text" not in shown and "shown" in shown
+    assert shown["talents"][0] == {"tree": "Arcane", "talent": "Arcane Focus", "points": 2, "of": 5}
+    card = game.cards[-1]
+    text = json.loads(card["sim"]["text"])
+    assert text == {"version": "v9.9.9", "flavor": "forever", "class": "mage", "level": 12, "race": "Human", "talents": "02--1",
+                    "professions": [{"name": "Tailoring", "level": 150}],
+                    "gear": {"items": [{"id": 9999, "random_suffix": 1234}, None, None, {"id": 2580, "enchant": 247}] + [None] * 10
+                                      + [{"id": 35}, None, None]}}, "the exporter's layout: fishing is no profession to a sim"
+    assert "Тестер" not in card["sim"]["text"] and "Test Realm" not in card["sim"]["text"] and card["sim"]["text"].isascii()
+    assert card["sim"]["url"] == "https://www.wowsims.com/forever/mage/dps/" and card["table"]["rows"][1] == ["Linen Cloak", "Back", "yes"]
+    assert card["table"]["sub"] == "level 12 · talents 2/0/1"
+
+    # the builds the text and the page are worked out from
+    build = lambda snap, order=sim.trees("mage", folder, never): sim.Build({"character": {"class": "MAGE", "level": 60, "raceFile": "Scourge"}, "gear": [], **snap}, order)
+    assert build({"talents": [[135343, 5], [135326, 3], [777, 2]], "talentsRead": True}).talent_string() == "05-3"
+    assert build({"talents": [[777, 2]], "talentsRead": True}).unknown() == 1
+    assert build({"talents": [], "talentsRead": True}).export() == {"version": sim.FORMAT, "flavor": "forever", "class": "mage", "level": 60, "race": "Undead"}
+    assert build({"talents": [[135343, 5]], "talentsRead": True}, None).talent_string() is None and build({}).page() == sim.SITE
+    assert "race" not in build({"character": {"class": "MAGE", "raceFile": "Some New Race"}}).export(), "a race the sim would refuse is left out"
+    bear = sim.Build({"character": {"class": "DRUID"}, "talents": [[sim.THICK_HIDE, 3]], "talentsRead": True},
+                     [{"name": "Balance", "talents": []}, {"name": "Feral", "talents": [(sim.THICK_HIDE, "Thick Hide", 5)]}, {"name": "Restoration", "talents": []}])
+    assert bear.page() == "https://www.wowsims.com/forever/druid/feralbear/"
+
+    old = run_tool(Game.load(make_wow_dir(tmp / "old")), "character_build", {"sim": True})
+    assert "has not told" in old["error"], "an addon from before this: said so, with the way to cure it"
+
+
 def test_eval_cases():
     """The assistant's eval (evals/) stays answerable: each case's written right answer still
     passes on this test game, and an empty answer does not. Free: no model is asked."""
@@ -2425,5 +2482,7 @@ if __name__ == "__main__":
         test_item_rarity(Path(ir))
     with tempfile.TemporaryDirectory() as pp:
         test_profession_path(Path(pp))
+    with tempfile.TemporaryDirectory() as se:
+        test_sim_export(Path(se))
     test_eval_cases()
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

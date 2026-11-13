@@ -491,6 +491,7 @@ class App:
             self.history.ingest(game.snapshot)
             game.history = self.history
             game.notes_dir = self.notes
+            game.sim_dir = local.APP_DIR / "sim"
             game.assets = self.assets
             game.live = self.live
             try:   # what the auction house's mail said, kept beyond the addon's sixty days
@@ -927,7 +928,8 @@ def make_handler(app: App, port: int):
             if self.path == "/api/copy":
                 text = body.get("text")
                 # only Wisp's own messages go to the clipboard this way
-                ok = isinstance(text, str) and text.startswith("WISP1:") and len(text) < 100_000 and text.isascii()
+                ok = isinstance(text, str) and len(text) < 100_000 and text.isascii() and (
+                    text.startswith("WISP1:") or text.startswith('{"version":') and '"flavor":"forever"' in text[:60])   # or its text for a sim
                 return self.send_json(200, {"copied": bool(ok and local.copy_to_clipboard(text))})
             if self.path == "/api/window":   # allowed mid-answer: the answer carries on while collapsed
                 if body.get("close") is True:
