@@ -1957,6 +1957,66 @@ local function talentRecord()
   return out
 end
 
+-- What the Pawn addon says of the items Wisp may be asked about: the quest log's rewards, what is carried,
+-- the dungeon journal's loot. Pawn knows the item stats and the player's scales; Wisp asks it, as its own
+-- tooltip does, and keeps the answer: for each scale, how much of an upgrade an item is and what it replaces.
+local PAWN_ITEMS = 150   -- at most this many asked, at logout
+
+local function pawnVerdicts(log, carried, journal)
+  if not (PawnIsInitialized and type(PawnGetItemData) == "function" and type(PawnIsItemAnUpgrade) == "function") then return nil end
+  local scales, order = {}, {}
+  if type(PawnGetAllScalesEx) == "function" then
+    for _, s in ipairs(PawnGetAllScalesEx() or {}) do
+      if s.IsVisible and #scales < 4 then scales[#scales + 1] = s.Name; order[s.Name] = #scales end
+    end
+  end
+  local wanted, seen = {}, {}
+  local function want(id) if type(id) == "number" and not seen[id] and #wanted < PAWN_ITEMS then seen[id] = true; wanted[#wanted + 1] = id end end
+  for _, quest in ipairs(log or {}) do
+    for _, list in ipairs({ quest.rewardItems or {}, quest.rewardChoices or {} }) do
+      for _, reward in ipairs(list) do want(reward.id) end
+    end
+  end
+  for _, line in ipairs(carried or {}) do want(line.id) end
+  for _, dungeon in ipairs(journal or {}) do
+    for _, boss in ipairs(dungeon.bosses or {}) do
+      for _, drop in ipairs(boss.loot or {}) do want(drop[1]) end
+    end
+  end
+  local items, unknown = {}, 0
+  for _, id in ipairs(wanted) do
+    local okI, item = pcall(PawnGetItemData, "item:" .. id)
+    if okI and type(item) == "table" and item.Link then
+      local entry = { id = id }
+      local okU, upgrades = pcall(PawnIsItemAnUpgrade, item)
+      if okU and type(upgrades) == "table" then
+        for _, u in ipairs(upgrades) do
+          if type(u) == "table" and order[u[1]] and type(u[3]) == "number" then
+            entry.up = entry.up or {}
+            entry.up[#entry.up + 1] = { s = order[u[1]], p = math.floor(u[3] * 1000 + 0.5) / 1000,
+                                        r = type(u[4]) == "string" and u[4]:match("%[(.-)%]") or nil }
+          end
+        end
+      end
+      if type(PawnGetSingleValueFromItem) == "function" then
+        for i, name in ipairs(scales) do
+          local okV, value = pcall(PawnGetSingleValueFromItem, item, name)
+          if okV and type(value) == "number" then entry.v = entry.v or {}; entry.v[i] = math.floor(value * 10 + 0.5) / 10 end
+        end
+      end
+      if entry.up or entry.v then items[#items + 1] = entry end
+    elseif okI and type(item) == "table" then
+      unknown = unknown + 1   -- the game has not described it yet: Pawn has no stats for it
+    end
+  end
+  local names = {}
+  for i, name in ipairs(scales) do
+    local okL, shown = pcall(PawnGetScaleLocalizedName, name)
+    names[i] = okL and type(shown) == "string" and shown or name
+  end
+  return { scales = names, items = items, unknown = unknown > 0 and unknown or nil }
+end
+
 local inboxWorks = function() return false end   -- set by the one-click inbox, further down
 
 local function buildSnapshot()
@@ -2024,6 +2084,7 @@ local function buildSnapshot()
   local okT, taught = pcall(trainerWindows)
   local okW, worn = pcall(gearRecord)
   local okU, spent = pcall(talentRecord)
+  local okPw, rated = pcall(pawnVerdicts, log, carried, journal)
   return {
     v = 1,
     takenAt = time(),
@@ -2068,6 +2129,7 @@ local function buildSnapshot()
     trainerWindows = okT and taught or nil,
     gear = okW and worn or nil,
     talents = okU and spent or nil,
+    pawn = okPw and rated or nil,
     talentsRead = okU and spent ~= nil,   -- an empty list alone would not say whether the game answered
     vendor = vendor,
     quests = log,

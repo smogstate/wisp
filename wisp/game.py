@@ -73,6 +73,7 @@ class Game:
         self.snapshot = snapshot or {}
         self.problem = problem            # why there is no snapshot, in words
         self.places: dict[str, dict] = {}  # ref -> {map, zone, x, y, title}
+        self.pawn, self.pawn_scales = self._pawn()   # what the Pawn addon said of items: before the quests and dungeons that show it
         self.quests = [self._quest(q) for q in _as_list(self.snapshot.get("quests")) if isinstance(q, dict)]
         self.dungeons = [self._dungeon(i, d) for i, d in enumerate(_as_list(self.snapshot.get("dungeons")))
                          if isinstance(d, dict)]
@@ -146,8 +147,31 @@ class Game:
             out["money"] = coins(q["money"])
         return out
 
-    @staticmethod
-    def _reward_items(q: dict) -> dict:
+    def _pawn(self) -> tuple[dict, list]:
+        """item id -> {"up": [(scale, share, replaces)], "values": {scale: number}}, and the player's scales, from the snapshot."""
+        raw = self.snapshot.get("pawn") if isinstance(self.snapshot.get("pawn"), dict) else {}
+        scales = [_clean(s, 60) for s in _as_list(raw.get("scales")) if isinstance(s, str)][:4]
+        number = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+        out = {}
+        for item in (i for i in _as_list(raw.get("items")) if isinstance(i, dict)):
+            if not (isinstance(item.get("id"), int) and not isinstance(item["id"], bool)):
+                continue
+            up = [(scales[u["s"] - 1], u["p"], _clean(u.get("r"), 80) or None) for u in _as_list(item.get("up"))
+                  if isinstance(u, dict) and isinstance(u.get("s"), int) and 1 <= u["s"] <= len(scales) and number(u.get("p")) and 0 < u["p"] < 100]
+            values = {scales[i]: v for i, v in enumerate(_as_list(item.get("v"))[:len(scales)]) if number(v)}
+            if up or values:
+                out[item["id"]] = {"up": sorted(up, key=lambda u: -u[1]), "values": values}
+        return out, scales
+
+    def _pawn_says(self, item) -> str | None:
+        """Pawn's verdict on an item in a few words, for the lists the model reads: '+15% for Fire, over Linen Cloak'."""
+        said = self.pawn.get(item) if isinstance(item, int) else None
+        if not said or not said["up"]:
+            return None
+        return "; ".join(f"+{round(share * 100)}% for {scale}" + (f", over {replaces}" if replaces else ", an empty slot")
+                         for scale, share, replaces in said["up"][:2])
+
+    def _reward_items(self, q: dict) -> dict:
         """The items a quest of the log gives, and those to choose one of, as the game lists them."""
         out = {}
         for key, told in (("rewardItems", "reward_items"), ("rewardChoices", "choose_one_reward_of")):
@@ -156,7 +180,9 @@ class Game:
                 name = _clean(item.get("name"), 80) or (f"item {item['id']}" if isinstance(item.get("id"), int) else "")
                 count = item.get("count")
                 if name:
-                    listed.append(f"{count} × {name}" if isinstance(count, int) and not isinstance(count, bool) and count > 1 else name)
+                    name = f"{count} × {name}" if isinstance(count, int) and not isinstance(count, bool) and count > 1 else name
+                    pawn = self._pawn_says(item.get("id"))
+                    listed.append(f"{name} (Pawn: upgrade {pawn})" if pawn else name)
             if listed:
                 out[told] = listed
         return out
@@ -286,7 +312,8 @@ class Game:
         name = _clean(d.get("name"), 80)
         bosses = []
         for b in (b for b in _as_list(d.get("bosses")) if isinstance(b, dict)):
-            loot = [{"item": _clean(i[1], 80), "slot": _clean(i[2], 40), "quality": QUALITY.get(i[3], "?")}
+            loot = [{"item": _clean(i[1], 80), "slot": _clean(i[2], 40), "quality": QUALITY.get(i[3], "?"),
+                     **({"pawn_upgrade": self._pawn_says(i[0])} if self._pawn_says(i[0]) else {})}
                     for i in _as_list(b.get("loot")) if isinstance(i, list) and len(i) >= 4]
             bosses.append({"name": _clean(b.get("name"), 80), "rare": bool(b.get("rare")), "loot": loot})
         return {
@@ -1780,13 +1807,14 @@ class Game:
             out["shown"] = ("a card is now shown to the player with the text sim sites import, a Copy button and a button that opens "
                             "the sim's page for this class: never write that text yourself, and do not repeat the card's rows. Say "
                             "it in a line or two: Copy, open the site, there Import, then Addon, paste. Wisp sends nothing to the "
-                            "site and does not run the sim: what the sim will show is not in your data.")
+                            "site and does not run the sim: what the sim will show is not in your data. Add in a line the way back: on the "
+                            "site, Stat Weights, then Export, Pawn EP, and paste that here for the Pawn addon.")
             if build.talent_string() is None:
                 out["talents_in_the_text"] = "no: the talents were not read, or the sim's tree order was not at hand; the site keeps the talents set there"
             elif build.unknown():
                 out["talents_in_the_text"] = f"all but {build.unknown()} that the sim's trees do not list"
         out["note"] = ("From the game's own character window, as of the last sync. Item names only: an item's stats are not in "
-                       "Wisp's data, so which of two items is better is not yours to work out; a sim does that. Talent names are "
+                       "Wisp's data, so which of two items is better is not yours to work out: Pawn's verdict (upgrades) or a sim does that. Talent names are "
                        "the game's own.")
         return out
 
@@ -1812,6 +1840,69 @@ class Game:
                         "given: after a change of gear or talents they want working out again."}
         if addons.get("pawn") is False:
             out["pawn_addon"] = "not seen in the game at the last sync: the card needs the Pawn addon installed"
+        return out
+
+    def tool_upgrades(self, args: dict) -> dict:
+        """Which items Wisp knows of are upgrades for the character, by the Pawn addon's verdict in the game."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        source = args.get("source", "any")
+        if source not in ("any", "quests", "bags", "dungeons"):
+            return {"error": "source must be any, quests, bags or dungeons"}
+        addons = self.snapshot.get("addons") if isinstance(self.snapshot.get("addons"), dict) else {}
+        if not isinstance(self.snapshot.get("pawn"), dict):
+            return {"error": "No word from Pawn. " + ("The Pawn addon was not seen in the game at the last sync: with it installed, Wisp asks "
+                                                       "it which items are upgrades." if not addons.get("pawn") else
+                                                       "Pawn is there, but Wisp's addon has not asked it yet: /wisp sync (twice right after an update).")}
+        if not self.pawn_scales:
+            return {"error": "Pawn shows no scale for this character, so it rates nothing. In Pawn's window a scale can be turned on, "
+                             "or a sim's weights imported (pawn_scale)."}
+        where: dict[int, list] = {}   # item -> [(its name, from where for the model, from where on the card)]
+        if source in ("any", "quests"):
+            for q in (q for q in _as_list(self.snapshot.get("quests")) if isinstance(q, dict)):
+                title = _clean(q.get("title"), 80)
+                for key, how, shown in (("rewardItems", f"reward of {title}", t("reward: {quest}", quest=title)),
+                                        ("rewardChoices", f"a choice of {title}", t("a choice: {quest}", quest=title))):
+                    for item in (i for i in _as_list(q.get(key)) if isinstance(i, dict) and isinstance(i.get("id"), int)):
+                        where.setdefault(item["id"], []).append((_clean(item.get("name"), 80), how, shown))
+        if source in ("any", "bags"):
+            for line in (b for b in _as_list(self.snapshot.get("bags")) if isinstance(b, dict) and isinstance(b.get("id"), int)):
+                where.setdefault(line["id"], []).append((_clean(line.get("name"), 80), "in the bags", t("in the bags")))
+        if source in ("any", "dungeons"):
+            for d in (d for d in _as_list(self.snapshot.get("dungeons")) if isinstance(d, dict)):
+                for b in (b for b in _as_list(d.get("bosses")) if isinstance(b, dict)):
+                    for drop in (i for i in _as_list(b.get("loot")) if isinstance(i, list) and len(i) >= 2 and isinstance(i[0], int)):
+                        boss = f"{_clean(b.get('name'), 80)}, {_clean(d.get('name'), 80)}"
+                        where.setdefault(drop[0], []).append((_clean(drop[1], 80), boss, boss))
+        found = []
+        for item, places in where.items():
+            said = self.pawn.get(item)
+            if said and said["up"]:
+                name = self.graph.names.get(item) or places[0][0] or f"item {item}"
+                found.append({"item": name, "from": [p[1] for p in places][:3], "_shown": places[0][2],
+                              "upgrade": [{"scale": scale, "by": f"+{round(share * 100)}%", "replaces": replaces or "an empty slot"}
+                                          for scale, share, replaces in said["up"]],
+                              **({"pawn_value": said["values"]} if said["values"] else {}), "_best": said["up"][0][1]})
+        found.sort(key=lambda f: -f["_best"])
+        unknown = (self.snapshot["pawn"].get("unknown") or 0) if isinstance(self.snapshot["pawn"].get("unknown"), int) else 0
+        out = {"scales": self.pawn_scales, "upgrades": [{k: v for k, v in f.items() if not k.startswith("_")} for f in found[:20]]}
+        if unknown:
+            out["not_rated"] = (f"{unknown} items the game had not described yet, so Pawn had no stats for them: they show once seen in the "
+                                "game (a tooltip, the journal), then /wisp sync")
+        if args.get("show") is True and found:
+            several = len(self.pawn_scales) > 1
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Upgrades"), "table": {
+                "title": t("Upgrades by Pawn"), "sub": " · ".join(self.pawn_scales),
+                # only the first column wraps in a card's table: what is long goes there, the figures stay short
+                "columns": [t("Item"), t("Upgrade"), t("Replaces")],
+                "rows": [[f"{f['item']} — {f['_shown']}" + (f" · {f['upgrade'][0]['scale']}" if several else ""), f["upgrade"][0]["by"],
+                          t("empty slot") if f["upgrade"][0]["replaces"] == "an empty slot" else f["upgrade"][0]["replaces"]] for f in found[:20]],
+                "notes": [t("Pawn's own reckoning from the item's stats and your scale, as on its tooltips.")]}})
+            out["shown"] = "a card with these upgrades is now shown to the player: do not repeat its rows"
+        out["note"] = ("Pawn's verdict, from the game: it knows each item's stats and the player's scales (a scale is a set of stat "
+                       "weights, from a sim or a guide). 'by' is how much better than what is worn in that slot, for that scale. "
+                       "Only items Wisp knows of are rated: the quest log's rewards, what is carried, the dungeon journal's loot. "
+                       "Nothing found means none of those is an upgrade by Pawn, not that there is none in the game.")
         return out
 
     def tool_farming(self, args: dict) -> dict:
@@ -2455,6 +2546,20 @@ TOOLS = [
         },
     },
     {
+        "name": "upgrades",
+        "description": "Which items are upgrades for the character, by the Pawn addon's verdict in the game (it knows item "
+                       "stats and the player's stat weights): quest rewards, items in the bags, dungeon loot, each with how "
+                       "much better it is than what is worn and what it replaces. Use it for 'is this an upgrade', 'which "
+                       "reward should I take', 'what should I farm in dungeons for gear'. Quest rewards and dungeon loot in "
+                       "the other tools also carry Pawn's verdict when there is one.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"source": {"type": "string", "enum": ["any", "quests", "bags", "dungeons"]},
+                           "show": {"type": "boolean", "description": "true to also show the player the upgrades as a card."}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "farming",
         "description": "What farming is worth, measured. spots: the zones the character has farmed, with time spent "
                        "looting, coins, loot worth and gold per hour. sources: each kind of creature and node the "
@@ -2641,11 +2746,10 @@ remember of the game may tell you what to look for, never what to say.
 How the character died, to another player or to anything else, is in deaths: for 'how was I killed' call it for that death \
 with show true, and explain the fight from its figures.
 
-What the character wears and its talents are in character_build. When the player wants to sim the character, or \
-wants its gear and talents for a sim site, call it with sim true: the card it shows carries the text such sites import. \
-Never write that text yourself, and never give a figure for damage or healing: Wisp runs no sim. The way back is \
-pawn_scale: the sim's site gives its stat weights as a Pawn scale (there: Stat Weights, then Export, Pawn EP); when the \
-player pastes one, call pawn_scale, and the card hands it to the Pawn addon. After a sim card, say in a line that this is there.
+Gear and talents: character_build; to sim the character, call it with sim true. Its card carries the text sim sites \
+import: never write it yourself, and give no damage figure, since Wisp runs no sim. A Pawn scale the player pastes goes \
+to pawn_scale. Which item or reward is better is Pawn's verdict (upgrades, and "Pawn: upgrade" in rewards and loot), \
+never yours; without one, say the Pawn addon with a scale makes it possible.
 
 Everything in the tools is named in the language of the player's game. Look a name up in the words the player used, in \
 their language, as the dictionary form of what they wrote; never translate a name into another language to search for it.

@@ -2420,6 +2420,33 @@ def test_sim_export(tmp: Path):
     assert Game.load(make_wow_dir(tmp / "pawn", flags="pawn")).snapshot["addons"]["pawn"] is True and game.snapshot["addons"]["pawn"] is False
 
 
+def test_pawn_upgrades(tmp: Path):
+    """Which items Wisp knows of are upgrades, by the Pawn addon's verdict in the game: it has the stats and the scales."""
+    game = Game.load(make_wow_dir(tmp, flags="pawn,rewards,questindex"))
+    assert game.snapshot["pawn"]["scales"] == ["Mage: frost", "Fire WoWSims Weights"], "the scales shown for this character, not the hidden one"
+    found = run_tool(game, "upgrades", {"show": True})
+    assert [u["item"] for u in found["upgrades"]] == ["Rockslicer", "Miner's Cape"], "the best upgrade first"
+    assert found["upgrades"][0]["upgrade"] == [{"scale": "Mage: frost", "by": "+42%", "replaces": "an empty slot"}]
+    assert found["upgrades"][0]["from"] == ["Rhahk'Zor, The Deadmines"] and found["upgrades"][0]["pawn_value"] == {"Mage: frost": 30.1}
+    cape = found["upgrades"][1]
+    assert cape["upgrade"] == [{"scale": "Fire WoWSims Weights", "by": "+15%", "replaces": "Linen Cloak"}], "a hidden scale is not this character's"
+    assert cape["from"][0].startswith("reward of ") and "not_rated" in found, "an item the game had not described yet is counted, not guessed"
+    card = game.cards[-1]["table"]
+    assert card["columns"] == ["Item", "Upgrade", "Replaces"] and card["rows"][0] == ["Rockslicer — Rhahk'Zor, The Deadmines · Mage: frost", "+42%", "empty slot"]
+    assert card["rows"][1][0].startswith("Miner's Cape — reward: ")
+    assert [u["item"] for u in run_tool(game, "upgrades", {"source": "dungeons"})["upgrades"]] == ["Rockslicer"]
+    assert run_tool(game, "upgrades", {"source": "bags"})["upgrades"] == [] and "error" in run_tool(game, "upgrades", {"source": "x"})
+    # the verdict rides along where the model already looks: the quest's rewards, the dungeon's loot
+    quest = next(q for q in run_tool(game, "quests", {})["quests"] if q.get("reward_items"))
+    assert quest["reward_items"] == ["Miner's Cape (Pawn: upgrade +15% for Fire WoWSims Weights, over Linen Cloak)"]
+    loot = [l for d in game.dungeons for b in d["bosses"] for l in b["loot"] if l.get("pawn_upgrade")]
+    assert [(l["item"], l["pawn_upgrade"]) for l in loot] == [("Rockslicer", "+42% for Mage: frost, an empty slot")]
+    plain = Game.load(make_wow_dir(tmp / "plain", flags="questindex"))
+    assert "not seen in the game" in run_tool(plain, "upgrades", {})["error"] and "pawn_upgrade" not in str(plain.dungeons)
+    noscale = Game({**game.snapshot, "pawn": {"scales": [], "items": []}})
+    assert "no scale" in run_tool(noscale, "upgrades", {})["error"]
+
+
 def test_eval_cases():
     """The assistant's eval (evals/) stays answerable: each case's written right answer still
     passes on this test game, and an empty answer does not. Free: no model is asked."""
@@ -2507,5 +2534,7 @@ if __name__ == "__main__":
         test_profession_path(Path(pp))
     with tempfile.TemporaryDirectory() as se:
         test_sim_export(Path(se))
+    with tempfile.TemporaryDirectory() as pu:
+        test_pawn_upgrades(Path(pu))
     test_eval_cases()
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))

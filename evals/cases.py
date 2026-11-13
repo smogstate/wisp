@@ -427,6 +427,13 @@ CASES = [
      "oracle": [([("pawn_scale", {"scale": '( Pawn: v1: "Fire WoWSims Weights": Class=Mage,Intellect=1.234,SpellDamage=1.000,HitRating=0.850 )'})],
                  "Карточка для Pawn готова: нажмите «Отправить в игру» или скопируйте и дважды вставьте в игре. Больше всего весит интеллект.")]},
 
+    {"id": "pawn-upgrades", "tags": ["sim", "cards"], "lang": "ru",
+     "ask": "Какие вещи мне будут апгрейдом? Что из наград или подземелий взять?",
+     "tools": ["upgrades"], "say": ["Rockslicer", "Miner's Cape", "42"],
+     "oracle": [([("upgrades", {"show": True})],
+                 "По оценке Pawn лучший апгрейд — Rockslicer с Rhahk'Zor в The Deadmines: +42% для шкалы Mage: frost, слот сейчас пустой. "
+                 "Награда Miner's Cape лучше вашего Linen Cloak на 15% по шкале Fire WoWSims Weights.")]},
+
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
      "ask": "Привет! Ты кто?", "no_tools": True,

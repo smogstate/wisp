@@ -772,6 +772,28 @@ if flags:find("pawn") then   -- the Pawn addon's public import: it parses the sc
     LISTS[#LISTS + 1] = "pawn " .. tostring(overwrite) .. " " .. tag
     return 1, name
   end
+  -- what Pawn says of items, from its own stats and the player's scales: two scales shown, one hidden
+  PawnIsInitialized = true
+  function PawnGetAllScalesEx()
+    return { { Name = '"MrRobot":MAGE3', IsVisible = true }, { Name = "Hidden one", IsVisible = false }, { Name = "Fire WoWSims Weights", IsVisible = true } }
+  end
+  function PawnGetScaleLocalizedName(name) return name == '"MrRobot":MAGE3' and "Mage: frost" or name end
+  function PawnGetItemData(link)
+    local id = tonumber(link:match("^item:(%d+)$"))
+    if id == 4306 then return nil end                -- cloth: no stats at all
+    if id == 5187 then return { ID = id } end        -- not described by the game yet: no link, no stats
+    return { ID = id, Link = "|cff1eff00|Hitem:" .. id .. "::|h[x]|h|r" }
+  end
+  function PawnIsItemAnUpgrade(item)
+    if item.ID == 5444 then return { { "Fire WoWSims Weights", "Fire WoWSims Weights", 0.1534, "|cffffffff|Hitem:2580:247::|h[Linen Cloak]|h|r" },
+                                     { "Hidden one", "Hidden one", 0.9, nil } } end
+    if item.ID == 872 then return { { '"MrRobot":MAGE3', "Mage: frost", 0.42, nil } } end   -- an empty slot: nothing replaced
+    if item.ID == 1195 then error("Pawn's own trouble") end
+  end
+  function PawnGetSingleValueFromItem(item, name)
+    if item.ID == 5444 then return name == "Fire WoWSims Weights" and 12.34 or 8 end
+    if item.ID == 872 then return name == '"MrRobot":MAGE3' and 30.06 or nil end
+  end
 end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }

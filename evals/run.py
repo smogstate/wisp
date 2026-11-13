@@ -330,10 +330,10 @@ def main():
         return serve(Path(args.serve[0]), Path(args.serve[1]))
 
     i18n.set_language("ru")
-    wow = test_mvp.make_wow_dir(Path(tempfile.mkdtemp(prefix="wisp-eval-game-")), flags="questindex,alts,rewards,ranks,pvpdeath,gear")
+    wow = test_mvp.make_wow_dir(Path(tempfile.mkdtemp(prefix="wisp-eval-game-")), flags="questindex,alts,rewards,ranks,pvpdeath,gear,pawn")
     # the Russian game is the stub's own Russian client (its locale, its texts), with the names it leaves in English renamed
     wow = {"en": wow, "ru": russian(test_mvp.make_wow_dir(Path(tempfile.mkdtemp(prefix="wisp-eval-game-")),
-                                                             flags="questindex,alts,rewards,ranks,pvpdeath,gear,russian"))}
+                                                             flags="questindex,alts,rewards,ranks,pvpdeath,gear,pawn,russian"))}
     only = set(filter(None, args.only.split(",")))
     cases = [c for c in CASES if not only or c["id"] in only]
     assert len({c["id"] for c in CASES}) == len(CASES), "two cases share an id"

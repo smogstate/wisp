@@ -93,6 +93,9 @@ RU = {
     "none yet: the addon files the last half minute of a fight when the character dies": "пока нет: аддон записывает последние полминуты боя, когда персонаж погибает",
     "a player": "игрок",
     "level {n}": "уровень {n}",
+    "Upgrades": "Улучшения", "Upgrades by Pawn": "Улучшения по Pawn", "Upgrade": "Лучше", "Replaces": "Вместо",
+    "reward: {quest}": "награда: {quest}", "a choice: {quest}": "на выбор: {quest}", "in the bags": "в сумках", "empty slot": "пустой слот",
+    "Pawn's own reckoning from the item's stats and your scale, as on its tooltips.": "Расчёт самого Pawn по характеристикам предмета и вашей шкале, как в его подсказках.",
     "For Pawn": "Для Pawn", "Import the scale \"{name}\"": "Импорт шкалы «{name}»", "Stat": "Характеристика", "Weight": "Вес",
     "Pawn then shows on every item's tooltip what it is worth by these weights, and marks upgrades.":
         "После этого Pawn показывает в подсказке каждого предмета его оценку по этим весам и отмечает улучшения.",
