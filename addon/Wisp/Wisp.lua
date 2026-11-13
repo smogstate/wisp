@@ -38,6 +38,9 @@ local RU = GetLocale and GetLocale() == "ruRU" and {
   ["this client has no JSON encoder"] = "в этом клиенте нет кодировщика JSON",
   ["bad waypoint"] = "неверная метка", ["cannot set a waypoint on that map"] = "на этой карте нельзя поставить метку",
   ["waypoint: "] = "метка: ", ["Auctionator is not installed"] = "Auctionator не установлен",
+  ["Pawn is not installed"] = "Pawn не установлен", ["bad Pawn scale"] = "неверная шкала Pawn",
+  ["Pawn did not take the scale"] = "Pawn не принял шкалу",
+  ["Pawn has the scale \"%s\": item tooltips now show its value"] = "Шкала «%s» в Pawn: подсказки предметов теперь показывают её оценку",
   ["bad shopping list"] = "неверный список покупок", ["Auctionator refused "] = "Auctionator не принял ",
   ["shopping list \"%s\" with %d items is in Auctionator's Shopping tab"] = "список покупок «%s» (предметов: %d) — на вкладке «Покупки» в Auctionator",
 } or {}
@@ -2040,7 +2043,8 @@ local function buildSnapshot()
       x = x and round1(x * 100), y = y and round1(y * 100),
     },
     addons = { inbox = inboxWorks(), questie = DB ~= nil, tomtom = type(TomTom) == "table" and type(TomTom.AddWaypoint) == "function",
-               dungeonjournal = journal ~= nil, auctionator = auctionator() ~= nil, gathermate = nodes ~= nil },
+               dungeonjournal = journal ~= nil, auctionator = auctionator() ~= nil, gathermate = nodes ~= nil,
+               pawn = type(PawnImportScale) == "function" },
     dungeons = journal,
     bags = carried,
     bank = banked,
@@ -2136,6 +2140,20 @@ commands["auctionator.shopping_list"] = function(a)
   local ok, why = pcall(api.CreateShoppingList, "Wisp", listName, searches)
   if not ok then return false, "Auctionator: " .. tostring(why) end
   return true, L("shopping list \"%s\" with %d items is in Auctionator's Shopping tab"):format(listName, #searches)
+end
+
+-- { tag = a Pawn scale: '( Pawn: v1: "name": Class=Mage, Intellect=1.2 )' }
+-- Handed to Pawn's own import, as if pasted into its Import window: the stat weights a sim worked out.
+commands["pawn.scale"] = function(a)
+  if type(PawnImportScale) ~= "function" then return false, L("Pawn is not installed") end
+  local tag = a.tag   -- only the shape Wisp writes: a name, then stats with their numbers; nothing the game could read as a code
+  if type(tag) ~= "string" or #tag > 2000 or not tag:find('^%( Pawn: v1: "[^"|%c]+": [%w=%.,%- ]+ %)$') then
+    return false, L("bad Pawn scale")
+  end
+  local ok, status, name = pcall(PawnImportScale, tag, true)   -- true: a scale of the same name is replaced, as Pawn's own import does
+  if not ok or status ~= (PawnImportScaleResultSuccess or 1) then return false, L("Pawn did not take the scale") end
+  if type(PawnUIFrame_ScaleSelector_Refresh) == "function" then pcall(PawnUIFrame_ScaleSelector_Refresh) end   -- its window, when open
+  return true, L("Pawn has the scale \"%s\": item tooltips now show its value"):format(tostring(name))
 end
 
 local function receive(text)

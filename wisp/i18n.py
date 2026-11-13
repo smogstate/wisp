@@ -93,6 +93,9 @@ RU = {
     "none yet: the addon files the last half minute of a fight when the character dies": "пока нет: аддон записывает последние полминуты боя, когда персонаж погибает",
     "a player": "игрок",
     "level {n}": "уровень {n}",
+    "For Pawn": "Для Pawn", "Import the scale \"{name}\"": "Импорт шкалы «{name}»", "Stat": "Характеристика", "Weight": "Вес",
+    "Pawn then shows on every item's tooltip what it is worth by these weights, and marks upgrades.":
+        "После этого Pawn показывает в подсказке каждого предмета его оценку по этим весам и отмечает улучшения.",
     "For a sim": "Для симулятора", "What the character wears": "Что надето", "Slot": "Слот", "Enchanted": "Чары",
     "{n} talent points": "очков талантов: {n}", "talents {build}": "таланты {build}",
     "Head": "Голова", "Neck": "Шея", "Shoulders": "Плечи", "Back": "Спина", "Chest": "Грудь", "Wrists": "Запястья",

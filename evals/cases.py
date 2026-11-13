@@ -421,6 +421,12 @@ CASES = [
      "oracle": [([("character_build", {})],
                  "Надето три вещи: Hat of the Owl (голова), Linen Cloak (спина, с чарами) и Bent Staff (правая рука). Остальные 14 слотов пустые.")]},
 
+    {"id": "sim-to-pawn", "tags": ["sim", "cards"], "lang": "ru",
+     "ask": 'Сим выдал веса: ( Pawn: v1: "Fire WoWSims Weights": Class=Mage,Intellect=1.234,SpellDamage=1.000,HitRating=0.850 ) Закинь в Pawn.',
+     "tools": ["pawn_scale"], "card": ["Fire WoWSims Weights", "1.234"],
+     "oracle": [([("pawn_scale", {"scale": '( Pawn: v1: "Fire WoWSims Weights": Class=Mage,Intellect=1.234,SpellDamage=1.000,HitRating=0.850 )'})],
+                 "Карточка для Pawn готова: нажмите «Отправить в игру» или скопируйте и дважды вставьте в игре. Больше всего весит интеллект.")]},
+
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
      "ask": "Привет! Ты кто?", "no_tools": True,

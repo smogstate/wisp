@@ -85,7 +85,7 @@ def test_snapshot_and_tools(wow: Path):
     snap = game.snapshot
     assert snap["character"]["class"] == "MAGE" and snap["character"]["level"] == 12
     assert snap["character"]["gold"] == 15 and snap["character"]["x"] == 42.1
-    assert snap["addons"] == {"inbox": False, "questie": True, "tomtom": True, "dungeonjournal": True, "auctionator": True, "gathermate": True}
+    assert snap["addons"] == {"inbox": False, "questie": True, "tomtom": True, "dungeonjournal": True, "auctionator": True, "gathermate": True, "pawn": False}
     assert [q["id"] for q in game.quests] == [33, 76], "header and hidden entries are skipped"
 
     wolves, mine = game.quests
@@ -2395,6 +2395,29 @@ def test_sim_export(tmp: Path):
 
     old = run_tool(Game.load(make_wow_dir(tmp / "old")), "character_build", {"sim": True})
     assert "has not told" in old["error"], "an addon from before this: said so, with the way to cure it"
+
+    # the way back: the sim's stat weights, pasted by the player, go to the Pawn addon through a card
+    said = 'вот веса ( Pawn: v1: "Fire WoWSims Weights": Class=Mage,Intellect=1.234,SpellDamage=1.000,HitRating=0.85,Spirit=X ) что важнее?'
+    scale = sim.pawn_scale(said)
+    assert scale["name"] == "Fire WoWSims Weights" and scale["cls"] == "Mage" and scale["weights"][0] == ("Intellect", 1.234)
+    assert scale["tag"] == '( Pawn: v1: "Fire WoWSims Weights": Class=Mage, Intellect=1.234, SpellDamage=1.000, HitRating=0.85, Spirit=X )'
+    for bad in ("no scale here", '( Pawn: v1: "x": Class=Mage )', '( Pawn: v1: "x": Intellect=1|cff, )', '( Pawn: v1: "": Intellect=1 )',
+                '( Pawn: v1: "x": Intellect=print(1) )', '( Pawn: v1: "x": Intellect=1; /run x )', None, 7):
+        assert sim.pawn_scale(bad) is None, bad
+    game.asked = said
+    handed = run_tool(game, "pawn_scale", {"scale": '( Pawn: v1: "Retyped": Intellect=9 )'})
+    card = game.cards[-1]
+    assert handed["scale"] == "Fire WoWSims Weights" and handed["weights"]["Intellect"] == "1.234", "the player's own text, not the model's copy of it"
+    assert card["table"]["rows"] == [["Intellect", "1.234"], ["SpellDamage", "1"], ["HitRating", "0.85"]] and "not seen" in handed["pawn_addon"]
+    assert f'LIST pawn true {scale["tag"]}' in stub("paste", card["wisp"], flags="pawn"), "Pawn's own import gets the scale, to replace one of that name"
+    assert any('Pawn has the scale "Fire WoWSims Weights"' in line for line in stub("paste", card["wisp"], flags="pawn"))
+    assert any("failed Pawn is not installed" in line for line in stub("paste", card["wisp"]))
+    for tag in ('( Pawn: v1: "x": Intellect=1 ) /run x', '( Pawn: v1: "a|cff": Intellect=1 )', "x", 5):
+        assert any("failed bad Pawn scale" in line for line in stub("paste", encode_wisp1([{"do": "pawn.scale", "tag": tag}]), flags="pawn")), tag
+    game.asked = ""
+    assert run_tool(game, "pawn_scale", {"scale": said})["scale"] == "Fire WoWSims Weights", "with no question at hand, the model's copy"
+    assert "No Pawn scale" in run_tool(game, "pawn_scale", {"scale": "Intellect is best"})["error"]
+    assert Game.load(make_wow_dir(tmp / "pawn", flags="pawn")).snapshot["addons"]["pawn"] is True and game.snapshot["addons"]["pawn"] is False
 
 
 def test_eval_cases():

@@ -94,6 +94,7 @@ class Game:
         self.web_seen: dict[str, str] = {}  # url -> title of every web page this conversation was given
         self.notes_dir: Path | None = None  # where research reports are kept, when the app has a place
         self.sim_dir: Path | None = None    # where the sim's talent order is kept for a day, when the app has a place
+        self.asked = ''                     # the player's question, as written
         self.saved_file: Path | None = None  # the addon's saved file: Questie's whole quest list is kept there too
         self._questdb = None
 
@@ -1789,6 +1790,30 @@ class Game:
                        "the game's own.")
         return out
 
+    def tool_pawn_scale(self, args: dict) -> dict:
+        """The stat weights a sim worked out, as a card that hands them to the Pawn addon (wisp/sim.py)."""
+        from .sim import pawn_scale
+        # the player's own text wins over the model's copy of it: a figure retyped is a figure that can change
+        scale = pawn_scale(self.asked) or pawn_scale(args.get("scale"))
+        if not scale:
+            return {"error": "No Pawn scale in that. It looks like ( Pawn: v1: \"name\": Class=Mage, Intellect=1.2, ... ): on the sim's "
+                             "site, run Stat Weights, then Export, Pawn EP, and paste what it gives here."}
+        addons = self.snapshot.get("addons") if isinstance(self.snapshot.get("addons"), dict) else {}
+        weights = [[stat, f"{value:g}"] for stat, value in scale["weights"]]
+        self.cards.append({"id": f"card{len(self.cards) + 1}", "heading": t("For Pawn"),
+                           "lines": [{"addon": "Pawn", "text": t("Import the scale \"{name}\"", name=scale["name"]), "detail": ""}],
+                           "table": {"title": scale["name"], "sub": scale["cls"] or "", "columns": [t("Stat"), t("Weight")], "rows": weights,
+                                     "notes": [t("Pawn then shows on every item's tooltip what it is worth by these weights, and marks upgrades.")]},
+                           "wisp": encode_wisp1([{"do": "pawn.scale", "tag": scale["tag"]}])})
+        out = {"scale": scale["name"], "weights": {stat: value for stat, value in weights},
+               "shown": "a card is now shown to the player with these weights and a button that hands the scale to the Pawn addon in the "
+                        "game (Send, or Copy and Ctrl+V twice there). Nothing has happened in the game yet. Do not repeat the rows; "
+                        "you may say in a line which stats weigh most. The weights are the sim's, for the gear and talents it was "
+                        "given: after a change of gear or talents they want working out again."}
+        if addons.get("pawn") is False:
+            out["pawn_addon"] = "not seen in the game at the last sync: the card needs the Pawn addon installed"
+        return out
+
     def tool_farming(self, args: dict) -> dict:
         if not self.snapshot:
             return {"error": self.problem}
@@ -2417,6 +2442,19 @@ TOOLS = [
         },
     },
     {
+        "name": "pawn_scale",
+        "description": "Hand a sim's stat weights to the Pawn addon in the game. When the player's message holds a Pawn "
+                       "scale, the text ( Pawn: v1: \"name\": Class=..., Stat=number, ... ) that a sim site's Pawn export "
+                       "gives, call this: the player gets a card with the weights and a button that imports the scale "
+                       "into Pawn, which then rates items on their tooltips.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"scale": {"type": "string", "description": "The Pawn scale exactly as the player wrote it, from ( to )."}},
+            "required": ["scale"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "farming",
         "description": "What farming is worth, measured. spots: the zones the character has farmed, with time spent "
                        "looting, coins, loot worth and gold per hour. sources: each kind of creature and node the "
@@ -2605,7 +2643,9 @@ with show true, and explain the fight from its figures.
 
 What the character wears and its talents are in character_build. When the player wants to sim the character, or \
 wants its gear and talents for a sim site, call it with sim true: the card it shows carries the text such sites import. \
-Never write that text yourself, and never give a figure for damage or healing: Wisp runs no sim.
+Never write that text yourself, and never give a figure for damage or healing: Wisp runs no sim. The way back is \
+pawn_scale: the sim's site gives its stat weights as a Pawn scale (there: Stat Weights, then Export, Pawn EP); when the \
+player pastes one, call pawn_scale, and the card hands it to the Pawn addon. After a sim card, say in a line that this is there.
 
 Everything in the tools is named in the language of the player's game. Look a name up in the words the player used, in \
 their language, as the dictionary form of what they wrote; never translate a name into another language to search for it.

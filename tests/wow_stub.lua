@@ -764,6 +764,15 @@ local function visitAuctionHouse(boot)
   runTimers()
   boot.scripts.OnEvent(boot, "COMMODITY_SEARCH_RESULTS_UPDATED", 4305)   -- then the player looks one item up
 end
+if flags:find("pawn") then   -- the Pawn addon's public import: it parses the scale itself and answers with a status and the name
+  PawnImportScaleResultSuccess = 1
+  function PawnImportScale(tag, overwrite)
+    local name = tag:match('^%s*%(%s*Pawn%s*:%s*v%d+%s*:%s*"([^"]+)"%s*:.+%)%s*$')
+    if not name then return 3 end
+    LISTS[#LISTS + 1] = "pawn " .. tostring(overwrite) .. " " .. tag
+    return 1, name
+  end
+end
 if not flags:find("notomtom") then
   TomTom = { AddWaypoint = function(_, m, x, y, o) WAYS[#WAYS + 1] = "tomtom " .. m .. " " .. x .. " " .. y .. " " .. o.title end }
 end

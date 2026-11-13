@@ -601,6 +601,7 @@ def answer(chat, game: Game, question: str, should_stop=lambda: False, research:
     turn_start = len(chat.messages)
     chat.user(question)
     game.cards = []
+    game.asked = question   # a tool may need the player's words as they wrote them
     said = ""
     hops = RESEARCH_HOPS if research else MAX_HOPS
     for hop in range(hops):

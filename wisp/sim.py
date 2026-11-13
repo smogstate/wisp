@@ -9,6 +9,7 @@ Talents are the one part that needs the sim: it reads them as digits in the orde
 That order comes from the sim's public source, one small file for the class, kept for a day.
 """
 import json
+import re
 import time
 import urllib.request
 from pathlib import Path
@@ -183,3 +184,34 @@ class Build:
             notes.append(t("{n} of the talents are not in the sim's trees and were left out.", n=self.unknown()))
         return {"title": t("What the character wears"), "sub": " · ".join(str(x) for x in (t("level {n}", n=self.level) if self.level else None, build) if x),
                 "columns": [t("Item"), t("Slot"), t("Enchanted")], "rows": rows, "notes": notes}
+
+
+# ---- the way back: the stat weights a sim worked out, for the Pawn addon ----
+# The sim's own Export, Pawn EP writes them as a Pawn scale: ( Pawn: v1: "Fire WoWSims Weights": Class=Mage,Intellect=1.234 )
+PAWN = re.compile(r'\(\s*Pawn\s*:\s*v1\s*:\s*"([^"|\\\x00-\x1f]{1,60})"\s*:\s*([^()|"\\\x00-\x1f]{1,1500}?)\s*\)')
+PAIR = re.compile(r"\s*([A-Za-z][A-Za-z0-9]{0,30})\s*=\s*(-?\d{1,6}(?:\.\d{1,6})?|[A-Za-z]{1,20})\s*")
+
+
+def pawn_scale(text) -> dict | None:
+    """The Pawn scale in a text: {name, cls, weights: [(stat, number)], tag}. None when there is none, or it is not
+    well formed. The tag is written again from its parts, so nothing else of the text can reach the game."""
+    found = PAWN.search(text) if isinstance(text, str) else None
+    if not found or not found.group(1).strip():
+        return None
+    name, cls, pairs, weights = found.group(1).strip(), None, [], []
+    for pair in found.group(2).split(","):
+        if not pair.strip():
+            continue
+        part = PAIR.fullmatch(pair)
+        if not part:
+            return None
+        stat, value = part.groups()
+        pairs.append(f"{stat}={value}")
+        if stat == "Class":
+            cls = value
+        elif stat != "Spec" and value[-1].isdigit():
+            weights.append((stat, float(value)))
+    if not weights:
+        return None
+    return {"name": name, "cls": cls, "weights": sorted(weights, key=lambda w: -w[1]),
+            "tag": f'( Pawn: v1: "{name}": ' + ", ".join(pairs) + " )"}
