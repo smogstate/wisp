@@ -161,6 +161,8 @@ class Game:
             values = {scales[i]: v for i, v in enumerate(_as_list(item.get("v"))[:len(scales)]) if number(v)}
             if up or values:
                 out[item["id"]] = {"up": sorted(up, key=lambda u: -u[1]), "values": values}
+                if isinstance(item.get("lv"), int) and not isinstance(item["lv"], bool):   # the level it needs, for gear to come by
+                    out[item["id"]]["needs"] = item["lv"]
                 if isinstance(item.get("ah"), int) and not isinstance(item["ah"], bool) and item["ah"] > 0:   # gear on the auction house
                     out[item["id"]].update(price=item["ah"], name=_clean(item.get("n"), 80) or f"item {item['id']}")
         return out, scales
@@ -1844,13 +1846,21 @@ class Game:
             out["pawn_addon"] = "not seen in the game at the last sync: the card needs the Pawn addon installed"
         return out
 
+    def _materials(self, item: int) -> str | None:
+        """What the materials for one cost at the lowest listings, held or not; from the craft calculator."""
+        try:
+            from .tree import breakdown
+            return breakdown(self, item, 1).get("all_materials_worth")
+        except Exception:   # a recipe the calculator cannot walk: no figure rather than no answer
+            return None
+
     def tool_upgrades(self, args: dict) -> dict:
         """Which items Wisp knows of are upgrades for the character, by the Pawn addon's verdict in the game."""
         if not self.snapshot:
             return {"error": self.problem}
         source = args.get("source", "any")
-        if source not in ("any", "quests", "bags", "dungeons", "auction"):
-            return {"error": "source must be any, quests, bags, dungeons or auction"}
+        if source not in ("any", "quests", "bags", "dungeons", "auction", "crafts"):
+            return {"error": "source must be any, quests, bags, dungeons, auction or crafts"}
         addons = self.snapshot.get("addons") if isinstance(self.snapshot.get("addons"), dict) else {}
         if not isinstance(self.snapshot.get("pawn"), dict):
             return {"error": "No word from Pawn. " + ("The Pawn addon was not seen in the game at the last sync: with it installed, Wisp asks "
@@ -1881,6 +1891,17 @@ class Game:
                 if said.get("price"):
                     where.setdefault(item, []).append((said["name"], f"on the auction house for {coins(said['price'])}",
                                                        t("auction house, {price}", price=coins(said["price"]))))
+        crafted = {}   # item -> the recipe that makes it, learned by this character first, else by another of theirs
+        if source in ("any", "crafts"):
+            for r in self.crafting.recipes.values():
+                if r["learned"] and r["makes"] in self.pawn and (r["makes"] not in crafted or crafted[r["makes"]]["owner"]):
+                    crafted[r["makes"]] = r
+            for item, r in crafted.items():
+                where.setdefault(item, []).append((self.graph.names.get(item) or r["name"],
+                                                   f"crafted by {r['owner'] or 'you'} ({r['profession']}: {r['name']})",
+                                                   t("an alt crafts it: {profession}" if r["owner"] else "you craft it: {profession}",
+                                                     profession=r["profession"])))
+        level = (self.snapshot.get("character") or {}).get("level") or 0
         found = []
         for item, places in where.items():
             said = self.pawn.get(item)
@@ -1890,7 +1911,9 @@ class Game:
                               "upgrade": [{"scale": scale, "by": f"+{round(share * 100)}%", "replaces": replaces or "an empty slot"}
                                           for scale, share, replaces in said["up"]],
                               **({"pawn_value": said["values"]} if said["values"] else {}), "_best": said["up"][0][1],
-                              **({"price": coins(said["price"]), "_price": said["price"], "_name": said["name"]} if said.get("price") else {})})
+                              **({"price": coins(said["price"]), "_price": said["price"], "_name": said["name"]} if said.get("price") else {}),
+                              **({"needs_level": said["needs"]} if said.get("needs", 0) > level else {}),
+                              **({"materials_worth": self._materials(item)} if item in crafted and self._materials(item) else {})})
         if source == "auction":   # for the money: how much better per gold
             found.sort(key=lambda f: -f["_best"] / max(f.get("_price", 1), 1))
         else:
@@ -1900,6 +1923,36 @@ class Game:
         if unknown:
             out["not_rated"] = (f"{unknown} items the game had not described yet, so Pawn had no stats for them: they show once seen in the "
                                 "game (a tooltip, the journal), then /wisp sync")
+        if source == "dungeons":   # where to go: the dungeons by the upgrades they drop, with their quests
+            groups = []
+            raw = [d for d in _as_list(self.snapshot.get("dungeons")) if isinstance(d, dict)]
+            for d, shown in zip(raw, self.dungeons):
+                ups = [(_clean(drop[1], 80), self.pawn[drop[0]]["up"][0]) for b in _as_list(d.get("bosses")) if isinstance(b, dict)
+                       for drop in _as_list(b.get("loot")) if isinstance(drop, list) and len(drop) >= 2 and self.pawn.get(drop[0], {}).get("up")]
+                if ups:
+                    groups.append({"dungeon": shown["name"], "level": shown["level"],
+                                   "upgrades": [f"{name} +{round(up[1] * 100)}%" for name, up in ups],
+                                   "open_quests": sum(q["status"] in ("available", "in your quest log") for q in shown["quests"]),
+                                   **({"entrance_ref": shown["entrance"]["ref"]} if shown.get("entrance") and shown["entrance"].get("ref") else {}),
+                                   "_rank": (len(ups), max(up[1] for _, up in ups))})
+            groups.sort(key=lambda g: g["_rank"], reverse=True)
+            out["by_dungeon"] = [{k: v for k, v in g.items() if k != "_rank"} for g in groups[:8]]
+            if args.get("show") is True and groups:
+                top = groups[:8]
+                ends = [self.places[g["entrance_ref"]] for g in top[:3] if g.get("entrance_ref") in self.places]
+                card = {"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Where to go for gear"), "table": {
+                    "title": t("Dungeons by the upgrades they drop"), "sub": " · ".join(self.pawn_scales),
+                    "columns": [t("Dungeon"), t("Upgrades"), t("Quests")],
+                    "rows": [[f"{g['dungeon']} ({g['level']}) — " + ", ".join(g["upgrades"][:4]), str(len(g["upgrades"])), str(g["open_quests"])]
+                             for g in top],
+                    "notes": [t("Pawn's own reckoning from the item's stats and your scale, as on its tooltips."),
+                              t("Quests: the dungeon's quests you can take or already have.")]}}
+                if ends:
+                    card["wisp"] = encode_wisp1([{"do": "tomtom.waypoint", "map": p["map"], "x": p["x"], "y": p["y"], "title": p["title"]} for p in ends])
+                    card["hint"] = t("Waypoints to the entrances: Copy, then in the game Ctrl+V twice")
+                self.cards.append(card)
+                out["shown"] = ("a card with these dungeons is now shown to the player" + (", with a button that sets waypoints to the "
+                                "first entrances" if ends else "") + ": do not repeat its rows")
         if args.get("show") is True and found and source == "auction":
             several = len(self.pawn_scales) > 1
             top = found[:20]
@@ -1914,20 +1967,24 @@ class Game:
                 "hint": t("Shopping list for Auctionator: Copy, then in the game Ctrl+V twice")})
             out["shown"] = ("a card with these upgrades and their prices is now shown to the player, with a button that makes an "
                             "Auctionator shopping list of the first ten: do not repeat its rows")
-        elif args.get("show") is True and found:
+        elif args.get("show") is True and found and source != "dungeons":   # the dungeons have their own card, above
             several = len(self.pawn_scales) > 1
             self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Upgrades"), "table": {
                 "title": t("Upgrades by Pawn"), "sub": " · ".join(self.pawn_scales),
                 # only the first column wraps in a card's table: what is long goes there, the figures stay short
                 "columns": [t("Item"), t("Upgrade"), t("Replaces")],
-                "rows": [[f"{f['item']} — {f['_shown']}" + (f" · {f['upgrade'][0]['scale']}" if several else ""), f["upgrade"][0]["by"],
+                "rows": [[f"{f['item']} — {f['_shown']}" + (f" · {f['upgrade'][0]['scale']}" if several else "")
+                          + (" · " + t("from level {n}", n=f["needs_level"]) if f.get("needs_level") else ""), f["upgrade"][0]["by"],
                           t("empty slot") if f["upgrade"][0]["replaces"] == "an empty slot" else f["upgrade"][0]["replaces"]] for f in found[:20]],
                 "notes": [t("Pawn's own reckoning from the item's stats and your scale, as on its tooltips.")]}})
             out["shown"] = "a card with these upgrades is now shown to the player: do not repeat its rows"
         out["note"] = ("Pawn's verdict, from the game: it knows each item's stats and the player's scales (a scale is a set of stat "
                        "weights, from a sim or a guide). 'by' is how much better than what is worn in that slot, for that scale. "
                        "Only items Wisp knows of are rated: the quest log's rewards, what is carried, the dungeon journal's loot, "
-                       "and gear seen on the auction house that the character can wear now (by auction: sorted by upgrade per gold). "
+                       "gear seen on the auction house that the character can wear now (by auction: sorted by upgrade per gold), "
+                       "and what the character's or an alt's recipes make. needs_level: a piece for a few levels on. "
+                       "by_dungeon: where to go for gear, the dungeons with the most upgrades first, and how many of their quests "
+                       "the character can take or has; its entrance_ref goes to the waypoint tool. "
                        "Nothing found means none of those is an upgrade by Pawn, not that there is none in the game.")
         return out
 
@@ -2580,8 +2637,9 @@ TOOLS = [
                        "the other tools also carry Pawn's verdict when there is one.",
         "input_schema": {
             "type": "object",
-            "properties": {"source": {"type": "string", "enum": ["any", "quests", "bags", "dungeons", "auction"],
-                                      "description": "auction: gear on the auction house, best upgrade for the money first."},
+            "properties": {"source": {"type": "string", "enum": ["any", "quests", "bags", "dungeons", "auction", "crafts"],
+                                      "description": "auction: best upgrade for the money first. crafts: what the character or "
+                                                     "an alt can make. dungeons: also where to go, dungeons ranked by upgrades."},
                            "show": {"type": "boolean", "description": "true to also show the player the upgrades as a card."}},
             "additionalProperties": False,
         },

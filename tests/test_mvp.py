@@ -2425,14 +2425,15 @@ def test_pawn_upgrades(tmp: Path):
     game = Game.load(make_wow_dir(tmp, flags="pawn,rewards,questindex"))
     assert game.snapshot["pawn"]["scales"] == ["Mage: frost", "Fire WoWSims Weights"], "the scales shown for this character, not the hidden one"
     found = run_tool(game, "upgrades", {"show": True})
-    assert [u["item"] for u in found["upgrades"]] == ["Rockslicer", "Owl Robe", "Miner's Cape", "Cheap Bracers"], "the best upgrade first"
+    assert [u["item"] for u in found["upgrades"]] == ["Rockslicer", "Owl Robe", "Miner's Cape", "Cheap Bracers", "Azure Silk Hood"], "the best upgrade first"
+    assert found["upgrades"][0]["needs_level"] == 14 and "needs_level" not in found["upgrades"][1], "a piece for a few levels on says so"
     assert found["upgrades"][0]["upgrade"] == [{"scale": "Mage: frost", "by": "+42%", "replaces": "an empty slot"}]
     assert found["upgrades"][0]["from"] == ["Rhahk'Zor, The Deadmines"] and found["upgrades"][0]["pawn_value"] == {"Mage: frost": 30.1}
     cape = found["upgrades"][2]
     assert cape["upgrade"] == [{"scale": "Fire WoWSims Weights", "by": "+15%", "replaces": "Linen Cloak"}], "a hidden scale is not this character's"
     assert cape["from"][0].startswith("reward of ") and "not_rated" in found, "an item the game had not described yet is counted, not guessed"
     card = game.cards[-1]["table"]
-    assert card["columns"] == ["Item", "Upgrade", "Replaces"] and card["rows"][0] == ["Rockslicer — Rhahk'Zor, The Deadmines · Mage: frost", "+42%", "empty slot"]
+    assert card["columns"] == ["Item", "Upgrade", "Replaces"] and card["rows"][0] == ["Rockslicer — Rhahk'Zor, The Deadmines · Mage: frost · from level 14", "+42%", "empty slot"]
     assert card["rows"][2][0].startswith("Miner's Cape — reward: ") and card["rows"][1][0] == "Owl Robe — auction house, 1g 20s · Mage: frost"
     assert [u["item"] for u in run_tool(game, "upgrades", {"source": "dungeons"})["upgrades"]] == ["Rockslicer"]
     assert run_tool(game, "upgrades", {"source": "bags"})["upgrades"] == [] and "error" in run_tool(game, "upgrades", {"source": "x"})
@@ -2444,6 +2445,18 @@ def test_pawn_upgrades(tmp: Path):
     assert card["table"]["columns"] == ["Item", "Upgrade", "Price"] and card["table"]["rows"][0] == ["Cheap Bracers · Fire WoWSims Weights", "+10%", "8s"]
     listed = [l for l in stub("paste", card["wisp"]) if l.startswith("LIST ")]
     assert listed == ['LIST Upgrades = "Cheap Bracers";1 + "Owl Robe";1'], "one button: the Auctionator shopping list of them"
+    # what the character's own recipes make, with what the materials cost
+    crafts = run_tool(game, "upgrades", {"source": "crafts", "show": True})["upgrades"]
+    assert [(c["item"], c["from"], c["needs_level"]) for c in crafts] == [("Azure Silk Hood", ["crafted by you (Tailoring: Azure Silk Hood)"], 13)]
+    assert "materials_worth" not in crafts[0], "Blue Dye has no price: no total rather than a wrong one"
+    assert game.cards[-1]["table"]["rows"][0][0] == "Azure Silk Hood — you craft it: Tailoring · Fire WoWSims Weights · from level 13"
+    # where to go for gear: the dungeons by the upgrades they drop, their quests, and the way to their entrances
+    where = run_tool(game, "upgrades", {"source": "dungeons", "show": True})
+    assert where["by_dungeon"] == [{"dungeon": "The Deadmines", "level": "17-26", "upgrades": ["Rockslicer +42%"], "open_quests": 1, "entrance_ref": "d2.entrance"}], \
+        "the cloak needs level 30 and the hammer is not described yet: neither is asked about"
+    card = game.cards[-1]
+    assert card["heading"] == "Where to go for gear" and card["table"]["rows"] == [["The Deadmines (17-26) — Rockslicer +42%", "1", "1"]]
+    assert any(l.startswith("WAY tomtom 1436 0.425 0.717") for l in stub("paste", card["wisp"])), "the button sets a waypoint at the entrance"
     # the verdict rides along where the model already looks: the quest's rewards, the dungeon's loot
     quest = next(q for q in run_tool(game, "quests", {})["quests"] if q.get("reward_items"))
     assert quest["reward_items"] == ["Miner's Cape (Pawn: upgrade +15% for Fire WoWSims Weights, over Linen Cloak)"]

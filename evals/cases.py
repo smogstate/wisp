@@ -441,6 +441,18 @@ CASES = [
                  "Выгоднее всего Cheap Bracers за 8с: +10% по шкале Fire WoWSims Weights. Owl Robe за 1з 20с даёт +30% для Mage: frost. "
                  "Кнопка на карточке сделает список покупок в Auctionator.")]},
 
+    {"id": "pawn-crafts", "tags": ["sim", "crafting"], "lang": "ru",
+     "ask": "Могу я сам скрафтить себе что-то получше того, что ношу?",
+     "tools": ["upgrades"], "say": ["Azure Silk Hood", "13"],
+     "oracle": [([("upgrades", {"source": "crafts"})],
+                 "Да: Azure Silk Hood, вы делаете его портняжным делом. По Pawn это +8% по шкале Fire WoWSims Weights, но надеть его можно с 13 уровня.")]},
+    {"id": "pawn-where-to-go", "tags": ["sim", "cards", "dungeons"], "lang": "ru",
+     "ask": "В какое подземелье мне идти за шмотом?",
+     "tools": ["upgrades"], "args": {"upgrades": {"source": "dungeons"}}, "say": ["Deadmines|Мертвые копи", "Rockslicer"], "never": ["Catacomb Cloak"],
+     "oracle": [([("upgrades", {"source": "dungeons", "show": True})],
+                 "В The Deadmines (17-26): Rockslicer с Rhahk'Zor даёт +42% для Mage: frost, и там одно задание, которое можно взять. "
+                 "Кнопка на карточке поставит метку у входа.")]},
+
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
      "ask": "Привет! Ты кто?", "no_tools": True,

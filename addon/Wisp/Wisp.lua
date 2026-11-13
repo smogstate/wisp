@@ -1960,8 +1960,24 @@ end
 -- What the Pawn addon says of the items Wisp may be asked about: the quest log's rewards, what is carried,
 -- the dungeon journal's loot. Pawn knows the item stats and the player's scales; Wisp asks it, as its own
 -- tooltip does, and keeps the answer: for each scale, how much of an upgrade an item is and what it replaces.
-local PAWN_ITEMS, PAWN_MARKET = 150, 250   -- at most this many asked, at logout: items Wisp knows of, then gear on the auction house
+local PAWN_ITEMS, PAWN_MARKET = 250, 200   -- at most this many asked, at logout: items Wisp knows of, then gear on the auction house
 local NOT_WORN = { INVTYPE_BAG = true, INVTYPE_QUIVER = true, INVTYPE_TABARD = true, INVTYPE_BODY = true, INVTYPE_AMMO = true, INVTYPE_NON_EQUIP_IGNORE = true }
+
+-- Gear this character can wear at its level, or a few levels on: its name and the level it needs. Nothing when
+-- the item is no gear, or needs more; and when the game has not described it yet, it is asked for, so that
+-- the next sync has it (the second value says so).
+local function wearable(id, above)
+  local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+  local info = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+  local okI, _, _, _, slot = pcall(instant, id)
+  if not (okI and type(slot) == "string" and slot ~= "" and not NOT_WORN[slot]) then return nil end
+  local okL, name, _, _, _, needs = pcall(info, id)
+  if not (okL and name) then
+    if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+    return nil, true
+  end
+  if type(needs) == "number" and needs <= (UnitLevel("player") or 0) + (above or 0) then return name, needs end
+end
 
 -- Gear the auction house had, at its lowest price: from Auctionator's record, which keeps gear under its own
 -- keys (g:item:item level), and from a full scan this session. Only what this character can wear at its level,
@@ -1983,23 +1999,16 @@ local function marketGear()
     for price in pairs(entry.prices or {}) do if not least or price < least then least = price end end
     seen(id, least)
   end
-  local level, out = UnitLevel("player") or 0, {}
-  local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
-  local info = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+  local out = {}
   for id, price in pairs(lowest) do
-    local okI, _, _, _, slot = pcall(instant, id)
-    if okI and type(slot) == "string" and slot ~= "" and not NOT_WORN[slot] then
-      local okL, name, _, _, _, needs = pcall(info, id)
-      if okL and name and type(needs) == "number" and needs <= level then
-        out[#out + 1] = { id = id, price = price, needs = needs, name = name }
-      end
-    end
+    local name, needs = wearable(id, 0)
+    if name then out[#out + 1] = { id = id, price = price, needs = needs, name = name } end
   end
   table.sort(out, function(a, b) if a.needs ~= b.needs then return a.needs > b.needs end return a.id < b.id end)
   return out
 end
 
-local function pawnVerdicts(log, carried, journal)
+local function pawnVerdicts(log, carried, journal, books)
   if not (PawnIsInitialized and type(PawnGetItemData) == "function" and type(PawnIsItemAnUpgrade) == "function") then return nil end
   local scales, order = {}, {}
   if type(PawnGetAllScalesEx) == "function" then
@@ -2007,17 +2016,35 @@ local function pawnVerdicts(log, carried, journal)
       if s.IsVisible and #scales < 4 then scales[#scales + 1] = s.Name; order[s.Name] = #scales end
     end
   end
-  local wanted, seen = {}, {}
-  local function want(id) if type(id) == "number" and not seen[id] and #wanted < PAWN_ITEMS then seen[id] = true; wanted[#wanted + 1] = id end end
+  local wanted, seen, extra, later = {}, {}, {}, 0
+  local function want(id, with)
+    if type(id) == "number" and not seen[id] and #wanted < PAWN_ITEMS then seen[id] = true; wanted[#wanted + 1] = id; extra[id] = with end
+  end
+  -- gear to come by, with the level it needs: what a recipe of this character or an alt makes, then the journal's loot
+  local function gear(id, above)
+    if type(id) ~= "number" or seen[id] then return end
+    local name, needs = wearable(id, above)
+    if name then want(id, { lv = needs }) elseif needs then later = later + 1 end
+  end
   for _, quest in ipairs(log or {}) do
     for _, list in ipairs({ quest.rewardItems or {}, quest.rewardChoices or {} }) do
       for _, reward in ipairs(list) do want(reward.id) end
     end
   end
   for _, line in ipairs(carried or {}) do want(line.id) end
-  for _, dungeon in ipairs(journal or {}) do
-    for _, boss in ipairs(dungeon.bosses or {}) do
-      for _, drop in ipairs(boss.loot or {}) do want(drop[1]) end
+  for _, book in ipairs(books or {}) do
+    for _, r in ipairs(book.recipes or {}) do if r.learned ~= false then gear(r.makes, 3) end end   -- a piece to wear in a level or two counts
+  end
+  local level, near = UnitLevel("player") or 0, {}
+  for _, dungeon in ipairs(journal or {}) do   -- the dungeons nearest the character's level first
+    local low, high = tostring(dungeon.level or ""):match("(%d+)%D+(%d+)")
+    low, high = tonumber(low) or 99, tonumber(high) or 99
+    near[#near + 1] = { dungeon = dungeon, off = level < low and low - level or (level > high and level - high or 0) }
+  end
+  table.sort(near, function(a, b) return a.off < b.off end)
+  for _, n in ipairs(near) do
+    for _, boss in ipairs(n.dungeon.bosses or {}) do
+      for _, drop in ipairs(boss.loot or {}) do gear(drop[1], 3) end   -- gear for a few levels on: a dungeon is a trip ahead
     end
   end
   local items, unknown = {}, 0
@@ -2047,7 +2074,7 @@ local function pawnVerdicts(log, carried, journal)
       unknown = unknown + 1   -- the game has not described it yet: Pawn has no stats for it
     end
   end
-  for _, id in ipairs(wanted) do rate(id) end
+  for _, id in ipairs(wanted) do rate(id, extra[id]) end
   local okM, gear = pcall(marketGear)
   local asked = 0
   for _, g in ipairs(okM and gear or {}) do
@@ -2062,6 +2089,7 @@ local function pawnVerdicts(log, carried, journal)
     local okL, shown = pcall(PawnGetScaleLocalizedName, name)
     names[i] = okL and type(shown) == "string" and shown or name
   end
+  unknown = unknown + later
   return { scales = names, items = items, unknown = unknown > 0 and unknown or nil }
 end
 
@@ -2132,7 +2160,7 @@ local function buildSnapshot()
   local okT, taught = pcall(trainerWindows)
   local okW, worn = pcall(gearRecord)
   local okU, spent = pcall(talentRecord)
-  local okPw, rated = pcall(pawnVerdicts, log, carried, journal)
+  local okPw, rated = pcall(pawnVerdicts, log, carried, journal, books)
   return {
     v = 1,
     takenAt = time(),

@@ -796,21 +796,27 @@ if flags:find("pawn") then   -- the Pawn addon's public import: it parses the sc
   end
   -- gear on the auction house, in Auctionator's record under its own keys: what it is, where it goes, the level it needs
   local gear = { [2000] = { "Owl Robe", "INVTYPE_ROBE", 11, "g:2000:15", 12000 }, [2002] = { "Cheap Bracers", "INVTYPE_WRIST", 9, "g:2002:10", 800 },
-                 [2001] = { "Too High Helm", "INVTYPE_HEAD", 20, "g:2001:25", 900 }, [2004] = { "Fine Necklace", "INVTYPE_NECK", 12, "2004", 50000 } }
+                 [2001] = { "Too High Helm", "INVTYPE_HEAD", 20, "g:2001:25", 900 }, [2004] = { "Fine Necklace", "INVTYPE_NECK", 12, "2004", 50000 },
+                 -- and gear elsewhere: the journal's loot (the hammer not described by the game yet), a tailoring recipe's hood
+                 [872] = { "Rockslicer", "INVTYPE_2HWEAPON", 14 }, [5187] = { nil, "INVTYPE_2HWEAPON", 15 },
+                 [279899] = { "Catacomb Cloak", "INVTYPE_CLOAK", 30 }, [7048] = { "Azure Silk Hood", "INVTYPE_HEAD", 13 } }
   if Auctionator then
-    for _, g in pairs(gear) do Auctionator.Database.db[g[4]] = { m = g[5], h = {} } end
+    for _, g in pairs(gear) do if g[4] then Auctionator.Database.db[g[4]] = { m = g[5], h = {} } end end
     Auctionator.Database.db["g:2002:11"] = { m = 1500, h = {} }   -- the same bracers again, dearer: the lowest price counts
   end
   C_Item.GetItemInfoInstant = function(id)
     if gear[id] then return id, "Armor", "Cloth", gear[id][2], 1, 4, 1 end
     return GetItemInfoInstant(id)
   end
-  C_Item.GetItemInfo = function(id) if gear[id] then return gear[id][1], "link", 2, 15, gear[id][3] end end
+  C_Item.GetItemInfo = function(id) if gear[id] and gear[id][1] then return gear[id][1], "link", 2, 15, gear[id][3] end end
+  local load = C_Item.RequestLoadItemDataByID
+  C_Item.RequestLoadItemDataByID = function(id) if id == 5187 then LOADED = (LOADED or "") .. id .. " " end return load(id) end
   local upgradeOf = PawnIsItemAnUpgrade
   PawnIsItemAnUpgrade = function(item)
     if item.ID == 2000 then return { { '"MrRobot":MAGE3', "Mage: frost", 0.30, nil } } end
     if item.ID == 2002 then return { { "Fire WoWSims Weights", "Fire WoWSims Weights", 0.10, "|cff9d9d9d|Hitem:3000::|h[Frayed Bracers]|h|r" } } end
-    if item.ID == 2001 then error("asked about an item the character cannot wear yet") end
+    if item.ID == 2001 or item.ID == 279899 or item.ID == 5187 then error("asked about an item the character cannot wear, or that is not described") end
+    if item.ID == 7048 then return { { "Fire WoWSims Weights", "Fire WoWSims Weights", 0.08, nil } } end
     return upgradeOf(item)
   end
 end
