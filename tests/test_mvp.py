@@ -2411,6 +2411,16 @@ def test_sim_export(tmp: Path):
     assert card["table"]["rows"] == [["Intellect", "1.234"], ["SpellDamage", "1"], ["HitRating", "0.85"]] and "not seen" in handed["pawn_addon"]
     assert f'LIST pawn true {scale["tag"]}' in stub("paste", card["wisp"], flags="pawn"), "Pawn's own import gets the scale, to replace one of that name"
     assert any('Pawn has the scale "Fire WoWSims Weights"' in line for line in stub("paste", card["wisp"], flags="pawn"))
+    from wisp import i18n
+    try:   # a Russian player reads the stats and the class as the game names them; a stat Wisp does not know stays Pawn's
+        i18n.set_language("ru")
+        game.asked = '( Pawn: v1: "Огонь": Class=Mage, Intellect=1.2, CritRating=0.6, SomeNewStat=0.1 )'
+        run_tool(game, "pawn_scale", {"scale": ""})
+        ru = game.cards[-1]["table"]
+        assert ru["sub"] == "Маг" and ru["columns"] == ["Характеристика", "Вес"]
+        assert ru["rows"] == [["Интеллект", "1.2"], ["Рейтинг критического удара", "0.6"], ["SomeNewStat", "0.1"]]
+    finally:
+        i18n.set_language("en")
     assert any("failed Pawn is not installed" in line for line in stub("paste", card["wisp"]))
     for tag in ('( Pawn: v1: "x": Intellect=1 ) /run x', '( Pawn: v1: "a|cff": Intellect=1 )', "x", 5):
         assert any("failed bad Pawn scale" in line for line in stub("paste", encode_wisp1([{"do": "pawn.scale", "tag": tag}]), flags="pawn")), tag

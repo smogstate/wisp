@@ -1834,7 +1834,9 @@ class Game:
         weights = [[stat, f"{value:g}"] for stat, value in scale["weights"]]
         self.cards.append({"id": f"card{len(self.cards) + 1}", "heading": t("For Pawn"),
                            "lines": [{"addon": "Pawn", "text": t("Import the scale \"{name}\"", name=scale["name"]), "detail": ""}],
-                           "table": {"title": scale["name"], "sub": scale["cls"] or "", "columns": [t("Stat"), t("Weight")], "rows": weights,
+                           # Pawn's stat keys and the class in the player's language; a key Wisp does not know stays as Pawn writes it
+                           "table": {"title": scale["name"], "sub": t(scale["cls"]) if scale["cls"] else "", "columns": [t("Stat"), t("Weight")],
+                                     "rows": [[t(stat), value] for stat, value in weights],
                                      "notes": [t("Pawn then shows on every item's tooltip what it is worth by these weights, and marks upgrades.")]},
                            "wisp": encode_wisp1([{"do": "pawn.scale", "tag": scale["tag"]}])})
         out = {"scale": scale["name"], "weights": {stat: value for stat, value in weights},

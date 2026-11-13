@@ -102,6 +102,16 @@ RU = {
     "Upgrades": "Улучшения", "Upgrades by Pawn": "Улучшения по Pawn", "Upgrade": "Лучше", "Replaces": "Вместо",
     "reward: {quest}": "награда: {quest}", "a choice: {quest}": "на выбор: {quest}", "in the bags": "в сумках", "empty slot": "пустой слот",
     "Pawn's own reckoning from the item's stats and your scale, as on its tooltips.": "Расчёт самого Pawn по характеристикам предмета и вашей шкале, как в его подсказках.",
+    # Pawn's stat keys, as the game names those stats
+    "Strength": "Сила", "Agility": "Ловкость", "Stamina": "Выносливость", "Intellect": "Интеллект", "Spirit": "Дух",
+    "Armor": "Броня", "Armor2": "Дополнительная броня", "Ap": "Сила атаки", "Rap": "Сила атаки дальнего боя", "FeralAp": "Сила атаки в облике зверя",
+    "SpellDamage": "Урон от заклинаний", "Healing": "Исцеление", "SpellPower": "Сила заклинаний", "Mp5": "Мана раз в 5 сек.",
+    "Hp5": "Здоровье раз в 5 сек.", "HitRating": "Рейтинг меткости", "CritRating": "Рейтинг критического удара", "HasteRating": "Рейтинг скорости",
+    "ExpertiseRating": "Рейтинг мастерства", "DodgeRating": "Рейтинг уклонения", "ParryRating": "Рейтинг парирования",
+    "BlockRating": "Рейтинг блока", "BlockValue": "Показатель блокирования", "DefenseRating": "Рейтинг защиты",
+    "ArmorPenetration": "Рейтинг пробивания брони", "Mana": "Мана", "MeleeDps": "Урон в секунду (ближний бой)", "RangedDps": "Урон в секунду (дальний бой)",
+    "SpellHitRating": "Рейтинг меткости заклинаний", "SpellCritRating": "Рейтинг крит. удара заклинаниями", "SpellPenetration": "Проникающая способность заклинаний",
+    "Resilience": "Устойчивость",
     "For Pawn": "Для Pawn", "Import the scale \"{name}\"": "Импорт шкалы «{name}»", "Stat": "Характеристика", "Weight": "Вес",
     "Pawn then shows on every item's tooltip what it is worth by these weights, and marks upgrades.":
         "После этого Pawn показывает в подсказке каждого предмета его оценку по этим весам и отмечает улучшения.",
