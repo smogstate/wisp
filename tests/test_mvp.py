@@ -333,6 +333,11 @@ def test_crafting(wow: Path, tmp: Path):
     assert "plan" not in game.cards[-1] and game.cards[-1]["lines"] == [
         {"addon": "Auctionator", "text": "Shopping list: x", "detail": "2 items · about 22s 50c · 1 without a price"},
         {"text": "5 × Silk Cloth", "detail": "4s 50c each"}, {"text": "2 × Mystery Dust", "detail": ""}]
+    assert named["cost"]["each"] == {"Silk Cloth": "4s 50c"} and named["cost"]["all_of_it"] == "22s 50c", \
+        "the sum is Wisp's: a model left to multiply 20 × 4s 50c once said 9g"
+    assert "lead with it" in named["note"], "buying is the card: the answer starts there, not with what Wisp cannot do"
+    assert run_tool(game, "shopping_list", {"name": "x", "items": [{"name": "Silk Clothes", "quantity": 1}]})["list"] == ["1 × Silk Cloth"], \
+        "a name as people type it, through the one name matcher"
     assert "error" in run_tool(game, "shopping_list", {"name": "x"})
     assert "error" in run_tool(game, "shopping_list", {"name": "x", "crafts": crafts, "items": [{"name": "a", "quantity": 1}]})
     assert "error" in run_tool(game, "shopping_list", {"name": "x", "items": [{"name": "a", "quantity": True}]})

@@ -2184,17 +2184,16 @@ class Game:
         else:
             if not isinstance(items, list) or not 1 <= len(items) <= 60:
                 return {"error": "items must be a list of 1 to 60 {name, quantity}"}
-            known = {name.lower(): item for item, name in craft.names.items()}
             buy = []
             for entry in items:
                 name = _clean(entry.get("name"), 80).replace(";", "") if isinstance(entry, dict) else ""
                 count = entry.get("quantity") if isinstance(entry, dict) else None
                 if not name or not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 100000:
                     return {"error": "every item needs a name and a whole quantity from 1 to 100000"}
-                item = known.get(name.lower())
+                item = next(iter(self.graph.find(name)), None)   # as the player typed it: case, ё and endings do not matter
                 if item is None:
                     unchecked.append(name)
-                buy.append((item, craft.name(item) if item else name, count))
+                buy.append((item, (craft.names.get(item) or self.graph.names.get(item) or name) if item else name, count))
         title = _clean(args.get("name"), 40).replace(";", "") or "Wisp"
         total = sum(craft.prices[item][0] * count for item, _, count in buy if item in craft.prices)
         priced = sum(1 for item, _, _ in buy if item in craft.prices)
@@ -2221,9 +2220,14 @@ class Game:
                             "has no Copy button. Do not repeat the card's steps and numbers in your text."}
         out = {"shown": "the plan as a card: steps, a materials table, the cost, and a Copy button" if plan else len(buy),
                "list": [f"{count} × {name}" for _, name, count in buy],
-               "note": "A card with a Copy button is now shown to the player. Nothing has happened in the game yet: the "
-                       "player copies it, pastes it into the game, and the list appears in Auctionator's Shopping tab."
+               "note": "A card with a Copy button is now shown to the player: that is how Wisp buys, so lead with it (the "
+                       "list for Auctionator is ready) and never open with what Wisp cannot do. Nothing has happened in the "
+                       "game yet: the player copies it, pastes it into the game, the list appears in Auctionator's Shopping "
+                       "tab, and they buy from there. Money: give the figures here as they are, never a sum of your own."
                        + (" Do not repeat the card's steps and numbers in your text." if plan else "")}
+        if not plan and priced:
+            out["cost"] = {"each": {name: coins(craft.prices[item][0]) for item, name, _ in buy if item in craft.prices},
+                           "all_of_it": coins(total), "priced_from": "the lowest listings in the player's last scans, before any that sold since"}
         if unchecked:
             out["names_wisp_could_not_check"] = unchecked
         if not craft.has_auctionator:
@@ -2712,15 +2716,13 @@ TOOLS = [
     },
     {
         "name": "shopping_list",
-        "description": "Show the player a card. Not for 'a shopping list for item X': that is craft_tree with show true, "
-                       "which goes down to raw materials and counts what the player's other characters hold; this tool does "
-                       "neither, so it would tell them to buy what they can make or already have. "
-                       "With crafts (the same as for craft_plan) it is the whole crafting "
-                       "plan laid out: the steps in the order given, a table of materials with what the bags cover "
-                       "and what to buy, the cost, and a Copy button that creates the shopping list for exactly the "
-                       "remainder in the Auctionator addon. Put the crafts in the order the player should do them. "
-                       "With items it is a plain shopping list by name. The list is created in the game only when "
-                       "the player pastes the card.",
+        "description": "How Wisp buys: a card whose Copy button creates a shopping list in the Auctionator addon, and the "
+                       "player buys from its Shopping tab. Use it whenever the player wants to buy something ('buy me 20 "
+                       "X', 'a list for these'): with items, a list by name, priced from their scans with the total. "
+                       "With crafts (the same as for craft_plan), the whole crafting plan: the steps in order, the "
+                       "materials with what the bags cover, what to buy and the cost. For the materials of one craftable "
+                       "item, craft_tree with show true is better: it goes down to raw materials and counts what their "
+                       "other characters hold. The list is created in the game when the player pastes the card.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -2883,7 +2885,8 @@ You cannot act in the game. The waypoint and shopping_list tools only show a car
 into the game. Call waypoint only when the player asks to be shown or sent somewhere. After calling one, the answer to \
 their question still comes first; then one short sentence to press Copy and then Ctrl+V twice in the game.
 
-Write money the way the tools write it (4s 50c, 1g 20s), never in words: the window draws the coins. \
+Write money the way the tools write it (4s 50c, 1g 20s), never in words, and never a sum or product of your own. To buy \
+anything: shopping_list with items, its card makes the Auctionator list. \
 Answer in the language the player's own words are in, whatever language the names in their question are in, but write every name (quest, item, creature, person, place) exactly as the tools \
 give it: never translate or respell a name, the player searches the game by it. Be brief: this is read in a narrow window between fights. Never a wall of text: when \
 there are steps or several items, put each on its own short line, numbered when the order matters. Plain text only: no \

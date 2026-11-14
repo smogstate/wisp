@@ -453,6 +453,14 @@ CASES = [
                  "В The Deadmines (17-26): Rockslicer с Rhahk'Zor даёт +42% для Mage: frost, и там одно задание, которое можно взять. "
                  "Кнопка на карточке поставит метку у входа.")]},
 
+    {"id": "buy-plain", "tags": ["cards", "gold"], "lang": "ru",
+     "ask": "Купи мне 20 шелка",
+     "tools": ["shopping_list"], "card": ["Auctionator"], "say": ["90\\s*(?:s|с)"],
+     "never": [r"^\W*(?:я\s+)?не\s+могу", r"\b9\s*(?:g|з)\b"],   # the card is the buying: no refusal first, and no sum of its own
+     "oracle": [([("shopping_list", {"name": "Шелк", "items": [{"name": "Шелк", "quantity": 20}]})],
+                 "Список для Auctionator готов: 20 × Шелк, около 90с по последнему скану. Нажмите «Копировать» и дважды Ctrl+V в игре, "
+                 "список появится во вкладке Shopping.")]},
+
     # --- what the assistant must not do ------------------------------------------------
     {"id": "hello", "tags": ["limits"], "lang": "ru",
      "ask": "Привет! Ты кто?", "no_tools": True,
