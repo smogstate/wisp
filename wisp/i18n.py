@@ -99,6 +99,10 @@ RU = {
     "from level {n}": "с {n} уровня", "Where to go for gear": "Куда идти за экипировкой", "Dungeons by the upgrades they drop": "Подземелья по числу улучшений в добыче",
     "Dungeon": "Подземелье", "Quests: the dungeon's quests you can take or already have.": "Задания: те задания подземелья, что можно взять или уже взяты.",
     "Waypoints to the entrances: Copy, then in the game Ctrl+V twice": "Метки у входов: «Копировать», затем в игре дважды Ctrl+V",
+    "Selling": "Продажа", "Price plan": "План цен", "Post at": "Выставить за", "You get": "Вы получите",
+    "vendor pays more": "торговец даст больше", "below its usual price": "ниже обычной цены", "yours is the lowest": "ваш лот уже самый дешёвый",
+    "Post them in Auctionator's Selling tab at these prices. You get: after the auction house's 5% cut, the deposit not counted.":
+        "Выставьте их во вкладке Selling в Auctionator по этим ценам. «Вы получите» — после 5% комиссии аукциона, без залога.",
     "Upgrades": "Улучшения", "Upgrades by Pawn": "Улучшения по Pawn", "Upgrade": "Лучше", "Replaces": "Вместо",
     "reward: {quest}": "награда: {quest}", "a choice: {quest}": "на выбор: {quest}", "in the bags": "в сумках", "empty slot": "пустой слот",
     "Pawn's own reckoning from the item's stats and your scale, as on its tooltips.": "Расчёт самого Pawn по характеристикам предмета и вашей шкале, как в его подсказках.",

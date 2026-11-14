@@ -1008,6 +1008,76 @@ class Game:
             out["shown"] = "a table card of the investments is now shown to the player: do not repeat its rows"
         return out
 
+    def _usual(self, item: int):
+        """An item's usual lowest price over the last 30 days, when there are enough days to say."""
+        past = self.market.series(self.snapshot, item, 30) if self.market else []
+        return statistics.median(low for _, low, _, _ in past) if len(past) >= 3 else None
+
+    def tool_sell_plan(self, args: dict) -> dict:
+        """What to post at the auction house and at what price: Wisp cannot post, the player does, from this plan."""
+        if not self.snapshot:
+            return {"error": self.problem}
+        craft, names = self.crafting, args.get("items")
+        if names is not None and not (isinstance(names, list) and 1 <= len(names) <= 20 and all(isinstance(n, str) for n in names)):
+            return {"error": "items must be a list of 1 to 20 item names, or left out for everything sellable in the bags"}
+        chosen, unknown = [], []
+        for name in names or []:
+            found = self.graph.find(_clean(name, 80))
+            (chosen.append(found[0]) if found else unknown.append(_clean(name, 80)))
+        if names is None:   # everything in the bags that is not bound and has a price somewhere
+            chosen = [i for i in craft.bags if i not in craft.bound and (i in craft.prices or self.farming.vendor.get(i))]
+        rows, skipped = [], []
+        for item in dict.fromkeys(chosen):
+            name, held = self.graph.names.get(item) or craft.name(item), craft.bags.get(item, 0)
+            if not held or item in craft.bound:
+                skipped.append({"item": name, "why": "bound to the character" if item in craft.bound else
+                                "not in the bags" + (f" ({craft.bank[item]} in the bank)" if craft.bank.get(item) else "")})
+                continue
+            ladder = self.market.depth(self.snapshot, item) if self.market else None
+            lowest = ladder["steps"][0][0] if ladder else craft.prices.get(item, (None,))[0]
+            vendor = self.farming.vendor.get(item, 0)
+            row = {"item": name, "held": held, "_item": item}
+            if not lowest:
+                row.update(advice="nobody lists it: sell to a vendor", **({"vendor_pays": coins(vendor * held)} if vendor else {}))
+                rows.append(row)
+                continue
+            mine = bool(ladder and ladder["mine"] and ladder["mine_at"] <= lowest)
+            post = lowest if mine or lowest <= 1 else lowest - 1   # a copper under the lowest, unless the lowest is the player's own
+            listed = ladder["steps"][-1][1] if ladder else None
+            now = held if not listed or held <= 2 * listed else listed   # a thin market: as many as are listed now, the rest later
+            row.update(post_at=coins(post), put_up_now=now, you_get=coins(int(post * now * 0.95)), _post=post, _get=int(post * now * 0.95))
+            if now < held:
+                row["keep_back"] = held - now
+            if mine:
+                row["advice"] = "your own auction is already the lowest"
+            elif vendor and vendor >= post * 0.95:
+                row["advice"] = f"a vendor pays {coins(vendor)} each, as much or more after the cut: sell to a vendor"
+            elif self._usual(item) and post <= self._usual(item) * 0.85:
+                row["advice"] = f"{(post - self._usual(item)) / self._usual(item):+.0%} against its usual price: hold if you can"
+            rows.append(row)
+        rows.sort(key=lambda r: -r.get("_get", 0))
+        out = {"plan": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows[:20]],
+               **({"left_out": skipped} if skipped else {}), **({"not_found": unknown} if unknown else {})}
+        if not rows:
+            return {**out, "error": "Nothing in the bags to sell from that." + (" Names not found: " + ", ".join(unknown) if unknown else "")}
+        if args.get("show") is True:
+            mark = lambda r: (" · " + t("vendor pays more") if "vendor" in r.get("advice", "") else
+                              " · " + t("below its usual price") if "usual" in r.get("advice", "") else
+                              " · " + t("yours is the lowest") if "own auction" in r.get("advice", "") else "")
+            self.cards.append({"id": f"card{len(self.cards) + 1}", "lines": [], "heading": t("Selling"), "table": {
+                "title": t("Price plan"), "sub": tn(len(rows), "{n} item", "{n} items"),
+                "columns": [t("Item"), t("Post at"), t("Qty"), t("You get")],
+                "rows": [[r["item"] + mark(r), r.get("post_at", "–"), str(r.get("put_up_now", "–")), r.get("you_get", "–")] for r in rows[:20]],
+                "notes": [t("Post them in Auctionator's Selling tab at these prices. You get: after the auction house's 5% cut, the deposit not counted."),
+                          t("Prices from your last auction scans: an item may be sold since.")]}})
+            out["shown"] = "a card with this plan is now shown to the player: do not repeat its rows"
+        out["note"] = ("Lead with the plan: it is how Wisp sells. Wisp cannot post an auction itself: the game posts only on the "
+                       "player's own click, in Auctionator's Selling tab; say so in one line at most, after the plan. post_at is a "
+                       "copper under the lowest listing of the player's last scan; put_up_now holds some back where few are listed, "
+                       "since many at once push the price down; you_get is after the 5% cut, the deposit not counted. Give these "
+                       "figures as they are.")
+        return out
+
     def tool_gold(self, args: dict) -> dict:
         """What the character's own things would fetch: bags to sell, recipes to craft for profit."""
         if not self.snapshot:
@@ -1020,9 +1090,7 @@ class Game:
         caveat = ("Lowest listings from the player's own Auctionator scans: what things are listed for, before the auction "
                   "house's cut, and not a promise that they sell. Selling many at once pushes a price down.")
 
-        def usual(item):
-            past = self.market.series(self.snapshot, item, 30) if self.market else []
-            return statistics.median(low for _, low, _, _ in past) if len(past) >= 3 else None
+        usual = self._usual
         if view == "bags":
             rows, bound, unpriced = [], 0, 0
             stock = {item: craft.bags.get(item, 0) + craft.bank.get(item, 0) for item in {*craft.bags, *craft.bank}}
@@ -2651,6 +2719,20 @@ TOOLS = [
         },
     },
     {
+        "name": "sell_plan",
+        "description": "How Wisp sells: a price plan for the auction house. For the items named, or everything sellable in "
+                       "the bags: the price to post at (just under the lowest listing), how many to put up now, what the "
+                       "player gets after the cut, and when a vendor pays more. Use it for 'sell my X', 'what should I post "
+                       "and for how much'. The player posts in Auctionator's Selling tab.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"items": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"},
+                                     "description": "Item names; leave out for everything sellable in the bags."},
+                           "show": {"type": "boolean", "description": "true to also show the plan as a card."}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "farming",
         "description": "What farming is worth, measured. spots: the zones the character has farmed, with time spent "
                        "looting, coins, loot worth and gold per hour. sources: each kind of creature and node the "
@@ -2886,7 +2968,7 @@ into the game. Call waypoint only when the player asks to be shown or sent somew
 their question still comes first; then one short sentence to press Copy and then Ctrl+V twice in the game.
 
 Write money the way the tools write it (4s 50c, 1g 20s), never in words, and never a sum or product of your own. To buy \
-anything: shopping_list with items, its card makes the Auctionator list. \
+anything: shopping_list with items, its card makes the Auctionator list; to sell: sell_plan. \
 Answer in the language the player's own words are in, whatever language the names in their question are in, but write every name (quest, item, creature, person, place) exactly as the tools \
 give it: never translate or respell a name, the player searches the game by it. Be brief: this is read in a narrow window between fights. Never a wall of text: when \
 there are steps or several items, put each on its own short line, numbered when the order matters. Plain text only: no \

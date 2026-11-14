@@ -2483,6 +2483,31 @@ def test_pawn_upgrades(tmp: Path):
     assert "no scale" in run_tool(noscale, "upgrades", {})["error"]
 
 
+def test_sell_plan(tmp: Path):
+    """How Wisp sells: a price plan the player posts from. Wisp never posts an auction."""
+    game = Game.load(make_wow_dir(tmp, flags="questindex,alts"))
+    plan = run_tool(game, "sell_plan", {"show": True})
+    assert plan["plan"][0] == {"item": "Silk Cloth", "held": 32, "post_at": "4s 49c", "put_up_now": 32, "you_get": "1g 36s"}, \
+        "a copper under the lowest listing, and after the 5% cut"
+    assert "Lead with the plan" in plan["note"] and game.cards[-1]["table"]["columns"] == ["Item", "Post at", "Qty", "You get"]
+    assert "wisp" not in game.cards[-1], "nothing to paste: the player posts in Auctionator"
+    named = run_tool(game, "sell_plan", {"items": ["silk cloth", "Nothing Such", "Hearthstone"]})
+    assert [r["item"] for r in named["plan"]] == ["Silk Cloth"] and named["not_found"] == ["Nothing Such"]
+    assert named["left_out"] == [{"item": "Hearthstone", "why": "bound to the character"}]
+    # a thin market: no more than are listed now; and where the lowest auction is the player's own, no undercutting it
+    class Thin:
+        def __init__(self, mine): self.mine = mine
+        def depth(self, snapshot, item): return {"steps": [[450, 10]], "auctions": 2, "at": 0, "partial": False, "mine": self.mine, "mine_at": 450 if self.mine else None}
+        def series(self, snapshot, item, days): return []
+    game.market = Thin(0)
+    thin = run_tool(game, "sell_plan", {"items": ["Silk Cloth"]})["plan"][0]
+    assert thin["put_up_now"] == 10 and thin["keep_back"] == 22, "32 into a market of 10 would push the price down"
+    game.market = Thin(3)
+    own = run_tool(game, "sell_plan", {"items": ["Silk Cloth"]})["plan"][0]
+    assert own["post_at"] == "4s 50c" and "already the lowest" in own["advice"]
+    assert "error" in run_tool(game, "sell_plan", {"items": "Silk Cloth"}) and "error" in run_tool(game, "sell_plan", {"items": ["Hearthstone"]})
+
+
 def test_eval_cases():
     """The assistant's eval (evals/) stays answerable: each case's written right answer still
     passes on this test game, and an empty answer does not. Free: no model is asked."""
@@ -2572,5 +2597,7 @@ if __name__ == "__main__":
         test_sim_export(Path(se))
     with tempfile.TemporaryDirectory() as pu:
         test_pawn_upgrades(Path(pu))
+    with tempfile.TemporaryDirectory() as sp:
+        test_sell_plan(Path(sp))
     test_eval_cases()
     print("mvp: OK (%s)" % next(l for l in stub("snapshot") if l.startswith("LUA ")))
